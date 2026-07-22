@@ -3,7 +3,11 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { build, Platform } = require("electron-builder");
 const { obfuscateDirectory } = require("./scripts/obfuscate-electron.cjs");
-const { writeIntegrityManifest } = require("./scripts/write-integrity-manifest.cjs");
+const {
+  writeIntegrityManifest,
+  resolveIntegrityAuthor,
+  sha256File,
+} = require("./scripts/write-integrity-manifest.cjs");
 
 const projectRoot = __dirname;
 const stageDir = path.join(projectRoot, "release-next", "package-win-app");
@@ -225,11 +229,17 @@ function copyPackage(packageName, copiedPackages = new Set(), resolvePaths = [pr
 }
 
 function createStagePackage() {
+  const brandedAuthor = resolveIntegrityAuthor(sourcePackage.author);
+  if (!String(brandedAuthor).includes("素言")) {
+    throw new Error(`Stage package author must include 素言, got: ${JSON.stringify(brandedAuthor)}`);
+  }
+
   const appPackage = {
     name: sourcePackage.name,
+    productName: sourcePackage.build.productName,
     version: sourcePackage.version,
     private: true,
-    author: sourcePackage.author,
+    author: brandedAuthor,
     description: sourcePackage.description,
     main: sourcePackage.main,
     packageManager: sourcePackage.packageManager,
@@ -238,11 +248,71 @@ function createStagePackage() {
     },
   };
 
+  if (appPackage.productName !== "素言") {
+    throw new Error(`Stage package productName must be 素言, got: ${JSON.stringify(appPackage.productName)}`);
+  }
+
+  if (appPackage.name !== "suyan") {
+    throw new Error(`Stage package name must be suyan, got: ${JSON.stringify(appPackage.name)}`);
+  }
+
   fs.writeFileSync(
     path.join(stageDir, "package.json"),
     `${JSON.stringify(appPackage, null, 2)}\n`,
     "utf8",
   );
+}
+
+function assertStagedRuntimeIdentity(targetDir) {
+  const packagePath = path.join(targetDir, "package.json");
+  const manifestPath = path.join(targetDir, "app-integrity.json");
+
+  if (!fs.existsSync(packagePath)) {
+    throw new Error(`Missing staged package.json: ${packagePath}`);
+  }
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`Missing staged app-integrity.json: ${manifestPath}`);
+  }
+
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const packageAuthor = resolveIntegrityAuthor(packageJson.author);
+  const manifestAuthor = resolveIntegrityAuthor(manifest.author);
+
+  if (packageJson.name !== "suyan") {
+    throw new Error(`Staged package name must be suyan, got: ${JSON.stringify(packageJson.name)}`);
+  }
+  if (packageJson.productName !== "素言") {
+    throw new Error(
+      `Staged package productName must be 素言, got: ${JSON.stringify(packageJson.productName)}`,
+    );
+  }
+  if (!String(packageAuthor).includes("素言")) {
+    throw new Error(`Staged package author must include 素言, got: ${JSON.stringify(packageJson.author)}`);
+  }
+  if (manifest.productName !== "素言") {
+    throw new Error(`Integrity manifest productName must be 素言, got: ${JSON.stringify(manifest.productName)}`);
+  }
+  if (manifest.packageName !== "suyan") {
+    throw new Error(`Integrity manifest packageName must be suyan, got: ${JSON.stringify(manifest.packageName)}`);
+  }
+  if (manifest.appId !== "local.suyan") {
+    throw new Error(`Integrity manifest appId must be local.suyan, got: ${JSON.stringify(manifest.appId)}`);
+  }
+  if (!String(manifestAuthor).includes("素言")) {
+    throw new Error(`Integrity manifest author must include 素言, got: ${JSON.stringify(manifest.author)}`);
+  }
+
+  for (const [relativePath, expectedHash] of Object.entries(manifest.files || {})) {
+    const absolutePath = path.join(targetDir, ...String(relativePath).split("/"));
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`Integrity target missing after stage: ${relativePath}`);
+    }
+    const actualHash = sha256File(absolutePath);
+    if (actualHash !== expectedHash) {
+      throw new Error(`Integrity hash mismatch after stage: ${relativePath}`);
+    }
+  }
 }
 
 function createVendorPackage() {
@@ -679,6 +749,131 @@ function removeStageSourceMaps(rootDir) {
   }
   return removed;
 }
+
+const defaultStartupAssetFileNames = [
+  "startup-default-1.png",
+  "startup-default-2.png",
+  "startup-default-3.png",
+  "startup-default-4.png",
+  "startup-default-5.png",
+  "startup-default-6.png",
+];
+
+const forbiddenPackagePayloadNames = new Set([
+  "library.json",
+  "ai-settings.json",
+  "proxy-settings.json",
+  "view-settings.json",
+  "window-state.json",
+  "acceleration-settings.json",
+  ".default-library-seeded",
+  ".startup-gallery-seeded",
+  "manifest.json",
+]);
+
+const emptyShellExcludeGlobs = [
+  "!**/ai-settings.json",
+  "!**/proxy-settings.json",
+  "!**/view-settings.json",
+  "!**/window-state.json",
+  "!**/acceleration-settings.json",
+  "!**/library.json",
+  "!**/.default-library-seeded",
+  "!**/.startup-gallery-seeded",
+  "!**/logs/**",
+  "!**/*.log",
+  "!**/manifest.json",
+  "!**/secrets/**",
+  "!**/private/**",
+  "!**/*.pem",
+  "!**/*.key",
+  "!**/*.p12",
+  "!**/*.pfx",
+  "!**/*.env",
+  "!**/.env*",
+];
+
+function assertEmptyShellStartupAssets(startupAssetsDir) {
+  if (!fs.existsSync(startupAssetsDir)) {
+    throw new Error(`Missing packaged startup assets: ${startupAssetsDir}`);
+  }
+
+  const entries = fs.readdirSync(startupAssetsDir, { withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.name).sort();
+  const unexpectedDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  const expected = [...defaultStartupAssetFileNames].sort();
+
+  if (unexpectedDirs.length > 0) {
+    throw new Error(`startup-assets contains unexpected directories: ${unexpectedDirs.join(", ")}`);
+  }
+
+  if (files.length !== expected.length || files.some((name, index) => name !== expected[index])) {
+    throw new Error(
+      `startup-assets must contain only default gallery images. expected=${expected.join(", ")} actual=${files.join(", ")}`,
+    );
+  }
+}
+
+function assertNoPersonalLibraryPayload(rootDir) {
+  if (!fs.existsSync(rootDir)) {
+    return;
+  }
+
+  const queue = [rootDir];
+
+  while (queue.length > 0) {
+    const current = queue.pop();
+    const entries = fs.readdirSync(current, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      const relativePath = path.relative(projectRoot, fullPath).replace(/\\/g, "/");
+      const lowerName = entry.name.toLowerCase();
+
+      if (entry.isDirectory()) {
+        queue.push(fullPath);
+        continue;
+      }
+
+      // 只拦截运行时用户数据文件，不拦截源码目录 features/library。
+      if (lowerName.endsWith(".log") || lowerName.endsWith(".tmp")) {
+        throw new Error(`Refusing to package local runtime residue: ${relativePath}`);
+      }
+      if (forbiddenPackagePayloadNames.has(lowerName) || forbiddenPackagePayloadNames.has(entry.name)) {
+        throw new Error(`Refusing to package personal library file: ${relativePath}`);
+      }
+    }
+  }
+}
+function assertPackagedEmptyShell(winUnpackedDir) {
+  const resourcesDir = path.join(winUnpackedDir, "resources");
+  assertEmptyShellStartupAssets(path.join(resourcesDir, "startup-assets"));
+  assertNoPersonalLibraryPayload(resourcesDir);
+
+  // 安装包旁不得附带用户运行时目录/日志，保持开箱空壳。
+  for (const name of ["library", "logs", "userData"]) {
+    const candidate = path.join(winUnpackedDir, name);
+    if (fs.existsSync(candidate)) {
+      throw new Error(`Refusing non-empty package shell residue: ${path.relative(projectRoot, candidate)}`);
+    }
+  }
+}
+function prepareStartupAssetsStage() {
+  const sourceDir = path.join(projectRoot, "electron", "assets", "startup-gallery");
+  const destinationDir = path.join(stageDir, "startup-assets");
+
+  resetDirectory(destinationDir);
+
+  for (const fileName of defaultStartupAssetFileNames) {
+    const sourcePath = path.join(sourceDir, fileName);
+    if (!fs.existsSync(sourcePath)) {
+      throw new Error(`Missing default startup asset: ${sourcePath}`);
+    }
+    fs.copyFileSync(sourcePath, path.join(destinationDir, fileName));
+  }
+
+  assertEmptyShellStartupAssets(destinationDir);
+}
 async function main() {
   resetDirectory(stageDir);
 
@@ -689,10 +884,9 @@ async function main() {
 
   copyDirectory(path.join(projectRoot, "dist"), path.join(stageDir, "dist"));
   copyDirectory(path.join(projectRoot, "dist-electron"), path.join(stageDir, "dist-electron"));
-  copyDirectory(
-    path.join(projectRoot, "electron", "assets", "startup-gallery"),
-    path.join(stageDir, "startup-assets"),
-  );
+  prepareStartupAssetsStage();
+  assertNoPersonalLibraryPayload(path.join(stageDir, "dist"));
+  assertNoPersonalLibraryPayload(path.join(stageDir, "dist-electron"));
   createStagePackage();
   const obfuscationSummary = obfuscateDirectory(path.join(stageDir, "dist-electron"));
   const removedStageMaps = removeStageSourceMaps(stageDir);
@@ -706,6 +900,8 @@ async function main() {
   );
   const integritySummary = writeIntegrityManifest(stageDir, sourcePackage);
   console.log("Wrote integrity manifest with " + integritySummary.fileCount + " hashed files.");
+  assertStagedRuntimeIdentity(stageDir);
+  console.log("Verified staged runtime identity and integrity hashes.");
   createVendorPackage();
   copyPackage("jszip");
   copyPackage("ffmpeg-static");
@@ -736,19 +932,7 @@ async function main() {
         "!**/*.md",
         "!**/LICENSE*",
         "!**/license*",
-        "!**/*.env",
-        "!**/.env*",
-        "!**/ai-settings.json",
-        "!**/proxy-settings.json",
-        "!**/view-settings.json",
-        "!**/window-state.json",
-        "!**/library.json",
-        "!**/secrets/**",
-        "!**/private/**",
-        "!**/*.pem",
-        "!**/*.key",
-        "!**/*.p12",
-        "!**/*.pfx",
+        ...emptyShellExcludeGlobs,
       ],
       directories: {
         output: packageOutputDir,
@@ -787,6 +971,9 @@ async function main() {
     promoteStagedRelease(packageOutputDir, requestedReleaseDir);
     cleanupReleaseBackups();
     syncPreviewReleaseMirror();
+    assertPackagedEmptyShell(path.join(requestedReleaseDir, "win-unpacked"));
+  } else {
+    assertPackagedEmptyShell(path.join(packageOutputDir, "win-unpacked"));
   }
 }
 

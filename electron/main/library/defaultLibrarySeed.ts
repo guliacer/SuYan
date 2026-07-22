@@ -160,6 +160,10 @@ const seedImagePalettes: SeedImagePalette[] = [
   { imageFileName: "00000000-0000-4000-8000-000000000112.png", from: [67, 76, 98], to: [185, 108, 89], accent: [127, 198, 176] },
 ];
 
+export function shouldEnableDefaultLibrarySeed(enableSeedEnv: string | undefined = process.env.PROMPT_LIBRARY_ENABLE_SEED): boolean {
+  return enableSeedEnv === "true";
+}
+
 export function createDefaultLibrary(): LibraryFile {
   return {
     schemaVersion: 1,

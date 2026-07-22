@@ -9,7 +9,7 @@ type IntegrityManifest = {
   productName: string;
   packageName: string;
   appId: string;
-  author: string;
+  author: string | { name?: string; email?: string; url?: string };
   generatedAt?: string;
   files: Record<string, string>;
 };
@@ -30,10 +30,44 @@ function sha256File(filePath: string): string {
   return hash.digest("hex");
 }
 
-function readPackageJson(appPath: string): { name?: string; author?: string; description?: string } | null {
+export function normalizeAuthorText(author: unknown): string {
+  if (author == null) {
+    return "";
+  }
+
+  if (typeof author === "string") {
+    return author.trim();
+  }
+
+  if (typeof author === "object") {
+    const record = author as { name?: unknown; email?: unknown; url?: unknown };
+    const parts = [record.name, record.email, record.url]
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean);
+    return parts.join(" ");
+  }
+
+  return String(author).trim();
+}
+
+function authorMatchesBrand(author: unknown): boolean {
+  return normalizeAuthorText(author).includes(EXPECTED_AUTHOR_FRAGMENT);
+}
+
+function readPackageJson(appPath: string): {
+  name?: string;
+  productName?: string;
+  author?: unknown;
+  description?: string;
+} | null {
   try {
     const raw = fs.readFileSync(path.join(appPath, "package.json"), "utf8");
-    return JSON.parse(raw) as { name?: string; author?: string; description?: string };
+    return JSON.parse(raw) as {
+      name?: string;
+      productName?: string;
+      author?: unknown;
+      description?: string;
+    };
   } catch {
     return null;
   }
@@ -58,7 +92,9 @@ export function verifyRuntimeIntegrity(): IntegrityReport {
   const packageJson = readPackageJson(appPath);
   const manifest = readManifest(appPath);
 
-  if (app.getName() !== EXPECTED_PRODUCT_NAME) {
+  const runtimeName = app.getName();
+  const packageProductName = packageJson?.productName;
+  if (runtimeName !== EXPECTED_PRODUCT_NAME && packageProductName !== EXPECTED_PRODUCT_NAME) {
     reasons.push("app-name");
   }
 
@@ -69,8 +105,7 @@ export function verifyRuntimeIntegrity(): IntegrityReport {
       reasons.push("package-name");
     }
 
-    const author = String(packageJson.author ?? "");
-    if (!author.includes(EXPECTED_AUTHOR_FRAGMENT)) {
+    if (!authorMatchesBrand(packageJson.author)) {
       reasons.push("package-author");
     }
   }
@@ -87,7 +122,7 @@ export function verifyRuntimeIntegrity(): IntegrityReport {
     if (manifest.appId !== EXPECTED_APP_ID) {
       reasons.push("manifest-app-id");
     }
-    if (!String(manifest.author ?? "").includes(EXPECTED_AUTHOR_FRAGMENT)) {
+    if (!authorMatchesBrand(manifest.author)) {
       reasons.push("manifest-author");
     }
 

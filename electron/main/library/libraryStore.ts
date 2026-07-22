@@ -1,4 +1,3 @@
-import { app } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { LibraryFile, LibraryItem, VideoKeyframe } from "../../../src/features/library/types/library";
@@ -6,7 +5,7 @@ import { normalizeNsfwRating } from "../../../src/features/library/utils/nsfwRat
 import { normalizePromptType } from "../../../src/features/library/utils/promptType";
 import { AppError } from "../ipc/errors";
 import { getImagesDir, getLibraryDataDir, getLibraryPath } from "./libraryPaths";
-import { createDefaultLibrary, createDefaultSeedImage, getDefaultSeedImageFileNames } from "./defaultLibrarySeed";
+import { createDefaultLibrary, createDefaultSeedImage, getDefaultSeedImageFileNames, shouldEnableDefaultLibrarySeed } from "./defaultLibrarySeed";
 
 const schemaVersion = 1;
 const defaultSeedMarkerFileName = ".default-library-seeded";
@@ -288,6 +287,8 @@ async function writeDefaultSeedLibrary(): Promise<void> {
 }
 
 async function writeInitialLibrary(): Promise<void> {
+  // 默认写入空素材库，避免演示提示词组进入开源包/正式包。
+  // 仅当显式设置 PROMPT_LIBRARY_ENABLE_SEED=true 时写入内置演示种子。
   if (shouldWriteDefaultSeed()) {
     await writeDefaultSeedLibrary();
     return;
@@ -297,8 +298,10 @@ async function writeInitialLibrary(): Promise<void> {
   await markDefaultSeeded();
 }
 
-function shouldWriteDefaultSeed(): boolean {
-  return !app.isPackaged || process.env.PROMPT_LIBRARY_ENABLE_SEED === "true";
+export function shouldWriteDefaultSeed(options?: {
+  enableSeedEnv?: string | undefined;
+}): boolean {
+  return shouldEnableDefaultLibrarySeed(options?.enableSeedEnv);
 }
 
 async function ensureDefaultSeedImages(): Promise<void> {

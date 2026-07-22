@@ -47,6 +47,22 @@ describe("package-win", () => {
     expect(script).toContain('to: "startup-assets"');
     expect(script).toContain("tryStopLockedReleaseProcesses");
   });
+  it("packages only default startup gallery assets and guards personal library payloads", () => {
+    const script = fs.readFileSync(path.join(projectRoot, "package-win.cjs"), "utf8");
+
+    expect(script).toContain("prepareStartupAssetsStage");
+    expect(script).toContain("assertEmptyShellStartupAssets");
+    expect(script).toContain("assertNoPersonalLibraryPayload");
+    expect(script).toContain('from: "startup-assets"');
+    expect(script).toContain('to: "startup-assets"');
+    expect(script).toContain("startup-default-1.png");
+    expect(script).toContain("!**/library.json");
+    expect(script).toContain("!**/ai-settings.json");
+    expect(script).toContain("acceleration-settings.json");
+    expect(script).toContain("assertPackagedEmptyShell");
+    expect(script).toContain("emptyShellExcludeGlobs");
+  });
+
 });
 
 function removePathIfExists(targetPath: string): void {

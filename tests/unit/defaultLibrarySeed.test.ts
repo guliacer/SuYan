@@ -3,10 +3,11 @@ import {
   createDefaultLibrary,
   createDefaultSeedImage,
   getDefaultSeedImageFileNames,
+  shouldEnableDefaultLibrarySeed,
 } from "../../electron/main/library/defaultLibrarySeed";
 
 describe("defaultLibrarySeed", () => {
-  it("creates a browsable Chinese prompt library for first launch", () => {
+  it("creates a browsable Chinese prompt library for optional demo seeding", () => {
     const library = createDefaultLibrary();
 
     expect(library.schemaVersion).toBe(1);
@@ -21,5 +22,11 @@ describe("defaultLibrarySeed", () => {
     const image = createDefaultSeedImage(firstImageFileName);
 
     expect(Array.from(image.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  });
+
+  it("keeps first-run library empty unless demo seed is explicitly enabled", () => {
+    expect(shouldEnableDefaultLibrarySeed(undefined)).toBe(false);
+    expect(shouldEnableDefaultLibrarySeed("false")).toBe(false);
+    expect(shouldEnableDefaultLibrarySeed("true")).toBe(true);
   });
 });

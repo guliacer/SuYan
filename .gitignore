@@ -27,6 +27,11 @@ app-integrity.json
 /tmp-*
 /test.txt
 
+# README GIF working frames (not for publish)
+/photo/_frames/
+/photo/_frames_ascii/
+/photo/_frames_png/
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -55,16 +60,19 @@ Desktop.ini
 secrets/
 private/
 
-# Runtime local settings that may contain API keys / proxy credentials
+# Runtime local settings / user data - never commit personal library or credentials
 /library.json
 /library/
 /userData/
 /logs/
+**/logs/
 **/ai-settings.json
 **/proxy-settings.json
 **/view-settings.json
 **/window-state.json
-
+**/acceleration-settings.json
+**/.default-library-seeded
+**/.startup-gallery-seeded
 # Generated icons
 build/icon.ico
 build/_exe-icon-probe*.png

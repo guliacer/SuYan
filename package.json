@@ -21,7 +21,8 @@
     "test": "vitest run",
     "package:win": "pnpm build && node package-win.cjs",
     "protect:electron": "node scripts/obfuscate-electron.cjs dist-electron",
-    "check:secrets": "node scripts/check-no-secrets.cjs"
+    "check:secrets": "node scripts/check-no-secrets.cjs",
+    "check:empty-shell": "node scripts/check-empty-shell.cjs"
   },
   "dependencies": {
     "ffmpeg-static": "5.2.0",
