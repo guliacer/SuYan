@@ -44,17 +44,26 @@ Desktop.ini
 .codex/config.toml
 .codex/*.md
 
-# Env and secrets
+# Env and secrets - never commit API credentials
 .env
 .env.*
+!.env.example
 *.pem
 *.key
+*.p12
+*.pfx
+secrets/
+private/
 
-# Runtime library data only at repo root
+# Runtime local settings that may contain API keys / proxy credentials
 /library.json
 /library/
 /userData/
 /logs/
+**/ai-settings.json
+**/proxy-settings.json
+**/view-settings.json
+**/window-state.json
 
 # Generated icons
 build/icon.ico

@@ -160,11 +160,22 @@
 
 ---
 
+---
+
+## 安全说明：API 信息隔离
+
+- API Key 只允许在软件「模型配置」中填写，保存在本机用户数据目录：`userData/library/ai-settings.json`。
+- 应用会优先使用系统 `safeStorage` 加密写入 `apiKeyEncrypted`，**不会**把明文 Key 写入仓库或安装包。
+- 渲染层只接收 `hasApiKey` / `apiKeyPreview`（脱敏预览），完整 Key 不会通过公开设置接口返回。
+- 打包与 Git 已排除：`ai-settings.json`、`proxy-settings.json`、`.env*`、密钥证书与本地 library 数据。
+- 推送 GitHub 前请确认没有把本机配置、日志或 release 产物一并提交。
+- 提交前可运行：`pnpm check:secrets`。
+
 ## 本地开发
 
- Node.js 20+ 与 pnpm 11。
+> 需要 Node.js 20+ 与 pnpm 11。
 
-`ash
+```bash
 # 安装依赖
 pnpm install
 
@@ -177,26 +188,25 @@ pnpm typecheck
 # 单元测试
 pnpm test
 
+# 密钥扫描
+pnpm check:secrets
+
 # Windows 打包
 pnpm package:win
-`
+```
 
-打包产物位于 elease/win-unpacked/ 与 elease/ 下的安装包。
-
----
+打包产物位于 `release/win-unpacked/` 与 `release/` 下的安装包。
 
 ## 目录结构
 
-`	ext
+```text
 electron/   # 主进程 / preload / 共享 IPC
 src/        # React 渲染层
 tests/      # Vitest 单元测试
-scripts/    # 构建与保护脚本
+scripts/    # 构建、保护与密钥扫描脚本
 build/      # 图标等资源
 photo/      # README 演示动图（可选）
-`
-
----
+```
 
 ## 许可证
 

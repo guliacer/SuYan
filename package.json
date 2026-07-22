@@ -20,7 +20,8 @@
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run",
     "package:win": "pnpm build && node package-win.cjs",
-    "protect:electron": "node scripts/obfuscate-electron.cjs dist-electron"
+    "protect:electron": "node scripts/obfuscate-electron.cjs dist-electron",
+    "check:secrets": "node scripts/check-no-secrets.cjs"
   },
   "dependencies": {
     "ffmpeg-static": "5.2.0",
@@ -57,7 +58,20 @@
       "!**/*.map",
       "!**/*.md",
       "!**/LICENSE*",
-      "!**/license*"
+      "!**/license*",
+      "!**/*.env",
+      "!**/.env*",
+      "!**/ai-settings.json",
+      "!**/proxy-settings.json",
+      "!**/view-settings.json",
+      "!**/window-state.json",
+      "!**/library.json",
+      "!**/secrets/**",
+      "!**/private/**",
+      "!**/*.pem",
+      "!**/*.key",
+      "!**/*.p12",
+      "!**/*.pfx"
     ],
     "directories": {
       "output": "release"
