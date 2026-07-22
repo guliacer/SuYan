@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": ".",
+    "outDir": "dist-electron",
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "electron/**/*.ts",
+    "src/types/**/*.ts",
+    "src/features/library/types/**/*.ts",
+    "src/features/library/utils/generationModels.ts",
+    "src/features/library/utils/moduleRegistry.ts",
+    "src/features/library/utils/nsfwGradingSpeed.ts",
+    "src/features/library/utils/photographyCategories.ts"
+  ]
+}

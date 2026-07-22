@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+/release/
+/release-*/
+app-integrity.json
+
+# Package manager local caches
+.npm-cache/
+.pnpm-cache/
+.pnpm-data/
+.pnpm-home/
+.pnpm-state/
+.pnpm-store/
+.yarn/
+.pnpm-debug.log*
+
+# Logs and local probe files
+*.log
+*.err.log
+/package-win-*.log
+/package-win-*.txt
+/clip-probe-*.txt
+/tmp-*
+/test.txt
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local tooling / AI agent runtime
+.agents/
+.trae/
+.codex/backups/
+.codex/reverse-pixcall/
+.codex/config.toml
+.codex/*.md
+
+# Env and secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Runtime library data only at repo root
+/library.json
+/library/
+/userData/
+/logs/
+
+# Generated icons
+build/icon.ico
+build/_exe-icon-probe*.png

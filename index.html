@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app-image: app-thumbnail: app-startup: data: https:; media-src 'self' app-image: app-thumbnail: blob: data:; connect-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>素言</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --app-loading-background: #f6f5f1;
+        --app-loading-foreground: #202521;
+        --app-loading-panel: #fbfaf7;
+        --app-loading-muted: #7e8580;
+        --app-loading-border: #dddcd4;
+        --app-loading-primary: #6f867e;
+        --app-loading-progress: #d96a3a;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --app-loading-background: #111417;
+          --app-loading-foreground: #e8edf2;
+          --app-loading-panel: #191d22;
+          --app-loading-muted: #98a2ad;
+          --app-loading-border: #2b323a;
+          --app-loading-primary: #c7d8d2;
+          --app-loading-progress: #e07a4d;
+        }
+      }
+
+      html,
+      body,
+      #root {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: var(--app-loading-background);
+        color: var(--app-loading-foreground);
+        font-family:
+          Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif;
+      }
+
+      .app-loading-shell {
+        display: grid;
+        min-height: 100%;
+        grid-template-rows: 36px minmax(0, 1fr);
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--app-loading-panel) 68%, transparent), transparent 34%),
+          var(--app-loading-background);
+      }
+
+      .app-loading-titlebar {
+        -webkit-app-region: drag;
+        border-bottom: 1px solid color-mix(in srgb, var(--app-loading-border) 62%, transparent);
+        background: color-mix(in srgb, var(--app-loading-background) 88%, transparent);
+      }
+
+      .app-loading-stage {
+        display: grid;
+        justify-items: center;
+        align-content: start;
+        gap: 30px;
+        min-width: 0;
+        padding: clamp(48px, 9vh, 92px) 32px 32px;
+      }
+
+      .app-loading-panel {
+        width: min(420px, 100%);
+      }
+
+      .app-loading-transform {
+        display: grid;
+        width: min(620px, 100%);
+        grid-template-columns: minmax(0, 1fr) 84px minmax(0, 1fr);
+        align-items: center;
+        gap: 18px;
+      }
+
+      .app-loading-prompt-card,
+      .app-loading-image-preview {
+        min-height: 128px;
+        border: 1px solid color-mix(in srgb, var(--app-loading-border) 76%, transparent);
+        border-radius: 12px;
+        background: color-mix(in srgb, var(--app-loading-panel) 82%, transparent);
+        box-shadow: 0 16px 34px rgb(15 23 42 / 7%);
+      }
+
+      .app-loading-prompt-card {
+        display: flex;
+        flex-wrap: wrap;
+        align-content: center;
+        gap: 8px;
+        padding: 18px;
+      }
+
+      .app-loading-prompt-chip {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        border: 1px solid color-mix(in srgb, var(--app-loading-primary) 30%, var(--app-loading-border));
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--app-loading-primary) 10%, var(--app-loading-panel));
+        color: color-mix(in srgb, var(--app-loading-foreground) 80%, var(--app-loading-primary));
+        padding: 0 10px;
+        font-size: 12px;
+        font-weight: 600;
+        opacity: 0;
+        transform: translateY(8px);
+        animation: app-loading-prompt-chip 3200ms ease-in-out infinite;
+      }
+
+      .app-loading-prompt-chip:nth-child(2) {
+        animation-delay: 180ms;
+      }
+
+      .app-loading-prompt-chip:nth-child(3) {
+        animation-delay: 360ms;
+      }
+
+      .app-loading-prompt-chip:nth-child(4) {
+        animation-delay: 540ms;
+      }
+
+      .app-loading-generate-flow {
+        position: relative;
+        height: 2px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--app-loading-border) 72%, transparent);
+      }
+
+      .app-loading-generate-flow::before,
+      .app-loading-generate-flow::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        border-radius: 999px;
+        transform: translateY(-50%);
+      }
+
+      .app-loading-generate-flow::before {
+        inset-inline: 0;
+        height: 2px;
+        background: linear-gradient(90deg, var(--app-loading-primary), var(--app-loading-progress));
+        transform: translateY(-50%) scaleX(0);
+        transform-origin: left;
+        animation: app-loading-flow-line 3200ms ease-in-out infinite;
+      }
+
+      .app-loading-generate-flow::after {
+        left: 0;
+        width: 10px;
+        height: 10px;
+        background: var(--app-loading-progress);
+        box-shadow: 0 0 0 5px color-mix(in srgb, var(--app-loading-progress) 16%, transparent);
+        animation: app-loading-flow-dot 3200ms ease-in-out infinite;
+      }
+
+      .app-loading-generate-flow span {
+        position: absolute;
+        top: 50%;
+        width: 4px;
+        height: 4px;
+        border-radius: 999px;
+        background: var(--app-loading-primary);
+        opacity: 0.34;
+        transform: translateY(-50%);
+      }
+
+      .app-loading-generate-flow span:nth-child(1) {
+        left: 18%;
+      }
+
+      .app-loading-generate-flow span:nth-child(2) {
+        left: 48%;
+      }
+
+      .app-loading-generate-flow span:nth-child(3) {
+        left: 78%;
+      }
+
+      .app-loading-image-preview {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+        padding: 12px;
+        overflow: hidden;
+      }
+
+      .app-loading-image-preview span {
+        min-height: 48px;
+        border-radius: 8px;
+        background:
+          radial-gradient(circle at 28% 24%, color-mix(in srgb, var(--app-loading-progress) 26%, transparent), transparent 26%),
+          linear-gradient(135deg, color-mix(in srgb, var(--app-loading-primary) 38%, var(--app-loading-panel)), color-mix(in srgb, var(--app-loading-border) 70%, transparent));
+        opacity: 0;
+        transform: scale(0.88);
+        animation: app-loading-image-cell 3200ms ease-in-out infinite;
+      }
+
+      .app-loading-image-preview span:nth-child(2) {
+        animation-delay: 120ms;
+      }
+
+      .app-loading-image-preview span:nth-child(3) {
+        animation-delay: 240ms;
+      }
+
+      .app-loading-image-preview span:nth-child(4) {
+        animation-delay: 360ms;
+      }
+
+      .app-loading-image-preview span:nth-child(5) {
+        animation-delay: 480ms;
+      }
+
+      .app-loading-image-preview span:nth-child(6) {
+        animation-delay: 600ms;
+      }
+
+      .app-loading-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--app-loading-foreground);
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .app-loading-mark {
+        position: relative;
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        overflow: hidden;
+        border: 1px solid var(--app-loading-border);
+        border-radius: 8px;
+        background: var(--app-loading-panel);
+        box-shadow: 0 12px 28px rgb(15 23 42 / 10%);
+      }
+
+      .app-loading-mark img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .app-loading-copy {
+        margin: 18px 0 0;
+        color: var(--app-loading-muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .app-loading-progress {
+        position: relative;
+        height: 8px;
+        margin-top: 22px;
+        overflow: hidden;
+        border: 1px solid var(--app-loading-border);
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--app-loading-border) 38%, transparent);
+      }
+
+      .app-loading-progress::before {
+        content: "";
+        position: absolute;
+        inset: 1px auto 1px 1px;
+        width: 42%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--app-loading-primary), var(--app-loading-progress));
+        animation: app-loading-progress 1600ms ease-in-out infinite;
+      }
+
+      .app-loading-skeleton {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 14px;
+        margin-top: 26px;
+        padding-top: 22px;
+        border-top: 1px solid color-mix(in srgb, var(--app-loading-border) 68%, transparent);
+      }
+
+      .app-loading-thumb,
+      .app-loading-line {
+        position: relative;
+        overflow: hidden;
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--app-loading-border) 42%, transparent);
+      }
+
+      .app-loading-thumb {
+        height: 70px;
+      }
+
+      .app-loading-lines {
+        display: grid;
+        align-content: center;
+        gap: 10px;
+      }
+
+      .app-loading-line {
+        height: 10px;
+      }
+
+      .app-loading-line:nth-child(2) {
+        width: 82%;
+      }
+
+      .app-loading-line:nth-child(3) {
+        width: 56%;
+      }
+
+      .app-loading-thumb::after,
+      .app-loading-line::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgb(255 255 255 / 28%), transparent);
+        animation: app-loading-shimmer 1700ms ease-in-out infinite;
+      }
+
+      .app-loading-shell {
+        position: relative;
+      }
+
+      .app-loading-magic {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .app-loading-magic::before {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 18%;
+        width: 60vw;
+        height: 60vw;
+        max-width: 720px;
+        max-height: 720px;
+        transform: translate(-50%, -50%);
+        background: radial-gradient(
+          circle,
+          color-mix(in srgb, var(--app-loading-primary) 22%, transparent),
+          transparent 68%
+        );
+        filter: blur(46px);
+        animation: app-loading-aura 6s ease-in-out infinite;
+      }
+
+      .app-loading-particle {
+        position: absolute;
+        bottom: -12px;
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: color-mix(in srgb, var(--app-loading-primary) 62%, #ffffff);
+        box-shadow: 0 0 8px color-mix(in srgb, var(--app-loading-primary) 55%, transparent);
+        opacity: 0;
+        animation: app-loading-rise linear infinite;
+      }
+
+      .app-loading-particle:nth-child(3n) {
+        background: color-mix(in srgb, var(--app-loading-progress) 66%, #ffffff);
+        box-shadow: 0 0 9px color-mix(in srgb, var(--app-loading-progress) 55%, transparent);
+      }
+
+      .app-loading-particle:nth-child(1) { left: 6%; width: 5px; height: 5px; animation-duration: 7.5s; animation-delay: 0s; }
+      .app-loading-particle:nth-child(2) { left: 14%; width: 8px; height: 8px; animation-duration: 9s; animation-delay: 1.2s; }
+      .app-loading-particle:nth-child(3) { left: 22%; width: 4px; height: 4px; animation-duration: 6.5s; animation-delay: 2.4s; }
+      .app-loading-particle:nth-child(4) { left: 30%; width: 7px; height: 7px; animation-duration: 8.2s; animation-delay: 0.6s; }
+      .app-loading-particle:nth-child(5) { left: 38%; width: 5px; height: 5px; animation-duration: 7s; animation-delay: 3.1s; }
+      .app-loading-particle:nth-child(6) { left: 46%; width: 9px; height: 9px; animation-duration: 10s; animation-delay: 1.8s; }
+      .app-loading-particle:nth-child(7) { left: 54%; width: 4px; height: 4px; animation-duration: 6.8s; animation-delay: 0.3s; }
+      .app-loading-particle:nth-child(8) { left: 62%; width: 7px; height: 7px; animation-duration: 8.6s; animation-delay: 2.1s; }
+      .app-loading-particle:nth-child(9) { left: 70%; width: 5px; height: 5px; animation-duration: 7.3s; animation-delay: 3.6s; }
+      .app-loading-particle:nth-child(10) { left: 78%; width: 8px; height: 8px; animation-duration: 9.4s; animation-delay: 0.9s; }
+      .app-loading-particle:nth-child(11) { left: 86%; width: 4px; height: 4px; animation-duration: 6.2s; animation-delay: 2.7s; }
+      .app-loading-particle:nth-child(12) { left: 93%; width: 6px; height: 6px; animation-duration: 8.8s; animation-delay: 1.5s; }
+      .app-loading-particle:nth-child(13) { left: 10%; width: 6px; height: 6px; animation-duration: 9.6s; animation-delay: 4.2s; }
+      .app-loading-particle:nth-child(14) { left: 34%; width: 5px; height: 5px; animation-duration: 7.8s; animation-delay: 4.8s; }
+      .app-loading-particle:nth-child(15) { left: 58%; width: 7px; height: 7px; animation-duration: 8.4s; animation-delay: 3.9s; }
+      .app-loading-particle:nth-child(16) { left: 82%; width: 5px; height: 5px; animation-duration: 7.1s; animation-delay: 5.1s; }
+
+      .app-loading-stage {
+        position: relative;
+        z-index: 1;
+      }
+
+      .app-loading-brand .app-loading-mark {
+        animation: app-loading-hero-float 3.4s ease-in-out infinite;
+      }
+
+      @keyframes app-loading-rise {
+        0% {
+          opacity: 0;
+          transform: translateY(0) scale(0.7);
+        }
+
+        12% {
+          opacity: 0.9;
+        }
+
+        80% {
+          opacity: 0.9;
+        }
+
+        100% {
+          opacity: 0;
+          transform: translateY(-88vh) scale(1);
+        }
+      }
+
+      @keyframes app-loading-aura {
+        0%,
+        100% {
+          transform: translate(-50%, -50%) scale(1);
+          opacity: 0.85;
+        }
+
+        50% {
+          transform: translate(-50%, -54%) scale(1.08);
+          opacity: 1;
+        }
+      }
+
+      @keyframes app-loading-hero-float {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+
+        50% {
+          transform: translateY(-5px) rotate(3deg);
+        }
+      }
+
+      @keyframes app-loading-progress {
+        0% {
+          transform: translateX(-104%);
+        }
+
+        50% {
+          transform: translateX(74%);
+        }
+
+        100% {
+          transform: translateX(246%);
+        }
+      }
+
+      @keyframes app-loading-float {
+        0%,
+        100% {
+          transform: translateY(0) rotate(0deg);
+        }
+
+        50% {
+          transform: translateY(-2px) rotate(4deg);
+        }
+      }
+
+      @keyframes app-loading-pulse {
+        0%,
+        100% {
+          transform: scale(0.82);
+          opacity: 0.65;
+        }
+
+        50% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes app-loading-shimmer {
+        100% {
+          transform: translateX(100%);
+        }
+      }
+
+      @keyframes app-loading-prompt-chip {
+        0%,
+        10% {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+
+        24%,
+        72% {
+          opacity: 1;
+          transform: translateY(0);
+        }
+
+        100% {
+          opacity: 0.38;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes app-loading-flow-line {
+        0%,
+        22% {
+          transform: translateY(-50%) scaleX(0);
+        }
+
+        58%,
+        100% {
+          transform: translateY(-50%) scaleX(1);
+        }
+      }
+
+      @keyframes app-loading-flow-dot {
+        0%,
+        22% {
+          left: 0;
+          opacity: 0;
+        }
+
+        30% {
+          opacity: 1;
+        }
+
+        72%,
+        100% {
+          left: calc(100% - 10px);
+          opacity: 0;
+        }
+      }
+
+      @keyframes app-loading-image-cell {
+        0%,
+        42% {
+          opacity: 0;
+          transform: scale(0.88);
+          filter: blur(4px);
+        }
+
+        64%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+          filter: blur(0);
+        }
+      }
+
+      @media (max-width: 720px) {
+        .app-loading-stage {
+          padding-top: 36px;
+        }
+
+        .app-loading-transform {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .app-loading-generate-flow {
+          width: 2px;
+          height: 44px;
+          justify-self: center;
+        }
+
+        .app-loading-generate-flow::before {
+          inset-block: 0;
+          inset-inline: auto;
+          width: 2px;
+          height: auto;
+          transform: translateX(-50%) scaleY(0);
+          transform-origin: top;
+          animation-name: app-loading-flow-line-vertical;
+        }
+
+        .app-loading-generate-flow::after {
+          top: 0;
+          left: 50%;
+          animation-name: app-loading-flow-dot-vertical;
+        }
+      }
+
+      @keyframes app-loading-flow-line-vertical {
+        0%,
+        22% {
+          transform: translateX(-50%) scaleY(0);
+        }
+
+        58%,
+        100% {
+          transform: translateX(-50%) scaleY(1);
+        }
+      }
+
+      @keyframes app-loading-flow-dot-vertical {
+        0%,
+        22% {
+          top: 0;
+          opacity: 0;
+        }
+
+        30% {
+          opacity: 1;
+        }
+
+        72%,
+        100% {
+          top: calc(100% - 10px);
+          opacity: 0;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .app-loading-particle,
+        .app-loading-magic::before,
+        .app-loading-brand .app-loading-mark,
+        .app-loading-mark::before,
+        .app-loading-mark::after,
+        .app-loading-progress::before,
+        .app-loading-thumb::after,
+        .app-loading-line::after,
+        .app-loading-prompt-chip,
+        .app-loading-generate-flow::before,
+        .app-loading-generate-flow::after,
+        .app-loading-image-preview span {
+          animation: none;
+        }
+
+        .app-loading-prompt-chip,
+        .app-loading-image-preview span {
+          opacity: 1;
+          transform: none;
+          filter: none;
+        }
+
+        .app-loading-generate-flow::before {
+          transform: translateY(-50%) scaleX(1);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <main class="app-loading-shell" aria-label="正在加载素言">
+        <div class="app-loading-magic" aria-hidden="true">
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+          <span class="app-loading-particle"></span>
+        </div>
+        <div class="app-loading-titlebar"></div>
+        <section class="app-loading-stage">
+          <div class="app-loading-panel">
+            <div class="app-loading-brand">
+              <span class="app-loading-mark" aria-hidden="true">
+                <img src="./src/assets/app-logo.png" alt="" />
+              </span>
+              <span>素言</span>
+            </div>
+            <p class="app-loading-copy">正在加载素材库...</p>
+            <div class="app-loading-progress" aria-hidden="true"></div>
+            <div class="app-loading-skeleton" aria-hidden="true">
+              <div class="app-loading-thumb"></div>
+              <div class="app-loading-lines">
+                <div class="app-loading-line"></div>
+                <div class="app-loading-line"></div>
+                <div class="app-loading-line"></div>
+              </div>
+            </div>
+          </div>
+          <div class="app-loading-transform" aria-hidden="true">
+            <div class="app-loading-prompt-card">
+              <span class="app-loading-prompt-chip">柔和自然光</span>
+              <span class="app-loading-prompt-chip">产品构图</span>
+              <span class="app-loading-prompt-chip">细腻材质</span>
+              <span class="app-loading-prompt-chip">背景层次</span>
+            </div>
+            <div class="app-loading-generate-flow">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <div class="app-loading-image-preview">
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
