@@ -5,6 +5,7 @@ import { AppError } from "../ipc/errors";
 import { prepareImageThumbnails } from "./imageThumbnails";
 import { getImagePath } from "./libraryPaths";
 import { readLibraryFile, writeLibraryFile } from "./libraryStore";
+import { resolveMediaAbsolutePath } from "./mediaPathResolver";
 import { computeKeyframeTimings } from "./videoKeyframeTiming";
 import { extractVideoFrameToPath, probeVideoDuration } from "./videoFrameExtractor";
 
@@ -30,7 +31,7 @@ export async function generateVideoFramesForItem(itemId: string): Promise<Genera
     throw new AppError("VIDEO_FRAMES_UNSUPPORTED", "这条素材不是视频，无法生成关键帧。");
   }
 
-  const sourcePath = getImagePath(item.imageFileName);
+  const sourcePath = await resolveMediaAbsolutePath(item);
 
   await fs.access(sourcePath).catch(() => {
     throw new AppError("VIDEO_SOURCE_MISSING", "找不到视频源文件，无法生成关键帧。");

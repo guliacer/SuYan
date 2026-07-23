@@ -9,6 +9,7 @@ export type CompressResult = {
   processedCount: number;
   totalOriginalBytes: number;
   totalCompressedBytes: number;
+  skippedExternalCount: number;
   failedItems: { itemId: string; reason: string }[];
 };
 

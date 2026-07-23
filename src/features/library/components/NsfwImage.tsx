@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Eye, ImageIcon, Play } from "lucide-react";
+import { Eye, ImageIcon, ImageOff, Play } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { getImageSrc, getImageThumbnailSrc } from "../utils/getImageSrc";
 import { isVideoMediaFile } from "../utils/mediaFileTypes";
@@ -16,6 +16,7 @@ const thumbnailSessionVersion = Date.now();
 
 type NsfwImageProps = {
   image: Pick<PromptCardData, "imageFileName" | "nsfwRating" | "title"> & {
+    mediaStatus?: PromptCardData["mediaStatus"];
     updatedAt?: number | string;
   };
   alt: string;
@@ -53,7 +54,8 @@ export function NsfwImage({
   source = "original",
   style,
 }: NsfwImageProps) {
-  const hasImage = Boolean(image.imageFileName);
+  const isMissing = image.mediaStatus === "missing";
+  const hasImage = Boolean(image.imageFileName) && !isMissing;
   const mediaVersion = image.updatedAt ?? "";
   const originalImageSrc = hasImage ? getImageSrc(image.imageFileName, mediaVersion) : "";
   const isVideoMedia = image.imageFileName ? isVideoMediaFile(image.imageFileName) : false;
@@ -206,7 +208,7 @@ export function NsfwImage({
   }
 
   function handleActivateClick() {
-    if (onPreview) {
+    if (onPreview && !isMissing) {
       if (clickTimerRef.current !== null) {
         window.clearTimeout(clickTimerRef.current);
         clickTimerRef.current = null;
@@ -271,7 +273,16 @@ export function NsfwImage({
         <div
           className={`absolute inset-0 flex h-full w-full items-center justify-center bg-background text-muted ${placeholderClassName}`}
         >
-          {isVideoMedia ? <Play size={42} /> : <ImageIcon size={42} />}
+          {isMissing ? (
+            <span className="flex flex-col items-center gap-2 text-center">
+              <ImageOff size={38} />
+              <span className="text-xs font-medium">源文件缺失</span>
+            </span>
+          ) : isVideoMedia ? (
+            <Play size={42} />
+          ) : (
+            <ImageIcon size={42} />
+          )}
         </div>
       ) : null}
       {onActivate ? (

@@ -640,6 +640,7 @@ async function copyMediaFileAsItemVariant(
     ...baseItem,
     id,
     imageFileName,
+    mediaStorage: "managed",
     promptType: normalizePromptType(undefined, { ...baseItem, imageFileName }),
     createdAt: isBlankPromptItem(baseItem) ? baseItem.createdAt : now,
     updatedAt: now,
@@ -692,6 +693,7 @@ export async function importClipboardImageForItem(
     ...baseItem,
     id: importedItemId,
     imageFileName,
+    mediaStorage: "managed",
     createdAt: now,
     updatedAt: now,
   };

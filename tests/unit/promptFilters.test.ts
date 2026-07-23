@@ -29,6 +29,23 @@ function makeItem(patch: Partial<PromptItemFixture>): PromptItemFixture {
 }
 
 describe("promptFilters", () => {
+  it("carries an external missing state to the rendered card model", () => {
+    const card = toPromptCardData(
+      makeItem({
+        mediaStorage: {
+          kind: "external",
+          rootId: "root-1",
+          relativePath: "missing.png",
+          status: "missing",
+        },
+      }),
+    );
+
+    expect(card.mediaStatus).toBe("missing");
+    expect(card.searchText).toContain("默认标题");
+    expect(card.searchText).toContain("missing.png");
+  });
+
   it("searches title, prompt, negative prompt, image file name and tags", () => {
     const cards = [
       makeItem({ id: "title", title: "品牌营销方案", tags: ["商业计划"] }),

@@ -6,6 +6,7 @@ import { normalizePromptType } from "../../../src/features/library/utils/promptT
 import { AppError } from "../ipc/errors";
 import { getImagesDir, getLibraryDataDir, getLibraryPath } from "./libraryPaths";
 import { createDefaultLibrary, createDefaultSeedImage, getDefaultSeedImageFileNames, shouldEnableDefaultLibrarySeed } from "./defaultLibrarySeed";
+import { refreshExternalMediaHealth } from "./externalMediaHealth";
 
 const schemaVersion = 1;
 const defaultSeedMarkerFileName = ".default-library-seeded";
@@ -56,7 +57,7 @@ export async function ensureLibraryStorage(): Promise<void> {
   }
 }
 
-export async function readLibraryFile(): Promise<LibraryFile> {
+export async function readLibraryFile(options?: { refreshExternalHealth?: boolean }): Promise<LibraryFile> {
   await ensureLibraryStorage();
 
   const content = await fs.readFile(getLibraryPath(), "utf8");
@@ -66,10 +67,22 @@ export async function readLibraryFile(): Promise<LibraryFile> {
     throw new AppError("LIBRARY_SCHEMA_INVALID", "素材库文件结构不合法。");
   }
 
-  return {
+  const normalizedLibrary = {
     ...parsed,
     items: parsed.items.map(normalizeItem),
   };
+
+  if (!options?.refreshExternalHealth) {
+    return normalizedLibrary;
+  }
+
+  const healthyLibrary = await refreshExternalMediaHealth(normalizedLibrary);
+
+  if (healthyLibrary !== normalizedLibrary) {
+    await writeLibraryFile(healthyLibrary, { skipNormalize: true });
+  }
+
+  return healthyLibrary;
 }
 
 export async function writeLibraryFile(library: LibraryFile, options?: { skipNormalize?: boolean }): Promise<LibraryFile> {
@@ -205,7 +218,10 @@ function isOptionalMediaStorage(input: unknown): boolean {
     (isRecord(input) &&
       input.kind === "external" &&
       typeof input.rootId === "string" &&
-      typeof input.relativePath === "string")
+      typeof input.relativePath === "string" &&
+      (input.size === undefined || input.size === null || (typeof input.size === "number" && Number.isFinite(input.size))) &&
+      (input.mtimeMs === undefined || input.mtimeMs === null || (typeof input.mtimeMs === "number" && Number.isFinite(input.mtimeMs))) &&
+      (input.status === undefined || input.status === "available" || input.status === "missing"))
   );
 }
 
@@ -221,6 +237,9 @@ function normalizeMediaStorage(input: LibraryItem["mediaStorage"]): MediaStorage
       kind: "external",
       rootId: input.rootId.trim(),
       relativePath: input.relativePath.trim(),
+      size: normalizeOptionalNumber(input.size),
+      mtimeMs: normalizeOptionalNumber(input.mtimeMs),
+      status: input.status === "missing" ? "missing" : "available",
     };
   }
 

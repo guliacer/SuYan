@@ -50,6 +50,9 @@ function normalizeMediaStorage(input: LibraryItem["mediaStorage"]): MediaStorage
       kind: "external",
       rootId: input.rootId.trim(),
       relativePath: input.relativePath.trim(),
+      size: normalizeOptionalNumber(input.size),
+      mtimeMs: normalizeOptionalNumber(input.mtimeMs),
+      status: input.status === "missing" ? "missing" : "available",
     };
   }
 

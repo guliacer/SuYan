@@ -75,7 +75,11 @@ export async function getOrCreateImageThumbnailPathForItem(
   }
 
   const task = resolveMediaAbsolutePath(item)
-    .then((imagePath) => createImageThumbnailPathFromSource(item.imageFileName, imagePath))
+    .then((imagePath) =>
+      createImageThumbnailPathFromSource(item.imageFileName, imagePath, {
+        normalizeVideo: !item.mediaStorage || item.mediaStorage === "managed",
+      }),
+    )
     .finally(() => {
       pendingThumbnails.delete(item.imageFileName);
     });
@@ -109,10 +113,14 @@ export function warmLibraryItemThumbnails(
 }
 
 async function createImageThumbnailPath(imageFileName: string): Promise<string> {
-  return createImageThumbnailPathFromSource(imageFileName, getImagePath(imageFileName));
+  return createImageThumbnailPathFromSource(imageFileName, getImagePath(imageFileName), { normalizeVideo: true });
 }
 
-async function createImageThumbnailPathFromSource(imageFileName: string, imagePath: string): Promise<string> {
+async function createImageThumbnailPathFromSource(
+  imageFileName: string,
+  imagePath: string,
+  options: { normalizeVideo: boolean },
+): Promise<string> {
   const thumbnailPath = getImageThumbnailPath(imageFileName);
 
   if (await isFreshThumbnail(imagePath, thumbnailPath)) {
@@ -122,7 +130,7 @@ async function createImageThumbnailPathFromSource(imageFileName: string, imagePa
   await fs.mkdir(getImageThumbnailsDir(), { recursive: true });
 
   if (isVideoMediaFile(imageFileName)) {
-    return createVideoThumbnailPath(imagePath, thumbnailPath);
+    return createVideoThumbnailPath(imagePath, thumbnailPath, options.normalizeVideo);
   }
 
   if (isAudioMediaFile(imageFileName)) {
@@ -154,11 +162,17 @@ async function createImageThumbnailPathFromSource(imageFileName: string, imagePa
   return thumbnailPath;
 }
 
-async function createVideoThumbnailPath(sourcePath: string, thumbnailPath: string): Promise<string> {
+async function createVideoThumbnailPath(
+  sourcePath: string,
+  thumbnailPath: string,
+  normalizeSource: boolean,
+): Promise<string> {
   const startedAt = Date.now();
   const tempPath = `${thumbnailPath}.${process.pid}.tmp.jpg`;
 
-  await waitForImportedVideoNormalization(sourcePath);
+  if (normalizeSource) {
+    await waitForImportedVideoNormalization(sourcePath);
+  }
 
   const durationSec = await probeVideoDuration(sourcePath).catch(() => 0);
   const seekSec = durationSec > 0 ? Math.min(1, durationSec * 0.1) : 0;

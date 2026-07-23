@@ -11,7 +11,12 @@ export type ExternalMediaStorage = {
   kind: "external";
   rootId: string;
   relativePath: string;
+  size?: number | null;
+  mtimeMs?: number | null;
+  status?: ExternalMediaStatus;
 };
+
+export type ExternalMediaStatus = "available" | "missing";
 
 export type MediaStorage = "managed" | ExternalMediaStorage;
 
@@ -21,6 +26,7 @@ export type LibraryRoot = {
   absolutePath: string;
   recursive: boolean;
   lastScanAt: string | null;
+  status?: ExternalMediaStatus;
 };
 
 export type VideoKeyframe = {

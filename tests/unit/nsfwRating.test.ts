@@ -25,6 +25,13 @@ describe("nsfwRating", () => {
     expect(shouldGradeNsfwItem({ imageFileName: "image.png", nsfwRating: "safe" }, { force: true })).toBe(true);
     expect(shouldGradeNsfwItem({ imageFileName: "clip.mp4", nsfwRating: "unknown" }, { force: true })).toBe(false);
     expect(shouldGradeNsfwItem({ imageFileName: "", nsfwRating: "unknown" })).toBe(false);
+    expect(
+      shouldGradeNsfwItem({
+        imageFileName: "missing.png",
+        mediaStorage: { kind: "external", rootId: "root-1", relativePath: "missing.png", status: "missing" },
+        nsfwRating: "unknown",
+      }),
+    ).toBe(false);
   });
 
   it("resolves remote NSFW and SFW labels", () => {

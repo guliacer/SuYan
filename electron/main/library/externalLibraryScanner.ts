@@ -50,7 +50,7 @@ export async function scanExternalLibraryRoot(
   }
 
   const mediaPaths = await collectMediaPaths(rootPath, root.recursive);
-  const library = await readLibraryFile();
+  const library = await readLibraryFile({ refreshExternalHealth: true });
   const knownPaths = new Set(
     library.items
       .flatMap((item) => {
@@ -75,12 +75,20 @@ export async function scanExternalLibraryRoot(
     const extension = path.extname(absolutePath).toLowerCase();
     const id = randomUUID();
     const draft = await readPngMetadataDraft(absolutePath);
+    const fileStats = await fs.stat(absolutePath);
     const imageFileName = `${id}${extension}`;
     items.push({
       id,
       title: draft.title.trim() || path.basename(absolutePath, extension),
       imageFileName,
-      mediaStorage: { kind: "external", rootId: root.id, relativePath },
+      mediaStorage: {
+        kind: "external",
+        rootId: root.id,
+        relativePath,
+        size: fileStats.size,
+        mtimeMs: fileStats.mtimeMs,
+        status: "available",
+      },
       prompt: draft.prompt,
       negativePrompt: draft.negativePrompt,
       category: null,

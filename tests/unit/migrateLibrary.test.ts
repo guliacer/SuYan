@@ -68,6 +68,9 @@ describe("migrateLibrary", () => {
       kind: "external",
       rootId: "root-1",
       relativePath: "素材/样例.png",
+      size: null,
+      mtimeMs: null,
+      status: "available",
     });
   });
 

@@ -53,6 +53,22 @@ export type ExternalLibraryScanData = {
   skippedCount: number;
 };
 
+export type ExternalLibraryValidationData = {
+  library: LibraryFile;
+  missingCount: number;
+  changedCount: number;
+};
+
+export type ExternalLibraryRemapData = ExternalLibraryValidationData & {
+  canceled: boolean;
+  root: LibraryRoot | null;
+};
+
+export type ExternalLibraryRootRemoveData = ExternalLibraryValidationData & {
+  roots: LibraryRoot[];
+  removedItemCount: number;
+};
+
 export type ImportImageBufferInput = {
   name: string;
   data: ArrayBuffer;
@@ -172,6 +188,7 @@ export type CompressResult = {
   processedCount: number;
   totalOriginalBytes: number;
   totalCompressedBytes: number;
+  skippedExternalCount: number;
   failedItems: { itemId: string; reason: string }[];
 };
 
@@ -256,6 +273,9 @@ export type SuyanApi = {
   listLibraryRoots: () => Promise<IpcResult<LibraryRoot[]>>;
   chooseAndScanLibraryRoot: () => Promise<IpcResult<ExternalLibraryScanData>>;
   scanLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryScanData>>;
+  remapLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRemapData>>;
+  removeLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRootRemoveData>>;
+  validateExternalLibrary: () => Promise<IpcResult<ExternalLibraryValidationData>>;
   listStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImage[]>>;
   importStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImportData>>;
   importStartupGalleryImageFromClipboard: () => Promise<IpcResult<StartupGalleryImportData>>;

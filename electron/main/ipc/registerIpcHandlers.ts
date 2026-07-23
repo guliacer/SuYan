@@ -61,6 +61,11 @@ import { getImageThumbnailPath } from "../library/libraryPaths";
 import { readLibraryFile, writeLibraryFile } from "../library/libraryStore";
 import { chooseAndAddLibraryRoot, readLibraryRoots } from "../library/libraryRoots";
 import { scanExternalLibraryRoot } from "../library/externalLibraryScanner";
+import {
+  detachExternalLibraryRoot,
+  remapExternalLibraryRoot,
+  validateExternalLibrary,
+} from "../library/externalLibraryManager";
 import { downloadRemoteMaterialForItem } from "../library/remoteMaterialDownload";
 import { readLibraryViewSettings, writeLibraryViewSettings } from "../library/viewSettingsStore";
 import {
@@ -123,7 +128,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(ipcChannels.libraryRead, () =>
     handleResult("library:read", async () => {
-      const library = await readLibraryFile();
+      const library = await readLibraryFile({ refreshExternalHealth: true });
       reportLibrarySize(library.items.length);
       return library;
     }),
@@ -165,6 +170,17 @@ export function registerIpcHandlers(): void {
       });
       return { ...result, canceled: false };
     }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootRemap, (event, rootId: string) =>
+    handleResult("library:root-remap", () =>
+      remapExternalLibraryRoot(rootId, BrowserWindow.fromWebContents(event.sender)),
+    ),
+  );
+  ipcMain.handle(ipcChannels.libraryRootRemove, (_event, rootId: string) =>
+    handleResult("library:root-remove", () => detachExternalLibraryRoot(rootId)),
+  );
+  ipcMain.handle(ipcChannels.libraryExternalValidate, () =>
+    handleResult("library:external-validate", () => validateExternalLibrary()),
   );
   ipcMain.handle(ipcChannels.startupGalleryList, () =>
     handleResult("startup-gallery:list", () => listStartupGalleryImages()),

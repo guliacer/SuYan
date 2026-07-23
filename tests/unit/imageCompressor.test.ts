@@ -65,4 +65,13 @@ describe("selectTargetItems (image compressor)", () => {
 
     expect(result.map((item) => item.id)).toEqual(["2"]);
   });
+
+  it("never selects external images for in-place compression", () => {
+    const external = makeItem("external", "external.png");
+    external.mediaStorage = { kind: "external", rootId: "root-1", relativePath: "external.png" };
+
+    expect(selectTargetItems([external, makeItem("managed", "managed.png")], undefined).map((item) => item.id)).toEqual([
+      "managed",
+    ]);
+  });
 });

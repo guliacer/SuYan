@@ -12,3 +12,10 @@ export function resolveExternalMediaPath(rootPath: string, relativePath: string)
 
   return resolvedMediaPath;
 }
+
+/** Verifies every stored relative path remains contained before a root is remapped. */
+export function validateExternalRemap(rootPath: string, relativePaths: readonly string[]): void {
+  for (const relativePath of relativePaths) {
+    resolveExternalMediaPath(rootPath, relativePath);
+  }
+}

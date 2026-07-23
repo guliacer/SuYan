@@ -541,6 +541,9 @@ export function LibraryView() {
   const importImages = useLibraryStore((state) => state.importImages);
   const addAndScanLibraryRoot = useLibraryStore((state) => state.addAndScanLibraryRoot);
   const scanLibraryRoot = useLibraryStore((state) => state.scanLibraryRoot);
+  const remapLibraryRoot = useLibraryStore((state) => state.remapLibraryRoot);
+  const removeLibraryRoot = useLibraryStore((state) => state.removeLibraryRoot);
+  const validateExternalLibrary = useLibraryStore((state) => state.validateExternalLibrary);
   const importImageFilesForItem = useLibraryStore((state) => state.importImageFilesForItem);
   const generateVideoFrames = useLibraryStore((state) => state.generateVideoFrames);
   const importVideoReferenceImages = useLibraryStore((state) => state.importVideoReferenceImages);
@@ -1564,7 +1567,10 @@ function resetFilters() {
           roots={libraryRoots}
           onAdd={() => void addAndScanLibraryRoot()}
           onClose={() => setIsLibraryRootsOpen(false)}
+          onRemap={(rootId) => void remapLibraryRoot(rootId)}
+          onRemove={(rootId) => void removeLibraryRoot(rootId)}
           onScan={(rootId) => void scanLibraryRoot(rootId)}
+          onValidate={() => void validateExternalLibrary()}
         />
       ) : null}
       {isImageDragOver ? <ImageDropOverlay /> : null}
@@ -10196,10 +10202,13 @@ type LibraryRootsDialogProps = {
   roots: readonly LibraryRoot[];
   onAdd: () => void;
   onClose: () => void;
+  onRemap: (rootId: string) => void;
+  onRemove: (rootId: string) => void;
   onScan: (rootId: string) => void;
+  onValidate: () => void;
 };
 
-function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onScan }: LibraryRootsDialogProps) {
+function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onRemap, onRemove, onScan, onValidate }: LibraryRootsDialogProps) {
   return (
     <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" onClose={onClose}>
       <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -10214,7 +10223,11 @@ function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onScan }: LibraryRo
           roots.map((root) => (
             <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-background px-3 py-3" key={root.id}>
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{root.label}</p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`size-2 shrink-0 rounded-full ${root.status === "missing" ? "bg-danger" : "bg-primary"}`} />
+                  <p className="truncate text-sm font-medium text-foreground">{root.label}</p>
+                  {root.status === "missing" ? <span className="shrink-0 text-xs font-medium text-danger">目录不可用</span> : null}
+                </div>
                 <p className="mt-1 truncate text-xs text-muted" title={root.absolutePath}>
                   {root.absolutePath}
                 </p>
@@ -10222,16 +10235,33 @@ function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onScan }: LibraryRo
                   {root.lastScanAt ? `上次扫描：${new Date(root.lastScanAt).toLocaleString()}` : "尚未扫描"}
                 </p>
               </div>
-              <Button icon={<RefreshCw size={15} />} disabled={isBusy} onClick={() => onScan(root.id)}>
-                扫描
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button aria-label="重新扫描" className="size-10 px-0" icon={<RefreshCw size={15} />} title="重新扫描" disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
+                <Button aria-label="重新定位" className="size-10 px-0" icon={<FolderTree size={15} />} title="重新定位" disabled={isBusy} onClick={() => onRemap(root.id)} />
+                <Button
+                  aria-label="移除挂载"
+                  className="size-10 px-0"
+                  icon={<Trash2 size={15} />}
+                  title="移除挂载"
+                  variant="ghost"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (window.confirm(`移除“${root.label}”挂载及其索引？原文件不会删除。`)) {
+                      onRemove(root.id);
+                    }
+                  }}
+                />
+              </div>
             </div>
           ))
         ) : (
           <p className="py-8 text-center text-sm text-muted">还没有已挂载目录。</p>
         )}
       </div>
-      <footer className="flex justify-end border-t border-border px-5 py-4">
+      <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+        <Button icon={<Shield size={16} />} disabled={isBusy || roots.length === 0} onClick={onValidate}>
+          校验全部
+        </Button>
         <Button icon={<FolderTree size={16} />} disabled={isBusy} variant="primary" onClick={onAdd}>
           添加素材目录
         </Button>

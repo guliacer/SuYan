@@ -171,6 +171,9 @@ type LibraryState = {
   importImages: () => Promise<void>;
   addAndScanLibraryRoot: () => Promise<void>;
   scanLibraryRoot: (rootId: string) => Promise<void>;
+  remapLibraryRoot: (rootId: string) => Promise<void>;
+  removeLibraryRoot: (rootId: string) => Promise<void>;
+  validateExternalLibrary: () => Promise<void>;
   importImageBuffers: (images: ImportImageBufferInput[]) => Promise<void>;
   importImageFilesForItem: (itemId: string) => Promise<string | null>;
   importWordDocument: () => Promise<void>;
@@ -1109,6 +1112,86 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  remapLibraryRoot: async (rootId) => {
+    set({ isBusy: true, statusMessage: progressStatus("正在重新定位素材目录...") });
+
+    try {
+      const result = await window.suyanApi.remapLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      if (result.data.canceled) {
+        set({ statusMessage: null });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.missingCount > 0
+            ? infoStatus(`目录已重新定位，仍有 ${result.data.missingCount} 个源文件缺失。`)
+            : successStatus("目录已重新定位，外链素材已恢复。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  removeLibraryRoot: async (rootId) => {
+    set({ isBusy: true, statusMessage: progressStatus("正在移除素材目录...") });
+
+    try {
+      const result = await window.suyanApi.removeLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      set({
+        libraryRoots: result.data.roots,
+        statusMessage: infoStatus(`已移除挂载和 ${result.data.removedItemCount} 条索引，原文件未删除。`),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  validateExternalLibrary: async () => {
+    set({ isBusy: true, statusMessage: progressStatus("正在校验外链素材...") });
+
+    try {
+      const result = await window.suyanApi.validateExternalLibrary();
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.missingCount > 0
+            ? infoStatus(`校验完成：${result.data.missingCount} 个源文件缺失。`)
+            : successStatus("校验完成，外链素材均可访问。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
   importImageBuffers: async (images) => {
     if (images.length === 0) {
       return;
@@ -1800,8 +1883,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         const savedBytes = Math.max(0, result.data.totalOriginalBytes - result.data.totalCompressedBytes);
+        const externalText =
+          result.data.skippedExternalCount > 0
+            ? `，${result.data.skippedExternalCount} 项外链素材保持只读`
+            : "";
         set({
-          statusMessage: successStatus(`已压缩 ${result.data.processedCount} 张图片，节省 ${formatSavedBytes(savedBytes)}。`),
+          statusMessage: successStatus(
+            `已压缩 ${result.data.processedCount} 张图片，节省 ${formatSavedBytes(savedBytes)}${externalText}。`,
+          ),
         });
         return result.data;
       }
@@ -1833,8 +1922,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         const savedBytes = Math.max(0, result.data.totalOriginalBytes - result.data.totalCompressedBytes);
+        const externalText =
+          result.data.skippedExternalCount > 0
+            ? `，${result.data.skippedExternalCount} 项外链素材保持只读`
+            : "";
         set({
-          statusMessage: successStatus(`已压缩 ${result.data.processedCount} 个视频，节省 ${formatSavedBytes(savedBytes)}。`),
+          statusMessage: successStatus(
+            `已压缩 ${result.data.processedCount} 个视频，节省 ${formatSavedBytes(savedBytes)}${externalText}。`,
+          ),
         });
         return result.data;
       }

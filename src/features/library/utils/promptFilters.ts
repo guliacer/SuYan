@@ -3,6 +3,7 @@ import type {
   MaterialBrowserSortDirection,
   MaterialBrowserSortMode,
   PromptContentType,
+  ExternalMediaStatus,
   VideoKeyframe,
 } from "../types/library";
 import { resolveGenerationModelLabel } from "./generationModels";
@@ -35,6 +36,7 @@ export type PromptCardData = {
   generationMethod: string;
   promptType: PromptContentType;
   nsfwRating: LibraryItem["nsfwRating"];
+  mediaStatus: ExternalMediaStatus | null;
   videoDurationSec: number | null;
   videoPosterFileName: string | null;
   videoKeyframes: VideoKeyframe[];
@@ -122,6 +124,8 @@ export function toPromptCardData(item: LibraryItem): PromptCardData {
     generationMethod,
     promptType,
     nsfwRating: normalizeNsfwRating(item.nsfwRating),
+    mediaStatus:
+      item.mediaStorage && item.mediaStorage !== "managed" ? (item.mediaStorage.status ?? "available") : null,
     videoDurationSec: typeof item.videoDurationSec === "number" && Number.isFinite(item.videoDurationSec) ? item.videoDurationSec : null,
     videoPosterFileName: typeof item.videoPosterFileName === "string" && item.videoPosterFileName ? item.videoPosterFileName : null,
     videoKeyframes: Array.isArray(item.videoKeyframes) ? item.videoKeyframes : [],
@@ -132,7 +136,10 @@ export function toPromptCardData(item: LibraryItem): PromptCardData {
       category,
       generationMethod,
       id: item.id,
-      imageFileName: item.imageFileName,
+      imageFileName:
+        item.mediaStorage && item.mediaStorage !== "managed"
+          ? `${item.imageFileName} ${item.mediaStorage.relativePath}`
+          : item.imageFileName,
       negativePrompt: item.negativePrompt,
       prompt: item.prompt,
       promptType,
