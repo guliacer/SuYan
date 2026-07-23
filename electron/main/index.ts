@@ -6,8 +6,15 @@ import { pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc/registerIpcHandlers";
 import { ipcChannels } from "../shared/ipcChannels";
 import { isVideoMediaFile } from "../../src/features/library/utils/mediaFileTypes";
-import { getFreshImageThumbnailPath, warmImageThumbnails } from "./library/imageThumbnails";
+import {
+  getFreshImageThumbnailPath,
+  getFreshImageThumbnailPathForItem,
+  warmImageThumbnails,
+  warmLibraryItemThumbnails,
+} from "./library/imageThumbnails";
 import { getImagePath, getStartupGalleryImagePath } from "./library/libraryPaths";
+import { readLibraryFile } from "./library/libraryStore";
+import { resolveMediaAbsolutePath } from "./library/mediaPathResolver";
 import { ensureStartupGalleryStorage, getFreshStartupThumbnailPath } from "./library/startupGalleryStore";
 import { waitForImportedVideoNormalization } from "./library/videoImportNormalizer";
 import { applyStoredProxySettings } from "./network/proxySettingsStore";
@@ -368,9 +375,10 @@ app.whenReady().then(async () => {
     try {
       const url = new URL(request.url);
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
-      const imagePath = getImagePath(imageFileName);
+      const item = await findLibraryItemByImageFileName(imageFileName);
+      const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
 
-      if (isVideoMediaFile(imageFileName)) {
+      if (isVideoMediaFile(imageFileName) && (!item || !item.mediaStorage || item.mediaStorage === "managed")) {
         await waitForImportedVideoNormalization(imagePath);
       }
 
@@ -400,15 +408,22 @@ app.whenReady().then(async () => {
     try {
       const url = new URL(request.url);
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
-      const thumbnailPath = await getFreshImageThumbnailPath(imageFileName);
+      const item = await findLibraryItemByImageFileName(imageFileName);
+      const thumbnailPath = item
+        ? await getFreshImageThumbnailPathForItem(item)
+        : await getFreshImageThumbnailPath(imageFileName);
 
       if (thumbnailPath) {
         return net.fetch(pathToFileURL(thumbnailPath).toString());
       }
 
-      const imagePath = getImagePath(imageFileName);
+      const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
 
-      warmImageThumbnails([imageFileName], 1);
+      if (item) {
+        warmLibraryItemThumbnails([item]);
+      } else {
+        warmImageThumbnails([imageFileName], 1);
+      }
 
       const imageStats = await fs.stat(imagePath).catch(() => null);
 
@@ -451,6 +466,11 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+async function findLibraryItemByImageFileName(imageFileName: string) {
+  const library = await readLibraryFile();
+  return library.items.find((item) => item.imageFileName === imageFileName) ?? null;
+}
 
 function registerWindowControls(window: BrowserWindow): void {
   ipcMain.handle(ipcChannels.windowMinimize, () => {

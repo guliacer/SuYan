@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LibraryFile, LibraryItem, VideoKeyframe } from "../../../src/features/library/types/library";
+import type { LibraryFile, LibraryItem, MediaStorage, VideoKeyframe } from "../../../src/features/library/types/library";
 import { normalizeNsfwRating } from "../../../src/features/library/utils/nsfwRating";
 import { normalizePromptType } from "../../../src/features/library/utils/promptType";
 import { AppError } from "../ipc/errors";
@@ -66,7 +66,10 @@ export async function readLibraryFile(): Promise<LibraryFile> {
     throw new AppError("LIBRARY_SCHEMA_INVALID", "素材库文件结构不合法。");
   }
 
-  return parsed;
+  return {
+    ...parsed,
+    items: parsed.items.map(normalizeItem),
+  };
 }
 
 export async function writeLibraryFile(library: LibraryFile, options?: { skipNormalize?: boolean }): Promise<LibraryFile> {
@@ -114,6 +117,7 @@ export function normalizeItem(item: LibraryItem): LibraryItem {
     id: item.id,
     title: item.title,
     imageFileName: item.imageFileName,
+    mediaStorage: normalizeMediaStorage(item.mediaStorage),
     prompt: item.prompt,
     negativePrompt: item.negativePrompt,
     category: normalizeOptionalString(item.category),
@@ -160,6 +164,7 @@ function isLibraryItem(input: unknown): input is LibraryItem {
     typeof input.id === "string" &&
     typeof input.title === "string" &&
     typeof input.imageFileName === "string" &&
+    isOptionalMediaStorage(input.mediaStorage) &&
     typeof input.prompt === "string" &&
     typeof input.negativePrompt === "string" &&
     Array.isArray(input.tags) &&
@@ -191,6 +196,35 @@ function isOptionalNsfwRating(input: unknown): boolean {
 
 function isOptionalRemoteImageStatus(input: unknown): boolean {
   return input === undefined || input === null || input === "pending" || input === "downloaded";
+}
+
+function isOptionalMediaStorage(input: unknown): boolean {
+  return (
+    input === undefined ||
+    input === "managed" ||
+    (isRecord(input) &&
+      input.kind === "external" &&
+      typeof input.rootId === "string" &&
+      typeof input.relativePath === "string")
+  );
+}
+
+function normalizeMediaStorage(input: LibraryItem["mediaStorage"]): MediaStorage {
+  if (
+    input &&
+    typeof input === "object" &&
+    input.kind === "external" &&
+    input.rootId.trim() &&
+    input.relativePath.trim()
+  ) {
+    return {
+      kind: "external",
+      rootId: input.rootId.trim(),
+      relativePath: input.relativePath.trim(),
+    };
+  }
+
+  return "managed";
 }
 
 function isOptionalString(input: unknown): boolean {

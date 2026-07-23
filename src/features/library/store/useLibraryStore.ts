@@ -29,6 +29,7 @@ import { buildAiActionInstructions } from "../types/ai";
 import type {
   LibraryFile,
   LibraryItem,
+  LibraryRoot,
   LibraryViewSettings,
   MaterialBrowserCollectionMode,
   MaterialBrowserGalleryMode,
@@ -109,6 +110,7 @@ const inFlightRemoteMaterialDownloads = new Set<string>();
 
 type LibraryState = {
   items: LibraryItem[];
+  libraryRoots: LibraryRoot[];
   selectedItemId: string | null;
   /** 刚导入的素材 id（按导入顺序），用于素材浏览列表临时置顶展示。 */
   recentImportPinIds: string[];
@@ -167,6 +169,8 @@ type LibraryState = {
   clearStatus: () => void;
   openExternalUrl: (url: string, label?: string) => Promise<boolean>;
   importImages: () => Promise<void>;
+  addAndScanLibraryRoot: () => Promise<void>;
+  scanLibraryRoot: (rootId: string) => Promise<void>;
   importImageBuffers: (images: ImportImageBufferInput[]) => Promise<void>;
   importImageFilesForItem: (itemId: string) => Promise<string | null>;
   importWordDocument: () => Promise<void>;
@@ -216,6 +220,7 @@ let themePersistenceQueue: Promise<void> = Promise.resolve();
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   items: [],
+  libraryRoots: [],
   selectedItemId: null,
   recentImportPinIds: [],
   searchQuery: "",
@@ -272,9 +277,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const loadStartedAt = performance.now();
     logRendererStartupEvent("library-load:start");
     set({ isLoading: true, statusMessage: null });
-    const [libraryResult, viewSettingsResult] = await Promise.all([
+    const [libraryResult, viewSettingsResult, rootsResult] = await Promise.all([
       window.suyanApi.readLibrary(),
       window.suyanApi.readLibraryViewSettings(),
+      window.suyanApi.listLibraryRoots(),
     ]);
 
     if (libraryResult.ok) {
@@ -287,6 +293,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       syncLibraryViewSettings(set, viewSettingsResult.data);
     } else if (libraryResult.ok) {
       set({ statusMessage: errorStatus(viewSettingsResult.error.code, viewSettingsResult.error.message) });
+    }
+
+    if (rootsResult.ok) {
+      set({ libraryRoots: rootsResult.data });
     }
 
     set({ isLoading: false, recentImportPinIds: [] });
@@ -1028,6 +1038,74 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       logRendererStartupEvent("import-files:renderer-timing", {
         durationMs: Math.round(performance.now() - startedAt),
       });
+    }
+  },
+
+  addAndScanLibraryRoot: async () => {
+    const previousItemIds = new Set(get().items.map((item) => item.id));
+    set({ isBusy: true, statusMessage: progressStatus("正在选择并扫描素材目录...") });
+    const unsubscribe = window.suyanApi.onImportProgress((progress) => {
+      set({ statusMessage: progressStatus(`正在扫描：${progress.currentFile} (${progress.current}/${progress.total})`) });
+    });
+
+    try {
+      const result = await window.suyanApi.chooseAndScanLibraryRoot();
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      if (result.data.canceled) {
+        set({ statusMessage: infoStatus("未选择素材目录。") });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      if (result.data.importedCount > 0) {
+        markRecentImportPins(set, get, previousItemIds);
+        scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+      }
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({ statusMessage: successStatus(`已扫描 ${result.data.root?.label ?? "素材目录"}，新增 ${result.data.importedCount} 个素材。`) });
+    } finally {
+      unsubscribe();
+      set({ isBusy: false });
+    }
+  },
+
+  scanLibraryRoot: async (rootId) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    const previousItemIds = new Set(get().items.map((item) => item.id));
+    set({ isBusy: true, statusMessage: progressStatus(`正在扫描 ${root?.label ?? "素材目录"}...`) });
+    const unsubscribe = window.suyanApi.onImportProgress((progress) => {
+      set({ statusMessage: progressStatus(`正在扫描：${progress.currentFile} (${progress.current}/${progress.total})`) });
+    });
+
+    try {
+      const result = await window.suyanApi.scanLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      if (result.data.importedCount > 0) {
+        markRecentImportPins(set, get, previousItemIds);
+        scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+      }
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({ statusMessage: successStatus(`扫描完成，新增 ${result.data.importedCount} 个素材，已跳过 ${result.data.skippedCount} 个。`) });
+    } finally {
+      unsubscribe();
+      set({ isBusy: false });
     }
   },
 

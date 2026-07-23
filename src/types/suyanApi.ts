@@ -1,5 +1,6 @@
 import type {
   LibraryFile,
+  LibraryRoot,
   LibraryViewSettings,
   PromptLexiconEntry,
   PromptLexiconKind,
@@ -42,6 +43,14 @@ export type ImportImagesData = {
   importedImageCount?: number;
   skippedDuplicateCount?: number;
   canceled?: boolean;
+};
+
+export type ExternalLibraryScanData = {
+  canceled: boolean;
+  library: LibraryFile;
+  root: LibraryRoot | null;
+  importedCount: number;
+  skippedCount: number;
 };
 
 export type ImportImageBufferInput = {
@@ -244,6 +253,9 @@ export type SuyanApi = {
   saveLibrary: (library: LibraryFile) => Promise<IpcResult<LibraryFile>>;
   readLibraryViewSettings: () => Promise<IpcResult<LibraryViewSettings>>;
   saveLibraryViewSettings: (settings: LibraryViewSettings) => Promise<IpcResult<LibraryViewSettings>>;
+  listLibraryRoots: () => Promise<IpcResult<LibraryRoot[]>>;
+  chooseAndScanLibraryRoot: () => Promise<IpcResult<ExternalLibraryScanData>>;
+  scanLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryScanData>>;
   listStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImage[]>>;
   importStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImportData>>;
   importStartupGalleryImageFromClipboard: () => Promise<IpcResult<StartupGalleryImportData>>;

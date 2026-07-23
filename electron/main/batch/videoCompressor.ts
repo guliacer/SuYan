@@ -102,10 +102,18 @@ export function selectVideoTargetItems(
   if (itemIds && itemIds.length > 0) {
     const idSet = new Set(itemIds);
 
-    return items.filter((item) => idSet.has(item.id) && isVideoMediaFile(item.imageFileName));
+    return items.filter(
+      (item) => idSet.has(item.id) && isManagedMedia(item) && isVideoMediaFile(item.imageFileName),
+    );
   }
 
-  return items.filter((item) => item.promptType === "video" || isVideoMediaFile(item.imageFileName));
+  return items.filter(
+    (item) => isManagedMedia(item) && (item.promptType === "video" || isVideoMediaFile(item.imageFileName)),
+  );
+}
+
+function isManagedMedia(item: LibraryItem): boolean {
+  return !item.mediaStorage || item.mediaStorage === "managed";
 }
 
 async function compressSingleVideo(

@@ -73,6 +73,7 @@ import startupArt5 from "../assets/startup-art-5.png?url";
 import startupArt6 from "../assets/startup-art-6.png?url";
 import type {
   LibraryItem,
+  LibraryRoot,
   PromptImageLexiconEntry,
   PromptLexiconEntry,
   PromptLexiconKind,
@@ -496,6 +497,7 @@ function ImageDropOverlay() {
 export function LibraryView() {
   recordLibraryViewRender();
   const items = useLibraryStore((state) => state.items);
+  const libraryRoots = useLibraryStore((state) => state.libraryRoots);
   const searchQuery = useLibraryStore((state) => state.searchQuery);
   const tagOrder = useLibraryStore((state) => state.tagOrder);
   const likedImageIds = useLibraryStore((state) => state.likedImageIds);
@@ -537,6 +539,8 @@ export function LibraryView() {
   const reverseImagePromptWithAi = useLibraryStore((state) => state.reverseImagePromptWithAi);
   const clearStatus = useLibraryStore((state) => state.clearStatus);
   const importImages = useLibraryStore((state) => state.importImages);
+  const addAndScanLibraryRoot = useLibraryStore((state) => state.addAndScanLibraryRoot);
+  const scanLibraryRoot = useLibraryStore((state) => state.scanLibraryRoot);
   const importImageFilesForItem = useLibraryStore((state) => state.importImageFilesForItem);
   const generateVideoFrames = useLibraryStore((state) => state.generateVideoFrames);
   const importVideoReferenceImages = useLibraryStore((state) => state.importVideoReferenceImages);
@@ -590,6 +594,7 @@ export function LibraryView() {
   const [isProxySettingsOpen, setIsProxySettingsOpen] = useState(false);
   const [isPerformanceSettingsOpen, setIsPerformanceSettingsOpen] = useState(false);
   const [isStartupGallerySettingsOpen, setIsStartupGallerySettingsOpen] = useState(false);
+  const [isLibraryRootsOpen, setIsLibraryRootsOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(getStoredSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -1553,6 +1558,15 @@ function resetFilters() {
       onDrop={handleWindowDrop}
     >
       <AppTitleBar isSidebarOpen={isSidebarOpen} overlayActive={isDetailOverlayOpen} onToggleSidebar={toggleSidebar} />
+      {isLibraryRootsOpen ? (
+        <LibraryRootsDialog
+          isBusy={isBusy}
+          roots={libraryRoots}
+          onAdd={() => void addAndScanLibraryRoot()}
+          onClose={() => setIsLibraryRootsOpen(false)}
+          onScan={(rootId) => void scanLibraryRoot(rootId)}
+        />
+      ) : null}
       {isImageDragOver ? <ImageDropOverlay /> : null}
       <div className="flex min-h-0 flex-1">
         {isSidebarOpen ? (
@@ -1573,6 +1587,10 @@ function resetFilters() {
               setIsImportMenuOpen(false);
               void importImages();
             }}
+            onAddLibraryDirectory={() => {
+              setIsImportMenuOpen(false);
+              void addAndScanLibraryRoot();
+            }}
             onImportZip={() => {
               setIsImportMenuOpen(false);
               void importZip();
@@ -1589,6 +1607,7 @@ function resetFilters() {
             onOpenStartupGallerySettings={openStartupGallerySettings}
             onOpenCategoryLexicon={() => openMainView("categoryLexicon")}
             onOpenHome={openHomeView}
+            onOpenLibraryRoots={() => setIsLibraryRootsOpen(true)}
             onOpenManager={() => openMainView("promptLibrary")}
             onOpenParameterLexicon={() => openMainView("parameterLexicon")}
             onOpenPromptSites={() => openMainView("promptSites")}
@@ -2737,6 +2756,7 @@ type LibrarySidebarProps = {
   width: number;
   onImportClipboardImage: () => void;
   onImportImages: () => void;
+  onAddLibraryDirectory: () => void;
   onImportZip: () => void;
   onImportWordDocument: () => void;
   onOpenAbout: () => void;
@@ -2747,6 +2767,7 @@ type LibrarySidebarProps = {
   onOpenStartupGallerySettings: () => void;
   onOpenCategoryLexicon: () => void;
   onOpenHome: () => void;
+  onOpenLibraryRoots: () => void;
   onOpenManager: () => void;
   onOpenParameterLexicon: () => void;
   onOpenPromptSites: () => void;
@@ -2768,6 +2789,7 @@ function LibrarySidebar({
   width,
   onImportClipboardImage,
   onImportImages,
+  onAddLibraryDirectory,
   onImportZip,
   onImportWordDocument,
   onOpenAbout,
@@ -2778,6 +2800,7 @@ function LibrarySidebar({
   onOpenStartupGallerySettings,
   onOpenCategoryLexicon,
   onOpenHome,
+  onOpenLibraryRoots,
   onOpenManager,
   onOpenParameterLexicon,
   onOpenPromptSites,
@@ -2807,7 +2830,7 @@ function LibrarySidebar({
       const viewportPadding = 8;
       const menuGap = 8;
       const menuWidth = 176;
-      const menuHeight = 184;
+      const menuHeight = 226;
       const canOpenRight = rect.right + menuGap + menuWidth <= window.innerWidth - viewportPadding;
       const left = canOpenRight
         ? rect.right + menuGap
@@ -2870,6 +2893,7 @@ function LibrarySidebar({
                     style={importMenuStyle}
                   >
                     <ImportMenuItem icon={<ImagePlus size={16} />} label="导入图片" onClick={onImportImages} />
+                    <ImportMenuItem icon={<FolderTree size={16} />} label="添加素材目录" onClick={onAddLibraryDirectory} />
                     <ImportMenuItem icon={<Clipboard size={16} />} label="粘贴导入" onClick={onImportClipboardImage} />
                     <ImportMenuItem icon={<FileText size={16} />} label="导入文档" onClick={onImportWordDocument} />
                     <ImportMenuItem icon={<Download size={16} />} label="导入分享" onClick={onImportZip} />
@@ -2878,6 +2902,12 @@ function LibrarySidebar({
                 )
               : null}
           </div>
+          <SidebarActionButton
+            icon={<FolderTree size={17} />}
+            isCompact={isCompact}
+            label="素材目录"
+            onClick={onOpenLibraryRoots}
+          />
           <SidebarActionButton
             active={activeView === "promptLibrary"}
             icon={<BookOpen size={17} />}
@@ -10161,6 +10191,55 @@ function GridPromptMosaic({
   );
 }
 
+type LibraryRootsDialogProps = {
+  isBusy: boolean;
+  roots: readonly LibraryRoot[];
+  onAdd: () => void;
+  onClose: () => void;
+  onScan: (rootId: string) => void;
+};
+
+function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onScan }: LibraryRootsDialogProps) {
+  return (
+    <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" onClose={onClose}>
+      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold">素材目录</h2>
+          <p className="mt-1 text-sm text-muted">{roots.length} 个已挂载目录</p>
+        </div>
+        <DialogCloseButton onClick={onClose} />
+      </header>
+      <div className="grid min-h-0 gap-3 overflow-y-auto p-5">
+        {roots.length > 0 ? (
+          roots.map((root) => (
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-background px-3 py-3" key={root.id}>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{root.label}</p>
+                <p className="mt-1 truncate text-xs text-muted" title={root.absolutePath}>
+                  {root.absolutePath}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {root.lastScanAt ? `上次扫描：${new Date(root.lastScanAt).toLocaleString()}` : "尚未扫描"}
+                </p>
+              </div>
+              <Button icon={<RefreshCw size={15} />} disabled={isBusy} onClick={() => onScan(root.id)}>
+                扫描
+              </Button>
+            </div>
+          ))
+        ) : (
+          <p className="py-8 text-center text-sm text-muted">还没有已挂载目录。</p>
+        )}
+      </div>
+      <footer className="flex justify-end border-t border-border px-5 py-4">
+        <Button icon={<FolderTree size={16} />} disabled={isBusy} variant="primary" onClick={onAdd}>
+          添加素材目录
+        </Button>
+      </footer>
+    </AppDialog>
+  );
+}
+
 type ImportMenuItemProps = {
   icon: React.ReactNode;
   label: string;
@@ -10452,4 +10531,3 @@ function LogExportDialog({
     </AppDialog>
   );
 }
-

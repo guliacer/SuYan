@@ -6,6 +6,23 @@ export type PromptContentType = "image" | "video";
 export type RemoteImageStatus = "pending" | "downloaded";
 export type NetworkMaterialImportMode = "download" | "link" | "ask";
 
+/** Media copied into SuYan's managed images directory, or indexed in a user-owned directory. */
+export type ExternalMediaStorage = {
+  kind: "external";
+  rootId: string;
+  relativePath: string;
+};
+
+export type MediaStorage = "managed" | ExternalMediaStorage;
+
+export type LibraryRoot = {
+  id: string;
+  label: string;
+  absolutePath: string;
+  recursive: boolean;
+  lastScanAt: string | null;
+};
+
 export type VideoKeyframe = {
   imageFileName: string;
   atSec: number;
@@ -16,6 +33,8 @@ export type LibraryItem = {
   id: string;
   title: string;
   imageFileName: string;
+  /** Missing in persisted v1 files means managed for backward compatibility. */
+  mediaStorage?: MediaStorage;
   prompt: string;
   negativePrompt: string;
   category?: string | null;

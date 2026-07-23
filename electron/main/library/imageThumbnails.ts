@@ -1,9 +1,11 @@
 import { nativeImage } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { LibraryItem } from "../../../src/features/library/types/library";
 import { isAudioMediaFile, isVideoMediaFile } from "../../../src/features/library/utils/mediaFileTypes";
 import { logger } from "../appLogger";
 import { getImagePath, getImageThumbnailPath, getImageThumbnailsDir } from "./libraryPaths";
+import { resolveMediaAbsolutePath } from "./mediaPathResolver";
 import { extractVideoFrameToPath, probeVideoDuration } from "./videoFrameExtractor";
 import { waitForImportedVideoNormalization } from "./videoImportNormalizer";
 
@@ -55,8 +57,62 @@ export async function getFreshImageThumbnailPath(imageFileName: string): Promise
   return (await isFreshThumbnail(imagePath, thumbnailPath)) ? thumbnailPath : null;
 }
 
+export async function getFreshImageThumbnailPathForItem(
+  item: Pick<LibraryItem, "imageFileName" | "mediaStorage">,
+): Promise<string | null> {
+  const imagePath = await resolveMediaAbsolutePath(item);
+  const thumbnailPath = getImageThumbnailPath(item.imageFileName);
+  return (await isFreshThumbnail(imagePath, thumbnailPath)) ? thumbnailPath : null;
+}
+
+export async function getOrCreateImageThumbnailPathForItem(
+  item: Pick<LibraryItem, "imageFileName" | "mediaStorage">,
+): Promise<string> {
+  const existingTask = pendingThumbnails.get(item.imageFileName);
+
+  if (existingTask) {
+    return existingTask;
+  }
+
+  const task = resolveMediaAbsolutePath(item)
+    .then((imagePath) => createImageThumbnailPathFromSource(item.imageFileName, imagePath))
+    .finally(() => {
+      pendingThumbnails.delete(item.imageFileName);
+    });
+  pendingThumbnails.set(item.imageFileName, task);
+  return task;
+}
+
+export function warmLibraryItemThumbnails(
+  items: readonly Pick<LibraryItem, "imageFileName" | "mediaStorage">[],
+  limit = 80,
+): void {
+  const uniqueItems = Array.from(
+    new Map(items.filter((item) => item.imageFileName).map((item) => [item.imageFileName, item])).values(),
+  ).slice(0, limit);
+  let nextIndex = 0;
+
+  async function warmNext(): Promise<void> {
+    while (nextIndex < uniqueItems.length) {
+      const item = uniqueItems[nextIndex];
+      nextIndex += 1;
+      await getOrCreateImageThumbnailPathForItem(item).catch((error) => {
+        logger.warn("media-thumbnail", "warm:failed", {
+          file: item.imageFileName,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  }
+
+  void Promise.all(Array.from({ length: Math.min(backgroundThumbnailConcurrency, uniqueItems.length) }, () => warmNext()));
+}
+
 async function createImageThumbnailPath(imageFileName: string): Promise<string> {
-  const imagePath = getImagePath(imageFileName);
+  return createImageThumbnailPathFromSource(imageFileName, getImagePath(imageFileName));
+}
+
+async function createImageThumbnailPathFromSource(imageFileName: string, imagePath: string): Promise<string> {
   const thumbnailPath = getImageThumbnailPath(imageFileName);
 
   if (await isFreshThumbnail(imagePath, thumbnailPath)) {

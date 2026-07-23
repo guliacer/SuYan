@@ -25,6 +25,7 @@ describe("migrateLibrary", () => {
       items: [
         {
           ...library.items[0],
+          mediaStorage: "managed",
           category: null,
           generationMethod: null,
           promptType: "image",
@@ -41,6 +42,32 @@ describe("migrateLibrary", () => {
           videoFramesGeneratedAt: null,
         },
       ],
+    });
+  });
+
+  it("keeps external storage references while validating their shape", () => {
+    const library = migrateLibrary({
+      schemaVersion: 1,
+      updatedAt: "2026-07-04T00:00:00.000Z",
+      items: [
+        {
+          id: "external-1",
+          title: "外链样例",
+          imageFileName: "external-1.png",
+          mediaStorage: { kind: "external", rootId: "root-1", relativePath: "素材/样例.png" },
+          prompt: "柔光",
+          negativePrompt: "",
+          tags: [],
+          createdAt: "2026-07-04T00:00:00.000Z",
+          updatedAt: "2026-07-04T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(library.items[0].mediaStorage).toEqual({
+      kind: "external",
+      rootId: "root-1",
+      relativePath: "素材/样例.png",
     });
   });
 

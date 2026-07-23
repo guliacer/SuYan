@@ -33,6 +33,9 @@ const suyanApi: SuyanApi = {
   readLibraryViewSettings: () => invoke(IpcChannelName.LibraryViewSettingsRead),
   saveLibraryViewSettings: (settings: LibraryViewSettings) =>
     invoke(IpcChannelName.LibraryViewSettingsSave, settings),
+  listLibraryRoots: () => invoke(IpcChannelName.LibraryRootsList),
+  chooseAndScanLibraryRoot: () => invoke(IpcChannelName.LibraryRootChooseAndScan),
+  scanLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootScan, rootId),
   listStartupGalleryImages: () => invoke(IpcChannelName.StartupGalleryList),
   importStartupGalleryImages: () => invoke(IpcChannelName.StartupGalleryImport),
   importStartupGalleryImageFromClipboard: () => invoke(IpcChannelName.StartupGalleryImportFromClipboard),

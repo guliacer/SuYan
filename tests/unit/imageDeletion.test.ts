@@ -56,4 +56,17 @@ describe("getDeletableImageFileNames", () => {
       ),
     ).toEqual(["clip.mp4", "poster.jpg", "frame-1.jpg", "frame-2.jpg", "ref-a.jpg"]);
   });
+
+  it("never schedules user-owned external media for deletion", () => {
+    expect(
+      getDeletableImageFileNames(
+        [
+          makeItem("external", "external.png", {
+            mediaStorage: { kind: "external", rootId: "root-1", relativePath: "素材/外链.png" },
+          }),
+        ],
+        [],
+      ),
+    ).toEqual([]);
+  });
 });

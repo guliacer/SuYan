@@ -103,10 +103,16 @@ export function selectTargetItems(
   if (itemIds && itemIds.length > 0) {
     const idSet = new Set(itemIds);
 
-    return items.filter((item) => idSet.has(item.id) && !isVideoMediaFile(item.imageFileName));
+    return items.filter(
+      (item) => idSet.has(item.id) && isManagedMedia(item) && !isVideoMediaFile(item.imageFileName),
+    );
   }
 
-  return items.filter((item) => !isVideoMediaFile(item.imageFileName));
+  return items.filter((item) => isManagedMedia(item) && !isVideoMediaFile(item.imageFileName));
+}
+
+function isManagedMedia(item: LibraryItem): boolean {
+  return !item.mediaStorage || item.mediaStorage === "managed";
 }
 
 async function compressSingleImage(

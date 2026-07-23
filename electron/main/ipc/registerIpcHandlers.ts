@@ -51,7 +51,7 @@ import {
   importReferenceImageFromUrlForItem,
 } from "../library/imageFiles";
 import { generateVideoFramesForItem } from "../library/videoFrames";
-import { getOrCreateImageThumbnailPath } from "../library/imageThumbnails";
+import { getOrCreateImageThumbnailPath, getOrCreateImageThumbnailPathForItem } from "../library/imageThumbnails";
 import {
   exportPromptLexicon,
   importPromptLexicon,
@@ -59,6 +59,8 @@ import {
 } from "../library/lexiconFiles";
 import { getImageThumbnailPath } from "../library/libraryPaths";
 import { readLibraryFile, writeLibraryFile } from "../library/libraryStore";
+import { chooseAndAddLibraryRoot, readLibraryRoots } from "../library/libraryRoots";
+import { scanExternalLibraryRoot } from "../library/externalLibraryScanner";
 import { downloadRemoteMaterialForItem } from "../library/remoteMaterialDownload";
 import { readLibraryViewSettings, writeLibraryViewSettings } from "../library/viewSettingsStore";
 import {
@@ -134,6 +136,35 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.libraryViewSettingsSave, (_event, settings: LibraryViewSettings) =>
     handleResult("library:view-settings-save", () => writeLibraryViewSettings(settings)),
+  );
+  ipcMain.handle(ipcChannels.libraryRootsList, () => handleResult("library:roots-list", () => readLibraryRoots()));
+  ipcMain.handle(ipcChannels.libraryRootChooseAndScan, (event) =>
+    handleResult("library:root-choose-and-scan", async () => {
+      const selection = await chooseAndAddLibraryRoot(BrowserWindow.fromWebContents(event.sender));
+
+      if (!selection.root) {
+        return {
+          canceled: true,
+          library: await readLibraryFile(),
+          root: null,
+          importedCount: 0,
+          skippedCount: 0,
+        };
+      }
+
+      const result = await scanExternalLibraryRoot(selection.root.id, (progress) => {
+        event.sender.send(IpcChannelName.ImageImportProgress, progress);
+      });
+      return { ...result, canceled: false };
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootScan, (event, rootId: string) =>
+    handleResult("library:root-scan", async () => {
+      const result = await scanExternalLibraryRoot(rootId, (progress) => {
+        event.sender.send(IpcChannelName.ImageImportProgress, progress);
+      });
+      return { ...result, canceled: false };
+    }),
   );
   ipcMain.handle(ipcChannels.startupGalleryList, () =>
     handleResult("startup-gallery:list", () => listStartupGalleryImages()),
@@ -484,7 +515,11 @@ async function resolveImageThumbnailSource(imageFileName: string): Promise<{
   source: "thumbnail" | "original";
   src: string;
 }> {
-  const thumbnailPath = await getOrCreateImageThumbnailPath(imageFileName);
+  const library = await readLibraryFile();
+  const item = library.items.find((candidate) => candidate.imageFileName === imageFileName);
+  const thumbnailPath = item
+    ? await getOrCreateImageThumbnailPathForItem(item)
+    : await getOrCreateImageThumbnailPath(imageFileName);
   const source = thumbnailPath === getImageThumbnailPath(imageFileName) ? "thumbnail" : "original";
 
   return {
