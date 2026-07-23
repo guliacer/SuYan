@@ -69,6 +69,20 @@ export type ExternalLibraryRootRemoveData = ExternalLibraryValidationData & {
   removedItemCount: number;
 };
 
+export type ExternalLibraryWatchData = {
+  root: LibraryRoot;
+  roots: LibraryRoot[];
+};
+
+export type ExternalLibrarySyncData = {
+  library: LibraryFile;
+  roots: LibraryRoot[];
+  rootId: string;
+  importedCount: number;
+  missingCount: number;
+  renamedCount: number;
+};
+
 export type ImportImageBufferInput = {
   name: string;
   data: ArrayBuffer;
@@ -275,6 +289,8 @@ export type SuyanApi = {
   scanLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryScanData>>;
   remapLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRemapData>>;
   removeLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRootRemoveData>>;
+  setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<IpcResult<ExternalLibraryWatchData>>;
+  onExternalLibraryChanged: (callback: (data: ExternalLibrarySyncData) => void) => () => void;
   validateExternalLibrary: () => Promise<IpcResult<ExternalLibraryValidationData>>;
   listStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImage[]>>;
   importStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImportData>>;

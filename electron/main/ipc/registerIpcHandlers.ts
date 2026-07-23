@@ -66,6 +66,11 @@ import {
   remapExternalLibraryRoot,
   validateExternalLibrary,
 } from "../library/externalLibraryManager";
+import {
+  refreshExternalLibraryRootWatcher,
+  setExternalLibraryRootWatch,
+  stopExternalLibraryRootWatcher,
+} from "../library/externalLibraryWatcher";
 import { downloadRemoteMaterialForItem } from "../library/remoteMaterialDownload";
 import { readLibraryViewSettings, writeLibraryViewSettings } from "../library/viewSettingsStore";
 import {
@@ -172,12 +177,30 @@ export function registerIpcHandlers(): void {
     }),
   );
   ipcMain.handle(ipcChannels.libraryRootRemap, (event, rootId: string) =>
-    handleResult("library:root-remap", () =>
-      remapExternalLibraryRoot(rootId, BrowserWindow.fromWebContents(event.sender)),
-    ),
+    handleResult("library:root-remap", async () => {
+      await stopExternalLibraryRootWatcher(rootId);
+
+      try {
+        return await remapExternalLibraryRoot(rootId, BrowserWindow.fromWebContents(event.sender));
+      } finally {
+        await refreshExternalLibraryRootWatcher(rootId);
+      }
+    }),
   );
   ipcMain.handle(ipcChannels.libraryRootRemove, (_event, rootId: string) =>
-    handleResult("library:root-remove", () => detachExternalLibraryRoot(rootId)),
+    handleResult("library:root-remove", async () => {
+      await stopExternalLibraryRootWatcher(rootId);
+
+      try {
+        return await detachExternalLibraryRoot(rootId);
+      } catch (error) {
+        await refreshExternalLibraryRootWatcher(rootId);
+        throw error;
+      }
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootWatchSet, (_event, rootId: string, enabled: boolean) =>
+    handleResult("library:root-watch-set", () => setExternalLibraryRootWatch(rootId, enabled)),
   );
   ipcMain.handle(ipcChannels.libraryExternalValidate, () =>
     handleResult("library:external-validate", () => validateExternalLibrary()),

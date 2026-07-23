@@ -13,7 +13,14 @@ import type {
   PromptLexiconKind,
 } from "../../src/features/library/types/library";
 import type { ProxySettings } from "../../src/features/library/types/proxy";
-import type { ImportProgress, SuyanApi, CompressProgress, ModuleInstallProgress, IpcResult } from "../../src/types/suyanApi";
+import type {
+  CompressProgress,
+  ExternalLibrarySyncData,
+  ImportProgress,
+  IpcResult,
+  ModuleInstallProgress,
+  SuyanApi,
+} from "../../src/types/suyanApi";
 import { IpcChannelName } from "../shared/ipcChannels";
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
@@ -38,6 +45,13 @@ const suyanApi: SuyanApi = {
   scanLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootScan, rootId),
   remapLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootRemap, rootId),
   removeLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootRemove, rootId),
+  setLibraryRootWatch: (rootId: string, enabled: boolean) =>
+    invoke(IpcChannelName.LibraryRootWatchSet, rootId, enabled),
+  onExternalLibraryChanged: (callback) => {
+    const handler = (_event: unknown, data: unknown) => callback(data as ExternalLibrarySyncData);
+    ipcRenderer.on(IpcChannelName.LibraryExternalChanged, handler);
+    return () => ipcRenderer.removeListener(IpcChannelName.LibraryExternalChanged, handler);
+  },
   validateExternalLibrary: () => invoke(IpcChannelName.LibraryExternalValidate),
   listStartupGalleryImages: () => invoke(IpcChannelName.StartupGalleryList),
   importStartupGalleryImages: () => invoke(IpcChannelName.StartupGalleryImport),

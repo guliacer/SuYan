@@ -28,6 +28,10 @@ import { installGpuCrashGuard, watchWindowForGpuCrash } from "./app/gpuCrashGuar
 import { assertRuntimeIntegrityOrExit } from "./app/runtimeIntegrity";
 import { startPerformanceMonitor } from "./performance/performanceMonitor";
 import { readWindowState, watchWindowState } from "./window/windowStateStore";
+import {
+  restoreExternalLibraryWatchers,
+  shutdownExternalLibraryWatchers,
+} from "./library/externalLibraryWatcher";
 
 app.setName("素言");
 
@@ -454,6 +458,13 @@ app.whenReady().then(async () => {
 
   await createWindow();
 
+  try {
+    await restoreExternalLibraryWatchers();
+    logStartupEvent("external-library-watchers:ready");
+  } catch (error) {
+    logger.warn("external-library", "watch:restore-failed", { message: String(error) });
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createWindow();
@@ -465,6 +476,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  void shutdownExternalLibraryWatchers();
 });
 
 async function findLibraryItemByImageFileName(imageFileName: string) {

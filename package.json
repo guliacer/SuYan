@@ -25,6 +25,7 @@
     "check:empty-shell": "node scripts/check-empty-shell.cjs"
   },
   "dependencies": {
+    "chokidar": "4.0.3",
     "ffmpeg-static": "5.2.0",
     "jszip": "3.10.1",
     "lucide-react": "1.23.0",

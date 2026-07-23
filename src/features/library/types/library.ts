@@ -25,6 +25,8 @@ export type LibraryRoot = {
   label: string;
   absolutePath: string;
   recursive: boolean;
+  /** Missing in legacy roots files means watching is disabled. */
+  watchEnabled?: boolean;
   lastScanAt: string | null;
   status?: ExternalMediaStatus;
 };

@@ -68,6 +68,7 @@ export async function chooseAndAddLibraryRoot(ownerWindow?: BrowserWindow | null
     label: path.basename(absolutePath) || absolutePath,
     absolutePath,
     recursive: true,
+    watchEnabled: false,
     lastScanAt: null,
   };
   await writeLibraryRoots([...roots, root]);
@@ -155,6 +156,7 @@ function isRootsFile(input: unknown): input is LibraryRootsFile {
         typeof root.label === "string" &&
         typeof root.absolutePath === "string" &&
         typeof root.recursive === "boolean" &&
+        (typeof root.watchEnabled === "boolean" || root.watchEnabled === undefined) &&
         (typeof root.lastScanAt === "string" || root.lastScanAt === null),
     )
   );
@@ -166,6 +168,7 @@ function normalizeRoot(root: LibraryRoot): LibraryRoot {
     label: root.label.trim() || path.basename(root.absolutePath) || root.absolutePath,
     absolutePath: path.resolve(root.absolutePath),
     recursive: root.recursive !== false,
+    watchEnabled: root.watchEnabled === true,
     lastScanAt: typeof root.lastScanAt === "string" ? root.lastScanAt : null,
   };
 }

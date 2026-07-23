@@ -171,6 +171,7 @@ type LibraryState = {
   importImages: () => Promise<void>;
   addAndScanLibraryRoot: () => Promise<void>;
   scanLibraryRoot: (rootId: string) => Promise<void>;
+  setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<void>;
   remapLibraryRoot: (rootId: string) => Promise<void>;
   removeLibraryRoot: (rootId: string) => Promise<void>;
   validateExternalLibrary: () => Promise<void>;
@@ -220,6 +221,7 @@ type LibraryState = {
 
 let themeSwitchRevision = 0;
 let themePersistenceQueue: Promise<void> = Promise.resolve();
+let isExternalLibraryWatchSubscribed = false;
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   items: [],
@@ -280,6 +282,32 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const loadStartedAt = performance.now();
     logRendererStartupEvent("library-load:start");
     set({ isLoading: true, statusMessage: null });
+
+    if (!isExternalLibraryWatchSubscribed) {
+      isExternalLibraryWatchSubscribed = true;
+      window.suyanApi.onExternalLibraryChanged((data) => {
+        const previousItemIds = new Set(get().items.map((item) => item.id));
+        setLibrary(data.library, set, get);
+        set({ libraryRoots: data.roots });
+
+        if (data.importedCount > 0) {
+          markRecentImportPins(set, get, previousItemIds);
+          scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        }
+
+        const changes = [
+          data.importedCount > 0 ? `新增 ${data.importedCount} 个` : null,
+          data.renamedCount > 0 ? `识别重命名 ${data.renamedCount} 个` : null,
+          data.missingCount > 0 ? `标记缺失 ${data.missingCount} 个` : null,
+        ].filter((entry): entry is string => Boolean(entry));
+        set({
+          statusMessage: infoStatus(
+            changes.length > 0 ? `目录监视已同步：${changes.join("，")}。` : "目录监视已同步。",
+          ),
+        });
+      });
+    }
+
     const [libraryResult, viewSettingsResult, rootsResult] = await Promise.all([
       window.suyanApi.readLibrary(),
       window.suyanApi.readLibraryViewSettings(),
@@ -1108,6 +1136,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ statusMessage: successStatus(`扫描完成，新增 ${result.data.importedCount} 个素材，已跳过 ${result.data.skippedCount} 个。`) });
     } finally {
       unsubscribe();
+      set({ isBusy: false });
+    }
+  },
+
+  setLibraryRootWatch: async (rootId, enabled) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    set({
+      isBusy: true,
+      statusMessage: progressStatus(`${enabled ? "正在开启" : "正在关闭"} ${root?.label ?? "素材目录"} 监视...`),
+    });
+
+    try {
+      const result = await window.suyanApi.setLibraryRootWatch(rootId, enabled);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      set({
+        libraryRoots: result.data.roots,
+        statusMessage: successStatus(enabled ? "目录监视已开启。" : "目录监视已关闭。"),
+      });
+    } finally {
       set({ isBusy: false });
     }
   },

@@ -30,6 +30,67 @@ export type ExternalScanResult = {
 
 const supportedExtensions = new Set<string>(supportedImportVisualMediaExtensions.map((extension) => `.${extension}`));
 
+export function isSupportedExternalMediaPath(filePath: string): boolean {
+  return supportedExtensions.has(path.extname(filePath).toLowerCase());
+}
+
+export async function createExternalLibraryItem(
+  root: LibraryRoot,
+  absolutePath: string,
+  now = new Date().toISOString(),
+): Promise<LibraryItem> {
+  const rootPath = path.resolve(root.absolutePath);
+  const resolvedPath = path.resolve(absolutePath);
+  const relativePath = path.relative(rootPath, resolvedPath);
+
+  if (
+    !relativePath ||
+    path.isAbsolute(relativePath) ||
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`)
+  ) {
+    throw new AppError("EXTERNAL_MEDIA_PATH_INVALID", "外链素材路径不在已注册目录内。");
+  }
+
+  const extension = path.extname(resolvedPath).toLowerCase();
+  const id = randomUUID();
+  const draft = await readPngMetadataDraft(resolvedPath);
+  const fileStats = await fs.stat(resolvedPath);
+  const imageFileName = `${id}${extension}`;
+
+  return {
+    id,
+    title: draft.title.trim() || path.basename(resolvedPath, extension),
+    imageFileName,
+    mediaStorage: {
+      kind: "external",
+      rootId: root.id,
+      relativePath,
+      size: fileStats.size,
+      mtimeMs: fileStats.mtimeMs,
+      status: "available",
+    },
+    prompt: draft.prompt,
+    negativePrompt: draft.negativePrompt,
+    category: null,
+    tags: draft.tags,
+    generationMethod: draft.generationMethod,
+    promptType: normalizePromptType(undefined, {
+      imageFileName,
+      prompt: draft.prompt,
+      tags: draft.tags,
+      generationMethod: draft.generationMethod ?? "",
+      title: draft.title,
+    }),
+    sourceUrl: null,
+    authorName: null,
+    authorUrl: null,
+    authorAvatarUrl: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 /** Indexes files in a registered root. It intentionally never writes the source media files. */
 export async function scanExternalLibraryRoot(
   rootId: string,
@@ -72,42 +133,7 @@ export async function scanExternalLibraryRoot(
       continue;
     }
 
-    const extension = path.extname(absolutePath).toLowerCase();
-    const id = randomUUID();
-    const draft = await readPngMetadataDraft(absolutePath);
-    const fileStats = await fs.stat(absolutePath);
-    const imageFileName = `${id}${extension}`;
-    items.push({
-      id,
-      title: draft.title.trim() || path.basename(absolutePath, extension),
-      imageFileName,
-      mediaStorage: {
-        kind: "external",
-        rootId: root.id,
-        relativePath,
-        size: fileStats.size,
-        mtimeMs: fileStats.mtimeMs,
-        status: "available",
-      },
-      prompt: draft.prompt,
-      negativePrompt: draft.negativePrompt,
-      category: null,
-      tags: draft.tags,
-      generationMethod: draft.generationMethod,
-      promptType: normalizePromptType(undefined, {
-        imageFileName,
-        prompt: draft.prompt,
-        tags: draft.tags,
-        generationMethod: draft.generationMethod ?? "",
-        title: draft.title,
-      }),
-      sourceUrl: null,
-      authorName: null,
-      authorUrl: null,
-      authorAvatarUrl: null,
-      createdAt: now,
-      updatedAt: now,
-    });
+    items.push(await createExternalLibraryItem(root, absolutePath, now));
   }
 
   const nextLibrary = items.length > 0 ? await appendLibraryItems(items) : library;
@@ -139,7 +165,7 @@ async function collectMediaPaths(rootPath: string, recursive: boolean): Promise<
         continue;
       }
 
-      if (entry.isFile() && supportedExtensions.has(path.extname(entry.name).toLowerCase())) {
+      if (entry.isFile() && isSupportedExternalMediaPath(entry.name)) {
         paths.push(entryPath);
       }
     }

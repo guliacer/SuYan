@@ -60,6 +60,7 @@ Browse in everyday order. Each section lists capabilities, then shows a demo GIF
 ### 📥 Import
 
 - **Import images** — batch add local files
+- **Mount folders** — index existing image / video folders without copying the source media
 - **Paste** — clipboard images go straight in
 - **Import documents** — extract images and prompts from Word
 - **Import shares** — ZIP packages or shared web links
@@ -67,6 +68,8 @@ Browse in everyday order. Each section lists capabilities, then shows a demo GIF
 #### Local import
 
 Left sidebar **Import** → **Import images**, multi-select local files; paste and Word import also work.
+
+Mounted folders can be watched individually from **Material folders**; watching is off by default. While enabled, new media is indexed automatically, removals are marked missing without deleting either the index or source files, and uniquely identifiable renames update the stored relative path. Turning watching off stops automatic synchronization.
 
 <img src="./photo/本地素材导入.gif" alt="Local import" width="860" />
 

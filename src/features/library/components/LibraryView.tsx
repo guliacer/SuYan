@@ -541,6 +541,7 @@ export function LibraryView() {
   const importImages = useLibraryStore((state) => state.importImages);
   const addAndScanLibraryRoot = useLibraryStore((state) => state.addAndScanLibraryRoot);
   const scanLibraryRoot = useLibraryStore((state) => state.scanLibraryRoot);
+  const setLibraryRootWatch = useLibraryStore((state) => state.setLibraryRootWatch);
   const remapLibraryRoot = useLibraryStore((state) => state.remapLibraryRoot);
   const removeLibraryRoot = useLibraryStore((state) => state.removeLibraryRoot);
   const validateExternalLibrary = useLibraryStore((state) => state.validateExternalLibrary);
@@ -1570,6 +1571,7 @@ function resetFilters() {
           onRemap={(rootId) => void remapLibraryRoot(rootId)}
           onRemove={(rootId) => void removeLibraryRoot(rootId)}
           onScan={(rootId) => void scanLibraryRoot(rootId)}
+          onWatchChange={(rootId, enabled) => void setLibraryRootWatch(rootId, enabled)}
           onValidate={() => void validateExternalLibrary()}
         />
       ) : null}
@@ -10205,10 +10207,21 @@ type LibraryRootsDialogProps = {
   onRemap: (rootId: string) => void;
   onRemove: (rootId: string) => void;
   onScan: (rootId: string) => void;
+  onWatchChange: (rootId: string, enabled: boolean) => void;
   onValidate: () => void;
 };
 
-function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onRemap, onRemove, onScan, onValidate }: LibraryRootsDialogProps) {
+function LibraryRootsDialog({
+  isBusy,
+  roots,
+  onAdd,
+  onClose,
+  onRemap,
+  onRemove,
+  onScan,
+  onWatchChange,
+  onValidate,
+}: LibraryRootsDialogProps) {
   return (
     <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" onClose={onClose}>
       <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
@@ -10234,6 +10247,27 @@ function LibraryRootsDialog({ isBusy, roots, onAdd, onClose, onRemap, onRemove, 
                 <p className="mt-1 text-xs text-muted">
                   {root.lastScanAt ? `上次扫描：${new Date(root.lastScanAt).toLocaleString()}` : "尚未扫描"}
                 </p>
+                <div className="mt-2 flex min-h-6 items-center gap-2">
+                  <button
+                    aria-checked={root.watchEnabled === true}
+                    aria-label={`监视 ${root.label}`}
+                    className={`relative h-5 w-9 shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                      root.watchEnabled ? "bg-primary" : "bg-border"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    disabled={isBusy || (root.status === "missing" && !root.watchEnabled)}
+                    role="switch"
+                    type="button"
+                    onClick={() => onWatchChange(root.id, !root.watchEnabled)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-0 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform ${
+                        root.watchEnabled ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs text-muted">监视此目录</span>
+                </div>
               </div>
               <div className="flex items-center gap-1">
                 <Button aria-label="重新扫描" className="size-10 px-0" icon={<RefreshCw size={15} />} title="重新扫描" disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
