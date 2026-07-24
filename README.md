@@ -200,7 +200,7 @@ Key 只存在本机并加密保存，不会打进安装包或仓库。
 ### 安装步骤
 
 1. **下载** [GitHub Releases](https://github.com/guliacer/SuYan/releases) 中的最新安装包（如 `SuYan-Setup-x.y.z.exe`），或便携 ZIP 解压后的 `素言.exe`  
-   （软件本身免费；首版为 `v0.1.0`，后续版本独立发布，互不覆盖。若别处收费，请 [举报](https://github.com/guliacer/SuYan/issues)）
+   （软件本身免费；当前版本为 `v0.1.1`，首版 `v0.1.0` 仍独立保留、互不覆盖。若别处收费，请 [举报](https://github.com/guliacer/SuYan/issues)）
 2. **安装或打开** 按向导安装，或直接跑便携版
 3. **导入素材** 左侧「导入素材」：图片、粘贴、文档或分享包都行  
    （可对照上方 [本地导入](#本地导入) / [网络导入](#网络导入)）

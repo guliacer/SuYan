@@ -194,7 +194,7 @@ Six default splash images ship with the app; replace them with your own for next
 ### Install
 
 1. **Download** the latest installer from [GitHub Releases](https://github.com/guliacer/SuYan/releases) (e.g. `SuYan-Setup-x.y.z.exe`), or portable ZIP then run `素言.exe`  
-   (Free software. First release is `v0.1.0`; later versions ship separately and do not overwrite older assets. Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues).)
+   (Free software. Current version is `v0.1.1`; first release `v0.1.0` remains separate and is not overwritten. Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues).)
 2. **Install or open** via the wizard, or run the portable build
 3. **Import** images, paste, documents, or share packages from the left sidebar  
    (see [Local import](#local-import) / [Network import](#network-import))
