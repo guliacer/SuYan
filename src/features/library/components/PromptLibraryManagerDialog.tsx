@@ -11,6 +11,7 @@ import { ImageCompressPanel } from "./batch/ImageCompressPanel";
 import { VideoCompressPanel } from "./batch/VideoCompressPanel";
 import { hasBuiltinModuleCapability } from "../utils/moduleRegistry";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { prioritizeMissingMediaStatusItems } from "../utils/externalMediaStatus";
 import { normalizePromptText } from "../utils/normalizePromptText";
 import { groupPromptImages, type PromptImageGroup } from "../utils/promptImageGroups";
 import type { PromptCardData } from "../utils/promptFilters";
@@ -96,7 +97,10 @@ export function PromptLibraryManagerView({
     variant === "dialog"
       ? "flex min-h-0 flex-1 flex-col"
       : "relative flex min-h-[calc(100vh-5.5rem)] flex-col overflow-hidden rounded-lg border border-border/70 bg-panel shadow-elevated";
-  const promptGroups = useMemo(() => groupPromptImages(items, []), [items]);
+  const promptGroups = useMemo(
+    () => groupPromptImages(prioritizeMissingMediaStatusItems(items), []),
+    [items],
+  );
   const moduleState = useLibraryStore((state) => state.moduleState);
   const canUseImageCompression = hasBuiltinModuleCapability("image-compression", moduleState);
   const canUseVideoCompression = hasBuiltinModuleCapability("video-compression", moduleState);

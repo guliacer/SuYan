@@ -7,6 +7,7 @@ import type {
   VideoKeyframe,
 } from "../types/library";
 import { resolveGenerationModelLabel } from "./generationModels";
+import { prioritizeMissingMediaStatusItems } from "./externalMediaStatus";
 import { normalizeNsfwRating } from "./nsfwRating";
 import { isGenericPromptLabel, removeCategoryFromTags, suggestPromptCategories } from "./promptAnalysis";
 import { normalizePromptType } from "./promptType";
@@ -169,7 +170,7 @@ export function filterPromptCards(cards: PromptCardData[], options: PromptFilter
     options.randomSeed,
   );
 
-  return pinPromptCards(sortedCards, options.pinnedItemIds);
+  return pinPromptCards(prioritizeMissingMediaStatusItems(sortedCards), options.pinnedItemIds);
 }
 
 function buildPromptSearchText(input: {
