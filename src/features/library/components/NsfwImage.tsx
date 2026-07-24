@@ -100,18 +100,19 @@ export function NsfwImage({
   const imageLoading = loading;
   const isRevealed = revealed ?? localIsRevealed;
   const shouldBlur = blurNsfwImages && isNsfwItem(image) && !isRevealed;
-  const shouldDisplayImage = isImageLoaded;
-  const hasVisibleBase = !isVideoMedia && Boolean(baseSrc) && baseSrc !== imageSrc;
-  const shouldShowPlaceholder = !hasImage || hasImageFailed || (!shouldDisplayImage && !hasVisibleBase);
+  const shouldDisplayImage = isImageLoaded && !isMissing;
+  const hasVisibleBase = !isMissing && !isVideoMedia && Boolean(baseSrc) && baseSrc !== imageSrc;
+  const shouldShowPlaceholder = isMissing || !hasImage || hasImageFailed || (!shouldDisplayImage && !hasVisibleBase);
 
   useEffect(() => {
     setLocalIsRevealed(false);
     setHasImageFailed(false);
 
-    if (!hasImage) {
+    if (!hasImage || isMissing) {
       setResolvedThumbnailSrc("");
       setThumbnailRetryIndex(0);
       setIsImageLoaded(false);
+      setBaseSrc("");
       return;
     }
 
@@ -133,7 +134,7 @@ export function NsfwImage({
     setResolvedThumbnailSrc(nextThumbnailSrc);
     setThumbnailRetryIndex(0);
     setIsImageLoaded(Boolean(nextThumbnailSrc && isImageSrcLoaded(nextThumbnailSrc)));
-  }, [directThumbnailSrc, hasImage, image.imageFileName, renderAsVideo, originalImageSrc, source]);
+  }, [directThumbnailSrc, hasImage, image.imageFileName, isMissing, renderAsVideo, originalImageSrc, source]);
 
   useEffect(() => {
     return () => {
@@ -225,7 +226,10 @@ export function NsfwImage({
   }
 
   return (
-    <div className={`relative grid overflow-hidden bg-background [&>*]:col-start-1 [&>*]:row-start-1 ${className}`} style={style}>
+    <div
+      className={`relative grid overflow-hidden bg-background [&>*]:col-start-1 [&>*]:row-start-1 ${isMissing ? "min-h-44" : ""} ${className}`}
+      style={style}
+    >
       {hasVisibleBase && !hasImageFailed ? (
         <img
           aria-hidden="true"
@@ -271,12 +275,12 @@ export function NsfwImage({
       ) : null}
       {shouldShowPlaceholder ? (
         <div
-          className={`absolute inset-0 flex h-full w-full items-center justify-center bg-background text-muted ${placeholderClassName}`}
+          className={`${isMissing ? "relative min-h-44 w-full" : "absolute inset-0 h-full w-full"} flex items-center justify-center bg-background text-muted ${placeholderClassName}`}
         >
           {isMissing ? (
-            <span className="flex flex-col items-center gap-2 text-center">
-              <ImageOff size={38} />
-              <span className="text-xs font-medium">源文件缺失</span>
+            <span className="flex flex-col items-center gap-2 px-3 py-6 text-center">
+              <ImageOff className="text-danger/80" size={36} />
+              <span className="text-xs font-semibold text-danger">源文件缺失</span>
             </span>
           ) : isVideoMedia ? (
             <Play size={42} />

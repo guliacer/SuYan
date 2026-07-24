@@ -175,6 +175,7 @@ type LibraryState = {
   setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<void>;
   remapLibraryRoot: (rootId: string) => Promise<void>;
   removeLibraryRoot: (rootId: string) => Promise<void>;
+  purgeMissingLibraryRootItems: (rootId: string) => Promise<void>;
   validateExternalLibrary: () => Promise<void>;
   importImageBuffers: (images: ImportImageBufferInput[]) => Promise<void>;
   importImageFilesForItem: (itemId: string) => Promise<string | null>;
@@ -1212,6 +1213,37 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({
         libraryRoots: result.data.roots,
         statusMessage: infoStatus(`已移除挂载和 ${result.data.removedItemCount} 条索引，原文件未删除。`),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  purgeMissingLibraryRootItems: async (rootId) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    set({
+      isBusy: true,
+      statusMessage: progressStatus(`正在清理 ${root?.label ?? "素材目录"} 的缺失索引...`),
+    });
+
+    try {
+      const result = await window.suyanApi.purgeMissingLibraryRootItems(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.removedItemCount > 0
+            ? successStatus(`已清理 ${result.data.removedItemCount} 条缺失索引（原文件未删除）。`)
+            : infoStatus("该目录下没有可清理的缺失索引。"),
       });
     } finally {
       set({ isBusy: false });

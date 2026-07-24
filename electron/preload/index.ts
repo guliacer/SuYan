@@ -45,6 +45,7 @@ const suyanApi: SuyanApi = {
   scanLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootScan, rootId),
   remapLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootRemap, rootId),
   removeLibraryRoot: (rootId: string) => invoke(IpcChannelName.LibraryRootRemove, rootId),
+  purgeMissingLibraryRootItems: (rootId: string) => invoke(IpcChannelName.LibraryRootPurgeMissing, rootId),
   setLibraryRootWatch: (rootId: string, enabled: boolean) =>
     invoke(IpcChannelName.LibraryRootWatchSet, rootId, enabled),
   onExternalLibraryChanged: (callback) => {

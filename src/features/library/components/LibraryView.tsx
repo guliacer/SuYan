@@ -26,6 +26,7 @@ import {
   Clipboard,
   Copy,
   Download,
+  Eraser,
   Eye,
   ExternalLink,
   FileText,
@@ -544,6 +545,7 @@ export function LibraryView() {
   const setLibraryRootWatch = useLibraryStore((state) => state.setLibraryRootWatch);
   const remapLibraryRoot = useLibraryStore((state) => state.remapLibraryRoot);
   const removeLibraryRoot = useLibraryStore((state) => state.removeLibraryRoot);
+  const purgeMissingLibraryRootItems = useLibraryStore((state) => state.purgeMissingLibraryRootItems);
   const validateExternalLibrary = useLibraryStore((state) => state.validateExternalLibrary);
   const importImageFilesForItem = useLibraryStore((state) => state.importImageFilesForItem);
   const generateVideoFrames = useLibraryStore((state) => state.generateVideoFrames);
@@ -1568,6 +1570,7 @@ function resetFilters() {
           roots={libraryRoots}
           onAdd={() => void addAndScanLibraryRoot()}
           onClose={() => setIsLibraryRootsOpen(false)}
+          onPurgeMissing={(rootId) => void purgeMissingLibraryRootItems(rootId)}
           onRemap={(rootId) => void remapLibraryRoot(rootId)}
           onRemove={(rootId) => void removeLibraryRoot(rootId)}
           onScan={(rootId) => void scanLibraryRoot(rootId)}
@@ -10204,6 +10207,7 @@ type LibraryRootsDialogProps = {
   roots: readonly LibraryRoot[];
   onAdd: () => void;
   onClose: () => void;
+  onPurgeMissing: (rootId: string) => void;
   onRemap: (rootId: string) => void;
   onRemove: (rootId: string) => void;
   onScan: (rootId: string) => void;
@@ -10216,6 +10220,7 @@ function LibraryRootsDialog({
   roots,
   onAdd,
   onClose,
+  onPurgeMissing,
   onRemap,
   onRemove,
   onScan,
@@ -10272,6 +10277,22 @@ function LibraryRootsDialog({
               <div className="flex items-center gap-1">
                 <Button aria-label="重新扫描" className="size-10 px-0" icon={<RefreshCw size={15} />} title="重新扫描" disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
                 <Button aria-label="重新定位" className="size-10 px-0" icon={<FolderTree size={15} />} title="重新定位" disabled={isBusy} onClick={() => onRemap(root.id)} />
+                <Button
+                  aria-label="清理该目录下已删除文件的提示词缓存"
+                  className="size-10 px-0"
+                  icon={<Eraser size={15} />}
+                  title="清理该目录下已删除文件的提示词缓存"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `清理“${root.label}”下已删除文件的提示词索引？仅删除库内缺失索引与缩略图缓存，不会删除磁盘上仍存在的原文件。`,
+                      )
+                    ) {
+                      onPurgeMissing(root.id);
+                    }
+                  }}
+                />
                 <Button
                   aria-label="移除挂载"
                   className="size-10 px-0"

@@ -67,6 +67,39 @@ export async function detachExternalLibraryRoot(
   };
 }
 
+/** Removes library indexes (and app thumbnail cache) for missing external files under one root. Never deletes source media. */
+export async function purgeMissingExternalLibraryItems(
+  rootId: string,
+): Promise<ExternalValidationResult & { removedItemCount: number }> {
+  const validation = await validateExternalLibrary();
+  const missingItemIds = validation.library.items.flatMap((item) => {
+    const storage = item.mediaStorage;
+    return storage &&
+      storage !== "managed" &&
+      storage.rootId === rootId &&
+      storage.status === "missing"
+      ? [item.id]
+      : [];
+  });
+
+  if (missingItemIds.length === 0) {
+    return {
+      ...validation,
+      removedItemCount: 0,
+    };
+  }
+
+  // deleteImages=true only removes app-owned cache/managed files; external sources are not unlinked.
+  const deleteResult = await deleteLibraryItems(missingItemIds, true);
+  const nextValidation = await validateExternalLibrary();
+
+  return {
+    ...nextValidation,
+    library: deleteResult.library,
+    removedItemCount: deleteResult.deletedCount,
+  };
+}
+
 function countMissingItems(library: LibraryFile): number {
   return library.items.filter((item) => {
     const storage = item.mediaStorage;

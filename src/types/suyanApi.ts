@@ -69,6 +69,10 @@ export type ExternalLibraryRootRemoveData = ExternalLibraryValidationData & {
   removedItemCount: number;
 };
 
+export type ExternalLibraryPurgeMissingData = ExternalLibraryValidationData & {
+  removedItemCount: number;
+};
+
 export type ExternalLibraryWatchData = {
   root: LibraryRoot;
   roots: LibraryRoot[];
@@ -289,6 +293,7 @@ export type SuyanApi = {
   scanLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryScanData>>;
   remapLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRemapData>>;
   removeLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRootRemoveData>>;
+  purgeMissingLibraryRootItems: (rootId: string) => Promise<IpcResult<ExternalLibraryPurgeMissingData>>;
   setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<IpcResult<ExternalLibraryWatchData>>;
   onExternalLibraryChanged: (callback: (data: ExternalLibrarySyncData) => void) => () => void;
   validateExternalLibrary: () => Promise<IpcResult<ExternalLibraryValidationData>>;

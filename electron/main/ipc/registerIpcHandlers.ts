@@ -64,6 +64,7 @@ import { scanExternalLibraryRoot } from "../library/externalLibraryScanner";
 import {
   detachExternalLibraryRoot,
   remapExternalLibraryRoot,
+  purgeMissingExternalLibraryItems,
   validateExternalLibrary,
 } from "../library/externalLibraryManager";
 import {
@@ -198,6 +199,9 @@ export function registerIpcHandlers(): void {
         throw error;
       }
     }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootPurgeMissing, (_event, rootId: string) =>
+    handleResult("library:root-purge-missing", () => purgeMissingExternalLibraryItems(rootId)),
   );
   ipcMain.handle(ipcChannels.libraryRootWatchSet, (_event, rootId: string, enabled: boolean) =>
     handleResult("library:root-watch-set", () => setExternalLibraryRootWatch(rootId, enabled)),
