@@ -2901,7 +2901,7 @@ function LibrarySidebar({
                     style={importMenuStyle}
                   >
                     <ImportMenuItem icon={<ImagePlus size={16} />} label="导入图片" onClick={onImportImages} />
-                    <ImportMenuItem icon={<FolderTree size={16} />} label="添加素材目录" onClick={onAddLibraryDirectory} />
+                    <ImportMenuItem icon={<FolderTree size={16} />} label="添加目录" onClick={onAddLibraryDirectory} />
                     <ImportMenuItem icon={<Clipboard size={16} />} label="粘贴导入" onClick={onImportClipboardImage} />
                     <ImportMenuItem icon={<FileText size={16} />} label="导入文档" onClick={onImportWordDocument} />
                     <ImportMenuItem icon={<Download size={16} />} label="导入分享" onClick={onImportZip} />
@@ -10297,7 +10297,7 @@ function LibraryRootsDialog({
           校验全部
         </Button>
         <Button icon={<FolderTree size={16} />} disabled={isBusy} variant="primary" onClick={onAdd}>
-          添加素材目录
+          添加目录
         </Button>
       </footer>
     </AppDialog>

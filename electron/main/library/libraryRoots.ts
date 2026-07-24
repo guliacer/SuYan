@@ -47,8 +47,8 @@ export async function chooseAndAddLibraryRoot(ownerWindow?: BrowserWindow | null
   canceled: boolean;
 }> {
   const result = ownerWindow
-    ? await dialog.showOpenDialog(ownerWindow, { title: "添加素材目录", properties: ["openDirectory"] })
-    : await dialog.showOpenDialog({ title: "添加素材目录", properties: ["openDirectory"] });
+    ? await dialog.showOpenDialog(ownerWindow, { title: "添加目录", properties: ["openDirectory"] })
+    : await dialog.showOpenDialog({ title: "添加目录", properties: ["openDirectory"] });
 
   if (result.canceled || result.filePaths.length === 0) {
     return { root: null, added: false, canceled: true };
