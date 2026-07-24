@@ -71,6 +71,8 @@ Left sidebar **Import** → **Import images**, multi-select local files; paste a
 
 Mounted folders can be watched individually from **Material folders**; watching is off by default. While enabled, new media is indexed automatically, removals are marked missing without deleting either the index or source files, and uniquely identifiable renames update the stored relative path. Turning watching off stops automatic synchronization.
 
+If files were deleted on disk and only **source missing** indexes remain: open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and app thumbnail cache for that root only — it does **not** delete remaining files on disk or affect other folders.
+
 <img src="./photo/本地素材导入.gif" alt="Local import" width="860" />
 
 #### Network import
@@ -218,6 +220,13 @@ Send evidence to [Issues](https://github.com/guliacer/SuYan/issues). Verified ca
 <summary><b>Where is my library? Is it uploaded?</b></summary>
 
 **A:** On your machine by default. Browse and edit offline. Network is used only when you call remote AI, parse share links, or download remote images.
+
+</details>
+
+<details>
+<summary><b>Source files were deleted; library still shows "source missing". How do I clean it?</b></summary>
+
+**A:** Open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and thumbnail cache for that root only — it does **not** delete files that still exist on disk. See [Import](#-import) / mounted folders notes above.
 
 </details>
 
