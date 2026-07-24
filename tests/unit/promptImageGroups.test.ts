@@ -50,6 +50,27 @@ describe("promptImageGroups", () => {
     expect(group.primaryItem.id).toBe("old");
   });
 
+  it("uses a missing external image as the group primary so its state stays visible", () => {
+    const cards = [
+      makeItem({ id: "available", createdAt: "2026-07-03T00:00:00.000Z" }),
+      makeItem({
+        id: "missing",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        mediaStorage: {
+          kind: "external",
+          rootId: "root-1",
+          relativePath: "missing.png",
+          status: "missing",
+        },
+      }),
+    ].map(toPromptCardData);
+
+    const [group] = groupPromptImages(cards, []);
+
+    expect(group.primaryItem.id).toBe("missing");
+    expect(group.items.map((item) => item.id)).toEqual(["missing", "available"]);
+  });
+
   it("uses the actual video file as the primary item in video prompt groups", () => {
     const cards = [
       makeItem({

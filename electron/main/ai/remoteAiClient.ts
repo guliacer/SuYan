@@ -21,7 +21,7 @@ import {
   photographyCategoryLabels,
 } from "../../../src/features/library/utils/photographyCategories";
 import { AppError } from "../ipc/errors";
-import { getImagePath } from "../library/libraryPaths";
+import { resolveLibraryMediaPath } from "../library/mediaLookup";
 
 const requestTimeoutMs = 20_000;
 const analysisRequestTimeoutMs = 24_000;
@@ -1129,7 +1129,7 @@ async function readPayloadImageDataUrl(
   }
 
   try {
-    const imageBuffer = await fs.readFile(getImagePath(imageFileName));
+    const imageBuffer = await fs.readFile(await resolveLibraryMediaPath(imageFileName));
     const policy = resolveVisionImagePayloadPolicy(imageBuffer.byteLength, options);
 
     if (imageBuffer.byteLength > maxVisionImageBytes) {

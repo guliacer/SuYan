@@ -1,4 +1,4 @@
-import type { LibraryFile, LibraryItem, VideoKeyframe } from "../types/library";
+import type { LibraryFile, LibraryItem, MediaStorage, VideoKeyframe } from "../types/library";
 import { normalizeNsfwRating } from "./nsfwRating";
 import { normalizePromptType } from "./promptType";
 
@@ -35,6 +35,7 @@ function isLibraryItem(input: unknown): input is LibraryItem {
     typeof input.id === "string" &&
     typeof input.title === "string" &&
     typeof input.imageFileName === "string" &&
+    isOptionalMediaStorage(input.mediaStorage) &&
     typeof input.prompt === "string" &&
     typeof input.negativePrompt === "string" &&
     Array.isArray(input.tags) &&
@@ -63,6 +64,7 @@ function normalizeItem(item: LibraryItem): LibraryItem {
     id: item.id,
     title: item.title,
     imageFileName: item.imageFileName,
+    mediaStorage: normalizeMediaStorage(item.mediaStorage),
     prompt: item.prompt,
     negativePrompt: item.negativePrompt,
     category: normalizeOptionalString(item.category),
@@ -83,6 +85,39 @@ function normalizeItem(item: LibraryItem): LibraryItem {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
+}
+
+function isOptionalMediaStorage(input: unknown): boolean {
+  return (
+    input === undefined ||
+    input === "managed" ||
+    (isRecord(input) &&
+      input.kind === "external" &&
+      typeof input.rootId === "string" &&
+      typeof input.relativePath === "string")
+  );
+}
+
+function normalizeMediaStorage(input: unknown): MediaStorage {
+  if (
+    isRecord(input) &&
+    input.kind === "external" &&
+    typeof input.rootId === "string" &&
+    input.rootId.trim() &&
+    typeof input.relativePath === "string" &&
+    input.relativePath.trim()
+  ) {
+    return {
+      kind: "external",
+      rootId: input.rootId.trim(),
+      relativePath: input.relativePath.trim(),
+      size: normalizeOptionalNumber(input.size),
+      mtimeMs: normalizeOptionalNumber(input.mtimeMs),
+      status: input.status === "missing" ? "missing" : "available",
+    };
+  }
+
+  return "managed";
 }
 
 function isOptionalNsfwRating(input: unknown): boolean {

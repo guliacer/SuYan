@@ -40,6 +40,14 @@ export async function compressVideos(
 
   const library = await readLibraryFile();
   const targetItems = selectVideoTargetItems(library.items, options.itemIds);
+  const requestedIds = options.itemIds && options.itemIds.length > 0 ? new Set(options.itemIds) : null;
+  const skippedExternalCount = library.items.filter(
+    (item) =>
+      (!requestedIds || requestedIds.has(item.id)) &&
+      item.mediaStorage &&
+      item.mediaStorage !== "managed" &&
+      isVideoMediaFile(item.imageFileName),
+  ).length;
   const total = targetItems.length;
 
   let processedCount = 0;
@@ -92,7 +100,7 @@ export async function compressVideos(
     });
   }
 
-  return { processedCount, totalOriginalBytes, totalCompressedBytes, failedItems };
+  return { processedCount, totalOriginalBytes, totalCompressedBytes, skippedExternalCount, failedItems };
 }
 
 export function selectVideoTargetItems(
@@ -102,10 +110,18 @@ export function selectVideoTargetItems(
   if (itemIds && itemIds.length > 0) {
     const idSet = new Set(itemIds);
 
-    return items.filter((item) => idSet.has(item.id) && isVideoMediaFile(item.imageFileName));
+    return items.filter(
+      (item) => idSet.has(item.id) && isManagedMedia(item) && isVideoMediaFile(item.imageFileName),
+    );
   }
 
-  return items.filter((item) => item.promptType === "video" || isVideoMediaFile(item.imageFileName));
+  return items.filter(
+    (item) => isManagedMedia(item) && (item.promptType === "video" || isVideoMediaFile(item.imageFileName)),
+  );
+}
+
+function isManagedMedia(item: LibraryItem): boolean {
+  return !item.mediaStorage || item.mediaStorage === "managed";
 }
 
 async function compressSingleVideo(

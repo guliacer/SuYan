@@ -29,6 +29,7 @@ import { buildAiActionInstructions } from "../types/ai";
 import type {
   LibraryFile,
   LibraryItem,
+  LibraryRoot,
   LibraryViewSettings,
   MaterialBrowserCollectionMode,
   MaterialBrowserGalleryMode,
@@ -61,6 +62,7 @@ import {
 } from "../utils/nsfwRating";
 import { applyTagConfigurationToItems, type TagConfigurationDraft } from "../utils/tagSettings";
 import { getUiErrorMessage } from "../utils/uiMessages";
+import { reconcileItemsByIdentity } from "../utils/libraryItemIdentity";
 import { applyThemeModeToRoot, finishThemeModeSwitch } from "../utils/themeMode";
 import { isPendingStatusFeedbackText, type StatusFeedbackMessage } from "../utils/statusFeedback";
 import {
@@ -109,6 +111,7 @@ const inFlightRemoteMaterialDownloads = new Set<string>();
 
 type LibraryState = {
   items: LibraryItem[];
+  libraryRoots: LibraryRoot[];
   selectedItemId: string | null;
   /** 刚导入的素材 id（按导入顺序），用于素材浏览列表临时置顶展示。 */
   recentImportPinIds: string[];
@@ -167,6 +170,13 @@ type LibraryState = {
   clearStatus: () => void;
   openExternalUrl: (url: string, label?: string) => Promise<boolean>;
   importImages: () => Promise<void>;
+  addAndScanLibraryRoot: () => Promise<void>;
+  scanLibraryRoot: (rootId: string) => Promise<void>;
+  setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<void>;
+  remapLibraryRoot: (rootId: string) => Promise<void>;
+  removeLibraryRoot: (rootId: string) => Promise<void>;
+  purgeMissingLibraryRootItems: (rootId: string) => Promise<void>;
+  validateExternalLibrary: () => Promise<void>;
   importImageBuffers: (images: ImportImageBufferInput[]) => Promise<void>;
   importImageFilesForItem: (itemId: string) => Promise<string | null>;
   importWordDocument: () => Promise<void>;
@@ -213,9 +223,11 @@ type LibraryState = {
 
 let themeSwitchRevision = 0;
 let themePersistenceQueue: Promise<void> = Promise.resolve();
+let isExternalLibraryWatchSubscribed = false;
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   items: [],
+  libraryRoots: [],
   selectedItemId: null,
   recentImportPinIds: [],
   searchQuery: "",
@@ -272,9 +284,36 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const loadStartedAt = performance.now();
     logRendererStartupEvent("library-load:start");
     set({ isLoading: true, statusMessage: null });
-    const [libraryResult, viewSettingsResult] = await Promise.all([
+
+    if (!isExternalLibraryWatchSubscribed) {
+      isExternalLibraryWatchSubscribed = true;
+      window.suyanApi.onExternalLibraryChanged((data) => {
+        const previousItemIds = new Set(get().items.map((item) => item.id));
+        setLibrary(data.library, set, get);
+        set({ libraryRoots: data.roots });
+
+        if (data.importedCount > 0) {
+          markRecentImportPins(set, get, previousItemIds);
+          scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        }
+
+        const changes = [
+          data.importedCount > 0 ? `新增 ${data.importedCount} 个` : null,
+          data.renamedCount > 0 ? `识别重命名 ${data.renamedCount} 个` : null,
+          data.missingCount > 0 ? `标记缺失 ${data.missingCount} 个` : null,
+        ].filter((entry): entry is string => Boolean(entry));
+        set({
+          statusMessage: infoStatus(
+            changes.length > 0 ? `目录监视已同步：${changes.join("，")}。` : "目录监视已同步。",
+          ),
+        });
+      });
+    }
+
+    const [libraryResult, viewSettingsResult, rootsResult] = await Promise.all([
       window.suyanApi.readLibrary(),
       window.suyanApi.readLibraryViewSettings(),
+      window.suyanApi.listLibraryRoots(),
     ]);
 
     if (libraryResult.ok) {
@@ -287,6 +326,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       syncLibraryViewSettings(set, viewSettingsResult.data);
     } else if (libraryResult.ok) {
       set({ statusMessage: errorStatus(viewSettingsResult.error.code, viewSettingsResult.error.message) });
+    }
+
+    if (rootsResult.ok) {
+      set({ libraryRoots: rootsResult.data });
     }
 
     set({ isLoading: false, recentImportPinIds: [] });
@@ -1031,6 +1074,209 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  addAndScanLibraryRoot: async () => {
+    const previousItemIds = new Set(get().items.map((item) => item.id));
+    set({ isBusy: true, statusMessage: progressStatus("正在选择并扫描素材目录...") });
+    const unsubscribe = window.suyanApi.onImportProgress((progress) => {
+      set({ statusMessage: progressStatus(`正在扫描：${progress.currentFile} (${progress.current}/${progress.total})`) });
+    });
+
+    try {
+      const result = await window.suyanApi.chooseAndScanLibraryRoot();
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      if (result.data.canceled) {
+        set({ statusMessage: infoStatus("未选择素材目录。") });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      if (result.data.importedCount > 0) {
+        markRecentImportPins(set, get, previousItemIds);
+        scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+      }
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({ statusMessage: successStatus(`已扫描 ${result.data.root?.label ?? "素材目录"}，新增 ${result.data.importedCount} 个素材。`) });
+    } finally {
+      unsubscribe();
+      set({ isBusy: false });
+    }
+  },
+
+  scanLibraryRoot: async (rootId) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    const previousItemIds = new Set(get().items.map((item) => item.id));
+    set({ isBusy: true, statusMessage: progressStatus(`正在扫描 ${root?.label ?? "素材目录"}...`) });
+    const unsubscribe = window.suyanApi.onImportProgress((progress) => {
+      set({ statusMessage: progressStatus(`正在扫描：${progress.currentFile} (${progress.current}/${progress.total})`) });
+    });
+
+    try {
+      const result = await window.suyanApi.scanLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      if (result.data.importedCount > 0) {
+        markRecentImportPins(set, get, previousItemIds);
+        scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+      }
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({ statusMessage: successStatus(`扫描完成，新增 ${result.data.importedCount} 个素材，已跳过 ${result.data.skippedCount} 个。`) });
+    } finally {
+      unsubscribe();
+      set({ isBusy: false });
+    }
+  },
+
+  setLibraryRootWatch: async (rootId, enabled) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    set({
+      isBusy: true,
+      statusMessage: progressStatus(`${enabled ? "正在开启" : "正在关闭"} ${root?.label ?? "素材目录"} 监视...`),
+    });
+
+    try {
+      const result = await window.suyanApi.setLibraryRootWatch(rootId, enabled);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      set({
+        libraryRoots: result.data.roots,
+        statusMessage: successStatus(enabled ? "目录监视已开启。" : "目录监视已关闭。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  remapLibraryRoot: async (rootId) => {
+    set({ isBusy: true, statusMessage: progressStatus("正在重新定位素材目录...") });
+
+    try {
+      const result = await window.suyanApi.remapLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      if (result.data.canceled) {
+        set({ statusMessage: null });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.missingCount > 0
+            ? infoStatus(`目录已重新定位，仍有 ${result.data.missingCount} 个源文件缺失。`)
+            : successStatus("目录已重新定位，外链素材已恢复。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  removeLibraryRoot: async (rootId) => {
+    set({ isBusy: true, statusMessage: progressStatus("正在移除素材目录...") });
+
+    try {
+      const result = await window.suyanApi.removeLibraryRoot(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      set({
+        libraryRoots: result.data.roots,
+        statusMessage: infoStatus(`已移除挂载和 ${result.data.removedItemCount} 条索引，原文件未删除。`),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  purgeMissingLibraryRootItems: async (rootId) => {
+    const root = get().libraryRoots.find((candidate) => candidate.id === rootId);
+    set({
+      isBusy: true,
+      statusMessage: progressStatus(`正在清理 ${root?.label ?? "素材目录"} 的缺失索引...`),
+    });
+
+    try {
+      const result = await window.suyanApi.purgeMissingLibraryRootItems(rootId);
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.removedItemCount > 0
+            ? successStatus(`已清理 ${result.data.removedItemCount} 条缺失索引（原文件未删除）。`)
+            : infoStatus("该目录下没有可清理的缺失索引。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  validateExternalLibrary: async () => {
+    set({ isBusy: true, statusMessage: progressStatus("正在校验外链素材...") });
+
+    try {
+      const result = await window.suyanApi.validateExternalLibrary();
+
+      if (!result.ok) {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+        return;
+      }
+
+      setLibrary(result.data.library, set, get);
+      const rootsResult = await window.suyanApi.listLibraryRoots();
+      if (rootsResult.ok) {
+        set({ libraryRoots: rootsResult.data });
+      }
+      set({
+        statusMessage:
+          result.data.missingCount > 0
+            ? infoStatus(`校验完成：${result.data.missingCount} 个源文件缺失。`)
+            : successStatus("校验完成，外链素材均可访问。"),
+      });
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
   importImageBuffers: async (images) => {
     if (images.length === 0) {
       return;
@@ -1722,8 +1968,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         const savedBytes = Math.max(0, result.data.totalOriginalBytes - result.data.totalCompressedBytes);
+        const externalText =
+          result.data.skippedExternalCount > 0
+            ? `，${result.data.skippedExternalCount} 项外链素材保持只读`
+            : "";
         set({
-          statusMessage: successStatus(`已压缩 ${result.data.processedCount} 张图片，节省 ${formatSavedBytes(savedBytes)}。`),
+          statusMessage: successStatus(
+            `已压缩 ${result.data.processedCount} 张图片，节省 ${formatSavedBytes(savedBytes)}${externalText}。`,
+          ),
         });
         return result.data;
       }
@@ -1755,8 +2007,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         const savedBytes = Math.max(0, result.data.totalOriginalBytes - result.data.totalCompressedBytes);
+        const externalText =
+          result.data.skippedExternalCount > 0
+            ? `，${result.data.skippedExternalCount} 项外链素材保持只读`
+            : "";
         set({
-          statusMessage: successStatus(`已压缩 ${result.data.processedCount} 个视频，节省 ${formatSavedBytes(savedBytes)}。`),
+          statusMessage: successStatus(
+            `已压缩 ${result.data.processedCount} 个视频，节省 ${formatSavedBytes(savedBytes)}${externalText}。`,
+          ),
         });
         return result.data;
       }
@@ -1952,151 +2210,6 @@ function setLibrary(
   });
 
   set({ items: reconciledItems, selectedItemId });
-}
-
-function reconcileItemsByIdentity(
-  previousItems: readonly LibraryItem[],
-  nextItems: readonly LibraryItem[],
-  stats?: { reused: number; changed: number; added: number },
-): LibraryItem[] {
-  if (previousItems.length === 0) {
-    if (stats) {
-      stats.added = nextItems.length;
-    }
-    return nextItems as LibraryItem[];
-  }
-
-  const previousById = new Map<string, LibraryItem>();
-  for (const item of previousItems) {
-    previousById.set(item.id, item);
-  }
-
-  let reusedCount = 0;
-  const reconciled = nextItems.map((nextItem) => {
-    const previousItem = previousById.get(nextItem.id);
-
-    if (!previousItem) {
-      if (stats) {
-        stats.added += 1;
-      }
-      return nextItem;
-    }
-
-    if (previousItem !== nextItem && isSameLibraryItem(previousItem, nextItem)) {
-      reusedCount += 1;
-      return previousItem;
-    }
-
-    if (previousItem === nextItem) {
-      reusedCount += 1;
-      return previousItem;
-    }
-
-    if (stats) {
-      stats.changed += 1;
-    }
-    return nextItem;
-  });
-
-  if (stats) {
-    stats.reused = reusedCount;
-  }
-
-  if (reusedCount === nextItems.length && nextItems.length === previousItems.length) {
-    return previousItems as LibraryItem[];
-  }
-
-  return reconciled;
-}
-
-function isSameLibraryItem(a: LibraryItem, b: LibraryItem): boolean {
-  if (a === b) {
-    return true;
-  }
-
-  // 删除/导入后主进程常返回“内容相同但引用不同”的条目。
-  // 用字段浅比较复用旧引用，避免列表与瀑布流整树失效。
-  if (
-    a.id !== b.id ||
-    a.updatedAt !== b.updatedAt ||
-    a.createdAt !== b.createdAt ||
-    a.imageFileName !== b.imageFileName ||
-    a.title !== b.title ||
-    a.prompt !== b.prompt ||
-    a.negativePrompt !== b.negativePrompt ||
-    a.category !== b.category ||
-    a.generationMethod !== b.generationMethod ||
-    a.promptType !== b.promptType ||
-    a.sourceUrl !== b.sourceUrl ||
-    a.remoteImageUrl !== b.remoteImageUrl ||
-    a.remoteImageStatus !== b.remoteImageStatus ||
-    a.authorName !== b.authorName ||
-    a.authorUrl !== b.authorUrl ||
-    a.authorAvatarUrl !== b.authorAvatarUrl ||
-    a.nsfwRating !== b.nsfwRating ||
-    a.nsfwCheckedAt !== b.nsfwCheckedAt ||
-    a.videoDurationSec !== b.videoDurationSec ||
-    a.videoPosterFileName !== b.videoPosterFileName ||
-    a.videoFramesGeneratedAt !== b.videoFramesGeneratedAt
-  ) {
-    return false;
-  }
-
-  if (!areStringArraysEqual(a.tags, b.tags)) {
-    return false;
-  }
-
-  if (!areStringArraysEqual(a.videoReferenceImages, b.videoReferenceImages)) {
-    return false;
-  }
-
-  return areVideoKeyframesEqual(a.videoKeyframes, b.videoKeyframes);
-}
-
-function areStringArraysEqual(left: readonly string[] | null | undefined, right: readonly string[] | null | undefined): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right || left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function areVideoKeyframesEqual(
-  left: LibraryItem["videoKeyframes"],
-  right: LibraryItem["videoKeyframes"],
-): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right || left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const leftFrame = left[index];
-    const rightFrame = right[index];
-
-    if (
-      leftFrame.imageFileName !== rightFrame.imageFileName ||
-      leftFrame.atSec !== rightFrame.atSec ||
-      leftFrame.label !== rightFrame.label
-    ) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 async function syncPromptLexiconsFromLibrary(

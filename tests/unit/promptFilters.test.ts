@@ -29,6 +29,23 @@ function makeItem(patch: Partial<PromptItemFixture>): PromptItemFixture {
 }
 
 describe("promptFilters", () => {
+  it("carries an external missing state to the rendered card model", () => {
+    const card = toPromptCardData(
+      makeItem({
+        mediaStorage: {
+          kind: "external",
+          rootId: "root-1",
+          relativePath: "missing.png",
+          status: "missing",
+        },
+      }),
+    );
+
+    expect(card.mediaStatus).toBe("missing");
+    expect(card.searchText).toContain("默认标题");
+    expect(card.searchText).toContain("missing.png");
+  });
+
   it("searches title, prompt, negative prompt, image file name and tags", () => {
     const cards = [
       makeItem({ id: "title", title: "品牌营销方案", tags: ["商业计划"] }),
@@ -156,6 +173,33 @@ describe("promptFilters", () => {
         sortDirection: "desc",
       }).map((item) => item.id),
     ).toEqual(["fresh", "normal", "stale"]);
+  });
+
+  it("keeps missing external entries visible ahead of the normal browse window", () => {
+    const cards = [
+      makeItem({ id: "new", createdAt: "2026-07-03T00:00:00.000Z" }),
+      makeItem({ id: "old", createdAt: "2026-07-01T00:00:00.000Z" }),
+      makeItem({
+        id: "missing",
+        createdAt: "2026-07-02T00:00:00.000Z",
+        mediaStorage: {
+          kind: "external",
+          rootId: "root-1",
+          relativePath: "missing.png",
+          status: "missing",
+        },
+      }),
+    ].map(toPromptCardData);
+
+    expect(
+      filterPromptCards(cards, {
+        query: "",
+        category: allCategoriesValue,
+        activeTag: null,
+        sortMode: "importedAt",
+        sortDirection: "desc",
+      }).map((item) => item.id),
+    ).toEqual(["missing", "new", "old"]);
   });
 
   it("sorts by image size from loaded dimensions", () => {

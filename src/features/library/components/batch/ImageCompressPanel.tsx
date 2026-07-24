@@ -130,6 +130,9 @@ export function ImageCompressPanel({
         {result.failedItems.length > 0 ? (
           <p className="text-xs text-muted">{result.failedItems.length} 项压缩失败，已跳过。</p>
         ) : null}
+        {result.skippedExternalCount > 0 ? (
+          <p className="text-xs text-muted">{result.skippedExternalCount} 项外链素材保持只读，未执行压缩。</p>
+        ) : null}
         <div>
           <Button variant="primary" onClick={handleReset}>
             再次压缩

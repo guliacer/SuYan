@@ -51,7 +51,7 @@ import {
   importReferenceImageFromUrlForItem,
 } from "../library/imageFiles";
 import { generateVideoFramesForItem } from "../library/videoFrames";
-import { getOrCreateImageThumbnailPath } from "../library/imageThumbnails";
+import { getOrCreateImageThumbnailPath, getOrCreateImageThumbnailPathForItem } from "../library/imageThumbnails";
 import {
   exportPromptLexicon,
   importPromptLexicon,
@@ -59,6 +59,19 @@ import {
 } from "../library/lexiconFiles";
 import { getImageThumbnailPath } from "../library/libraryPaths";
 import { readLibraryFile, writeLibraryFile } from "../library/libraryStore";
+import { chooseAndAddLibraryRoot, readLibraryRoots } from "../library/libraryRoots";
+import { scanExternalLibraryRoot } from "../library/externalLibraryScanner";
+import {
+  detachExternalLibraryRoot,
+  remapExternalLibraryRoot,
+  purgeMissingExternalLibraryItems,
+  validateExternalLibrary,
+} from "../library/externalLibraryManager";
+import {
+  refreshExternalLibraryRootWatcher,
+  setExternalLibraryRootWatch,
+  stopExternalLibraryRootWatcher,
+} from "../library/externalLibraryWatcher";
 import { downloadRemoteMaterialForItem } from "../library/remoteMaterialDownload";
 import { readLibraryViewSettings, writeLibraryViewSettings } from "../library/viewSettingsStore";
 import {
@@ -121,7 +134,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(ipcChannels.libraryRead, () =>
     handleResult("library:read", async () => {
-      const library = await readLibraryFile();
+      const library = await readLibraryFile({ refreshExternalHealth: true });
       reportLibrarySize(library.items.length);
       return library;
     }),
@@ -134,6 +147,67 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.libraryViewSettingsSave, (_event, settings: LibraryViewSettings) =>
     handleResult("library:view-settings-save", () => writeLibraryViewSettings(settings)),
+  );
+  ipcMain.handle(ipcChannels.libraryRootsList, () => handleResult("library:roots-list", () => readLibraryRoots()));
+  ipcMain.handle(ipcChannels.libraryRootChooseAndScan, (event) =>
+    handleResult("library:root-choose-and-scan", async () => {
+      const selection = await chooseAndAddLibraryRoot(BrowserWindow.fromWebContents(event.sender));
+
+      if (!selection.root) {
+        return {
+          canceled: true,
+          library: await readLibraryFile(),
+          root: null,
+          importedCount: 0,
+          skippedCount: 0,
+        };
+      }
+
+      const result = await scanExternalLibraryRoot(selection.root.id, (progress) => {
+        event.sender.send(IpcChannelName.ImageImportProgress, progress);
+      });
+      return { ...result, canceled: false };
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootScan, (event, rootId: string) =>
+    handleResult("library:root-scan", async () => {
+      const result = await scanExternalLibraryRoot(rootId, (progress) => {
+        event.sender.send(IpcChannelName.ImageImportProgress, progress);
+      });
+      return { ...result, canceled: false };
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootRemap, (event, rootId: string) =>
+    handleResult("library:root-remap", async () => {
+      await stopExternalLibraryRootWatcher(rootId);
+
+      try {
+        return await remapExternalLibraryRoot(rootId, BrowserWindow.fromWebContents(event.sender));
+      } finally {
+        await refreshExternalLibraryRootWatcher(rootId);
+      }
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootRemove, (_event, rootId: string) =>
+    handleResult("library:root-remove", async () => {
+      await stopExternalLibraryRootWatcher(rootId);
+
+      try {
+        return await detachExternalLibraryRoot(rootId);
+      } catch (error) {
+        await refreshExternalLibraryRootWatcher(rootId);
+        throw error;
+      }
+    }),
+  );
+  ipcMain.handle(ipcChannels.libraryRootPurgeMissing, (_event, rootId: string) =>
+    handleResult("library:root-purge-missing", () => purgeMissingExternalLibraryItems(rootId)),
+  );
+  ipcMain.handle(ipcChannels.libraryRootWatchSet, (_event, rootId: string, enabled: boolean) =>
+    handleResult("library:root-watch-set", () => setExternalLibraryRootWatch(rootId, enabled)),
+  );
+  ipcMain.handle(ipcChannels.libraryExternalValidate, () =>
+    handleResult("library:external-validate", () => validateExternalLibrary()),
   );
   ipcMain.handle(ipcChannels.startupGalleryList, () =>
     handleResult("startup-gallery:list", () => listStartupGalleryImages()),
@@ -484,7 +558,11 @@ async function resolveImageThumbnailSource(imageFileName: string): Promise<{
   source: "thumbnail" | "original";
   src: string;
 }> {
-  const thumbnailPath = await getOrCreateImageThumbnailPath(imageFileName);
+  const library = await readLibraryFile();
+  const item = library.items.find((candidate) => candidate.imageFileName === imageFileName);
+  const thumbnailPath = item
+    ? await getOrCreateImageThumbnailPathForItem(item)
+    : await getOrCreateImageThumbnailPath(imageFileName);
   const source = thumbnailPath === getImageThumbnailPath(imageFileName) ? "thumbnail" : "original";
 
   return {

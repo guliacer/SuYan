@@ -11,8 +11,9 @@ import { normalizePromptType } from "../../../src/features/library/utils/promptT
 import { AppError } from "../ipc/errors";
 import { prepareImageThumbnails } from "./imageThumbnails";
 import { writeImportMediaBuffer } from "./importedImageWriter";
-import { getImagePath } from "./libraryPaths";
 import { appendLibraryItems, readLibraryFile } from "./libraryStore";
+import { resolveMediaAbsolutePath } from "./mediaPathResolver";
+import { collectArchiveExportEntries, toPortableArchiveItem } from "./archiveExportPolicy";
 
 type JSZipConstructor = {
   new (): JSZip;
@@ -45,13 +46,12 @@ export async function exportLibraryZip(itemIds: string[]): Promise<ArchiveResult
   const exportFile: LibraryFile = {
     schemaVersion: 1,
     updatedAt: new Date().toISOString(),
-    items,
+    items: items.map(toPortableArchiveItem),
   };
 
   zip.file("data.json", JSON.stringify(exportFile, null, 2));
 
-  for (const item of items) {
-    const imageBuffer = await fs.readFile(getImagePath(item.imageFileName));
+  for (const { item, imageBuffer } of await collectArchiveExportEntries(items, resolveMediaAbsolutePath, fs.readFile)) {
     zip.file(`images/${item.imageFileName}`, imageBuffer);
   }
 
@@ -109,6 +109,7 @@ export async function importLibraryZip(): Promise<{
       ...item,
       id: nextId,
       imageFileName,
+      mediaStorage: "managed",
       promptType: normalizePromptType(item.promptType, { ...item, imageFileName }),
       nsfwRating: normalizeNsfwRating(item.nsfwRating),
       nsfwCheckedAt: null,

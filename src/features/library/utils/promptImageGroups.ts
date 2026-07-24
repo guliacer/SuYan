@@ -108,10 +108,13 @@ function sortByPromptCardOrder(
   const shouldPreferVideoMedia = first.promptType === "video" && second.promptType === "video";
   const firstVideoMediaWeight = shouldPreferVideoMedia && isVideoMediaFile(first.imageFileName) ? 1 : 0;
   const secondVideoMediaWeight = shouldPreferVideoMedia && isVideoMediaFile(second.imageFileName) ? 1 : 0;
+  const firstMissingWeight = first.mediaStatus === "missing" ? 1 : 0;
+  const secondMissingWeight = second.mediaStatus === "missing" ? 1 : 0;
 
   return (
     secondLikedWeight - firstLikedWeight ||
     secondVideoMediaWeight - firstVideoMediaWeight ||
+    secondMissingWeight - firstMissingWeight ||
     second.createdAt - first.createdAt ||
     first.title.localeCompare(second.title, "zh-CN") ||
     first.id.localeCompare(second.id)

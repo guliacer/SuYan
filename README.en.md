@@ -60,6 +60,7 @@ Browse in everyday order. Each section lists capabilities, then shows a demo GIF
 ### 📥 Import
 
 - **Import images** — batch add local files
+- **Mount folders** — index existing image / video folders without copying the source media
 - **Paste** — clipboard images go straight in
 - **Import documents** — extract images and prompts from Word
 - **Import shares** — ZIP packages or shared web links
@@ -191,7 +192,7 @@ Six default splash images ship with the app; replace them with your own for next
 ### Install
 
 1. **Download** the latest installer from [GitHub Releases](https://github.com/guliacer/SuYan/releases) (e.g. `SuYan-Setup-x.y.z.exe`), or portable ZIP then run `素言.exe`  
-   (Free software. First release is `v0.1.0`; later versions ship separately and do not overwrite older assets. Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues).)
+   (Free software. Current version is `v0.1.1`; first release `v0.1.0` remains separate and is not overwritten. Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues).)
 2. **Install or open** via the wizard, or run the portable build
 3. **Import** images, paste, documents, or share packages from the left sidebar  
    (see [Local import](#local-import) / [Network import](#network-import))
@@ -215,6 +216,29 @@ Send evidence to [Issues](https://github.com/guliacer/SuYan/issues). Verified ca
 <summary><b>Where is my library? Is it uploaded?</b></summary>
 
 **A:** On your machine by default. Browse and edit offline. Network is used only when you call remote AI, parse share links, or download remote images.
+
+</details>
+
+<details>
+<summary><b>How do I use images already on disk?</b></summary>
+
+**A:** Left sidebar **Import** → **Add folder** scans existing image/video folders. Media stays in place; the app only stores indexes, size/mtime, and thumbnail cache — it does **not** copy source media. Deleting a library entry does not delete the original file.
+
+Each mounted folder can enable **Watch this folder** (off by default). While enabled, new media is indexed automatically; removals are marked missing without deleting the index or source files. Uniquely identifiable renames update the stored relative path; otherwise it becomes "old entry missing + new entry added". Turning watching off stops automatic synchronization.
+
+You can also validate, re-locate, incrementally rescan, or unmount from **Material folders**. After re-locating, items recover by original relative paths.
+
+ZIP shares read external sources and embed media into the package (no in-library copy required). External items are not compressed/transcoded in-app and are never overwritten in place; create a managed copy via normal import first if you need compression.
+
+</details>
+
+<details>
+<summary><b>How do I handle missing source files?</b></summary>
+
+**A:** If a mount is disconnected or files were moved/deleted on disk, cards show **source missing** (both masonry and batch manage).
+
+- If files only moved: **re-locate** the mount under **Material folders** to restore by relative paths.
+- If the originals are gone for good and only missing indexes remain: open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and app thumbnail cache for that root only — it does **not** delete remaining files on disk or affect other folders.
 
 </details>
 

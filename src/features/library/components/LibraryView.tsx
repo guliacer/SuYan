@@ -26,6 +26,7 @@ import {
   Clipboard,
   Copy,
   Download,
+  Eraser,
   Eye,
   ExternalLink,
   FileText,
@@ -73,6 +74,7 @@ import startupArt5 from "../assets/startup-art-5.png?url";
 import startupArt6 from "../assets/startup-art-6.png?url";
 import type {
   LibraryItem,
+  LibraryRoot,
   PromptImageLexiconEntry,
   PromptLexiconEntry,
   PromptLexiconKind,
@@ -174,7 +176,7 @@ const minMasonryColumnCount = 2;
 const maxMasonryColumnCount = 10;
 const defaultMasonryColumnCount = 4;
 const masonryColumnGap = 16;
-const appVersion = "0.2.0";
+const appVersion = "0.1.1";
 const suyanGithubRepoUrl = "https://github.com/guliacer/SuYan";
 const suyanGithubReleasesUrl = `${suyanGithubRepoUrl}/releases`;
 const allParameterSourcesValue = "__all__";
@@ -496,6 +498,7 @@ function ImageDropOverlay() {
 export function LibraryView() {
   recordLibraryViewRender();
   const items = useLibraryStore((state) => state.items);
+  const libraryRoots = useLibraryStore((state) => state.libraryRoots);
   const searchQuery = useLibraryStore((state) => state.searchQuery);
   const tagOrder = useLibraryStore((state) => state.tagOrder);
   const likedImageIds = useLibraryStore((state) => state.likedImageIds);
@@ -537,6 +540,13 @@ export function LibraryView() {
   const reverseImagePromptWithAi = useLibraryStore((state) => state.reverseImagePromptWithAi);
   const clearStatus = useLibraryStore((state) => state.clearStatus);
   const importImages = useLibraryStore((state) => state.importImages);
+  const addAndScanLibraryRoot = useLibraryStore((state) => state.addAndScanLibraryRoot);
+  const scanLibraryRoot = useLibraryStore((state) => state.scanLibraryRoot);
+  const setLibraryRootWatch = useLibraryStore((state) => state.setLibraryRootWatch);
+  const remapLibraryRoot = useLibraryStore((state) => state.remapLibraryRoot);
+  const removeLibraryRoot = useLibraryStore((state) => state.removeLibraryRoot);
+  const purgeMissingLibraryRootItems = useLibraryStore((state) => state.purgeMissingLibraryRootItems);
+  const validateExternalLibrary = useLibraryStore((state) => state.validateExternalLibrary);
   const importImageFilesForItem = useLibraryStore((state) => state.importImageFilesForItem);
   const generateVideoFrames = useLibraryStore((state) => state.generateVideoFrames);
   const importVideoReferenceImages = useLibraryStore((state) => state.importVideoReferenceImages);
@@ -590,6 +600,7 @@ export function LibraryView() {
   const [isProxySettingsOpen, setIsProxySettingsOpen] = useState(false);
   const [isPerformanceSettingsOpen, setIsPerformanceSettingsOpen] = useState(false);
   const [isStartupGallerySettingsOpen, setIsStartupGallerySettingsOpen] = useState(false);
+  const [isLibraryRootsOpen, setIsLibraryRootsOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(getStoredSidebarOpen);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
@@ -1553,6 +1564,20 @@ function resetFilters() {
       onDrop={handleWindowDrop}
     >
       <AppTitleBar isSidebarOpen={isSidebarOpen} overlayActive={isDetailOverlayOpen} onToggleSidebar={toggleSidebar} />
+      {isLibraryRootsOpen ? (
+        <LibraryRootsDialog
+          isBusy={isBusy}
+          roots={libraryRoots}
+          onAdd={() => void addAndScanLibraryRoot()}
+          onClose={() => setIsLibraryRootsOpen(false)}
+          onPurgeMissing={(rootId) => void purgeMissingLibraryRootItems(rootId)}
+          onRemap={(rootId) => void remapLibraryRoot(rootId)}
+          onRemove={(rootId) => void removeLibraryRoot(rootId)}
+          onScan={(rootId) => void scanLibraryRoot(rootId)}
+          onWatchChange={(rootId, enabled) => void setLibraryRootWatch(rootId, enabled)}
+          onValidate={() => void validateExternalLibrary()}
+        />
+      ) : null}
       {isImageDragOver ? <ImageDropOverlay /> : null}
       <div className="flex min-h-0 flex-1">
         {isSidebarOpen ? (
@@ -1573,6 +1598,10 @@ function resetFilters() {
               setIsImportMenuOpen(false);
               void importImages();
             }}
+            onAddLibraryDirectory={() => {
+              setIsImportMenuOpen(false);
+              void addAndScanLibraryRoot();
+            }}
             onImportZip={() => {
               setIsImportMenuOpen(false);
               void importZip();
@@ -1589,6 +1618,7 @@ function resetFilters() {
             onOpenStartupGallerySettings={openStartupGallerySettings}
             onOpenCategoryLexicon={() => openMainView("categoryLexicon")}
             onOpenHome={openHomeView}
+            onOpenLibraryRoots={() => setIsLibraryRootsOpen(true)}
             onOpenManager={() => openMainView("promptLibrary")}
             onOpenParameterLexicon={() => openMainView("parameterLexicon")}
             onOpenPromptSites={() => openMainView("promptSites")}
@@ -2737,6 +2767,7 @@ type LibrarySidebarProps = {
   width: number;
   onImportClipboardImage: () => void;
   onImportImages: () => void;
+  onAddLibraryDirectory: () => void;
   onImportZip: () => void;
   onImportWordDocument: () => void;
   onOpenAbout: () => void;
@@ -2747,6 +2778,7 @@ type LibrarySidebarProps = {
   onOpenStartupGallerySettings: () => void;
   onOpenCategoryLexicon: () => void;
   onOpenHome: () => void;
+  onOpenLibraryRoots: () => void;
   onOpenManager: () => void;
   onOpenParameterLexicon: () => void;
   onOpenPromptSites: () => void;
@@ -2768,6 +2800,7 @@ function LibrarySidebar({
   width,
   onImportClipboardImage,
   onImportImages,
+  onAddLibraryDirectory,
   onImportZip,
   onImportWordDocument,
   onOpenAbout,
@@ -2778,6 +2811,7 @@ function LibrarySidebar({
   onOpenStartupGallerySettings,
   onOpenCategoryLexicon,
   onOpenHome,
+  onOpenLibraryRoots,
   onOpenManager,
   onOpenParameterLexicon,
   onOpenPromptSites,
@@ -2807,7 +2841,7 @@ function LibrarySidebar({
       const viewportPadding = 8;
       const menuGap = 8;
       const menuWidth = 176;
-      const menuHeight = 184;
+      const menuHeight = 226;
       const canOpenRight = rect.right + menuGap + menuWidth <= window.innerWidth - viewportPadding;
       const left = canOpenRight
         ? rect.right + menuGap
@@ -2870,6 +2904,7 @@ function LibrarySidebar({
                     style={importMenuStyle}
                   >
                     <ImportMenuItem icon={<ImagePlus size={16} />} label="导入图片" onClick={onImportImages} />
+                    <ImportMenuItem icon={<FolderTree size={16} />} label="添加目录" onClick={onAddLibraryDirectory} />
                     <ImportMenuItem icon={<Clipboard size={16} />} label="粘贴导入" onClick={onImportClipboardImage} />
                     <ImportMenuItem icon={<FileText size={16} />} label="导入文档" onClick={onImportWordDocument} />
                     <ImportMenuItem icon={<Download size={16} />} label="导入分享" onClick={onImportZip} />
@@ -2878,6 +2913,12 @@ function LibrarySidebar({
                 )
               : null}
           </div>
+          <SidebarActionButton
+            icon={<FolderTree size={17} />}
+            isCompact={isCompact}
+            label="素材目录"
+            onClick={onOpenLibraryRoots}
+          />
           <SidebarActionButton
             active={activeView === "promptLibrary"}
             icon={<BookOpen size={17} />}
@@ -10161,6 +10202,129 @@ function GridPromptMosaic({
   );
 }
 
+type LibraryRootsDialogProps = {
+  isBusy: boolean;
+  roots: readonly LibraryRoot[];
+  onAdd: () => void;
+  onClose: () => void;
+  onPurgeMissing: (rootId: string) => void;
+  onRemap: (rootId: string) => void;
+  onRemove: (rootId: string) => void;
+  onScan: (rootId: string) => void;
+  onWatchChange: (rootId: string, enabled: boolean) => void;
+  onValidate: () => void;
+};
+
+function LibraryRootsDialog({
+  isBusy,
+  roots,
+  onAdd,
+  onClose,
+  onPurgeMissing,
+  onRemap,
+  onRemove,
+  onScan,
+  onWatchChange,
+  onValidate,
+}: LibraryRootsDialogProps) {
+  return (
+    <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" onClose={onClose}>
+      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold">素材目录</h2>
+          <p className="mt-1 text-sm text-muted">{roots.length} 个已挂载目录</p>
+        </div>
+        <DialogCloseButton onClick={onClose} />
+      </header>
+      <div className="grid min-h-0 gap-3 overflow-y-auto p-5">
+        {roots.length > 0 ? (
+          roots.map((root) => (
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-border bg-background px-3 py-3" key={root.id}>
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`size-2 shrink-0 rounded-full ${root.status === "missing" ? "bg-danger" : "bg-primary"}`} />
+                  <p className="truncate text-sm font-medium text-foreground">{root.label}</p>
+                  {root.status === "missing" ? <span className="shrink-0 text-xs font-medium text-danger">目录不可用</span> : null}
+                </div>
+                <p className="mt-1 truncate text-xs text-muted" title={root.absolutePath}>
+                  {root.absolutePath}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {root.lastScanAt ? `上次扫描：${new Date(root.lastScanAt).toLocaleString()}` : "尚未扫描"}
+                </p>
+                <div className="mt-2 flex min-h-6 items-center gap-2">
+                  <button
+                    aria-checked={root.watchEnabled === true}
+                    aria-label={`监视 ${root.label}`}
+                    className={`relative h-5 w-9 shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                      root.watchEnabled ? "bg-primary" : "bg-border"
+                    } disabled:cursor-not-allowed disabled:opacity-50`}
+                    disabled={isBusy || (root.status === "missing" && !root.watchEnabled)}
+                    role="switch"
+                    type="button"
+                    onClick={() => onWatchChange(root.id, !root.watchEnabled)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`absolute left-0 top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform ${
+                        root.watchEnabled ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs text-muted">监视此目录</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button aria-label="重新扫描" className="size-10 px-0" icon={<RefreshCw size={15} />} title="重新扫描" disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
+                <Button aria-label="重新定位" className="size-10 px-0" icon={<FolderTree size={15} />} title="重新定位" disabled={isBusy} onClick={() => onRemap(root.id)} />
+                <Button
+                  aria-label="清理该目录下已删除文件的提示词缓存"
+                  className="size-10 px-0"
+                  icon={<Eraser size={15} />}
+                  title="清理该目录下已删除文件的提示词缓存"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `清理“${root.label}”下已删除文件的提示词索引？仅删除库内缺失索引与缩略图缓存，不会删除磁盘上仍存在的原文件。`,
+                      )
+                    ) {
+                      onPurgeMissing(root.id);
+                    }
+                  }}
+                />
+                <Button
+                  aria-label="移除挂载"
+                  className="size-10 px-0"
+                  icon={<Trash2 size={15} />}
+                  title="移除挂载"
+                  variant="ghost"
+                  disabled={isBusy}
+                  onClick={() => {
+                    if (window.confirm(`移除“${root.label}”挂载及其索引？原文件不会删除。`)) {
+                      onRemove(root.id);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="py-8 text-center text-sm text-muted">还没有已挂载目录。</p>
+        )}
+      </div>
+      <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+        <Button icon={<Shield size={16} />} disabled={isBusy || roots.length === 0} onClick={onValidate}>
+          校验全部
+        </Button>
+        <Button icon={<FolderTree size={16} />} disabled={isBusy} variant="primary" onClick={onAdd}>
+          添加目录
+        </Button>
+      </footer>
+    </AppDialog>
+  );
+}
+
 type ImportMenuItemProps = {
   icon: React.ReactNode;
   label: string;
@@ -10452,4 +10616,3 @@ function LogExportDialog({
     </AppDialog>
   );
 }
-

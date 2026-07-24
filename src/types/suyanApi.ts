@@ -1,5 +1,6 @@
 import type {
   LibraryFile,
+  LibraryRoot,
   LibraryViewSettings,
   PromptLexiconEntry,
   PromptLexiconKind,
@@ -42,6 +43,48 @@ export type ImportImagesData = {
   importedImageCount?: number;
   skippedDuplicateCount?: number;
   canceled?: boolean;
+};
+
+export type ExternalLibraryScanData = {
+  canceled: boolean;
+  library: LibraryFile;
+  root: LibraryRoot | null;
+  importedCount: number;
+  skippedCount: number;
+};
+
+export type ExternalLibraryValidationData = {
+  library: LibraryFile;
+  missingCount: number;
+  changedCount: number;
+};
+
+export type ExternalLibraryRemapData = ExternalLibraryValidationData & {
+  canceled: boolean;
+  root: LibraryRoot | null;
+};
+
+export type ExternalLibraryRootRemoveData = ExternalLibraryValidationData & {
+  roots: LibraryRoot[];
+  removedItemCount: number;
+};
+
+export type ExternalLibraryPurgeMissingData = ExternalLibraryValidationData & {
+  removedItemCount: number;
+};
+
+export type ExternalLibraryWatchData = {
+  root: LibraryRoot;
+  roots: LibraryRoot[];
+};
+
+export type ExternalLibrarySyncData = {
+  library: LibraryFile;
+  roots: LibraryRoot[];
+  rootId: string;
+  importedCount: number;
+  missingCount: number;
+  renamedCount: number;
 };
 
 export type ImportImageBufferInput = {
@@ -163,6 +206,7 @@ export type CompressResult = {
   processedCount: number;
   totalOriginalBytes: number;
   totalCompressedBytes: number;
+  skippedExternalCount: number;
   failedItems: { itemId: string; reason: string }[];
 };
 
@@ -244,6 +288,15 @@ export type SuyanApi = {
   saveLibrary: (library: LibraryFile) => Promise<IpcResult<LibraryFile>>;
   readLibraryViewSettings: () => Promise<IpcResult<LibraryViewSettings>>;
   saveLibraryViewSettings: (settings: LibraryViewSettings) => Promise<IpcResult<LibraryViewSettings>>;
+  listLibraryRoots: () => Promise<IpcResult<LibraryRoot[]>>;
+  chooseAndScanLibraryRoot: () => Promise<IpcResult<ExternalLibraryScanData>>;
+  scanLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryScanData>>;
+  remapLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRemapData>>;
+  removeLibraryRoot: (rootId: string) => Promise<IpcResult<ExternalLibraryRootRemoveData>>;
+  purgeMissingLibraryRootItems: (rootId: string) => Promise<IpcResult<ExternalLibraryPurgeMissingData>>;
+  setLibraryRootWatch: (rootId: string, enabled: boolean) => Promise<IpcResult<ExternalLibraryWatchData>>;
+  onExternalLibraryChanged: (callback: (data: ExternalLibrarySyncData) => void) => () => void;
+  validateExternalLibrary: () => Promise<IpcResult<ExternalLibraryValidationData>>;
   listStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImage[]>>;
   importStartupGalleryImages: () => Promise<IpcResult<StartupGalleryImportData>>;
   importStartupGalleryImageFromClipboard: () => Promise<IpcResult<StartupGalleryImportData>>;

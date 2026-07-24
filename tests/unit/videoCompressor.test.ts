@@ -205,4 +205,13 @@ describe("selectVideoTargetItems", () => {
 
     expect(result.map((item) => item.id)).toEqual(["v1"]);
   });
+
+  it("never selects external videos for in-place compression", () => {
+    const external = makeVideoItem("external", "external.mp4");
+    external.mediaStorage = { kind: "external", rootId: "root-1", relativePath: "external.mp4" };
+
+    expect(selectVideoTargetItems([external, makeVideoItem("managed", "managed.mp4")], undefined).map((item) => item.id)).toEqual([
+      "managed",
+    ]);
+  });
 });

@@ -6,8 +6,15 @@ import { pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc/registerIpcHandlers";
 import { ipcChannels } from "../shared/ipcChannels";
 import { isVideoMediaFile } from "../../src/features/library/utils/mediaFileTypes";
-import { getFreshImageThumbnailPath, warmImageThumbnails } from "./library/imageThumbnails";
+import {
+  getFreshImageThumbnailPath,
+  getFreshImageThumbnailPathForItem,
+  warmImageThumbnails,
+  warmLibraryItemThumbnails,
+} from "./library/imageThumbnails";
 import { getImagePath, getStartupGalleryImagePath } from "./library/libraryPaths";
+import { readLibraryFile } from "./library/libraryStore";
+import { resolveMediaAbsolutePath } from "./library/mediaPathResolver";
 import { ensureStartupGalleryStorage, getFreshStartupThumbnailPath } from "./library/startupGalleryStore";
 import { waitForImportedVideoNormalization } from "./library/videoImportNormalizer";
 import { applyStoredProxySettings } from "./network/proxySettingsStore";
@@ -21,6 +28,10 @@ import { installGpuCrashGuard, watchWindowForGpuCrash } from "./app/gpuCrashGuar
 import { assertRuntimeIntegrityOrExit } from "./app/runtimeIntegrity";
 import { startPerformanceMonitor } from "./performance/performanceMonitor";
 import { readWindowState, watchWindowState } from "./window/windowStateStore";
+import {
+  restoreExternalLibraryWatchers,
+  shutdownExternalLibraryWatchers,
+} from "./library/externalLibraryWatcher";
 
 app.setName("素言");
 
@@ -368,9 +379,10 @@ app.whenReady().then(async () => {
     try {
       const url = new URL(request.url);
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
-      const imagePath = getImagePath(imageFileName);
+      const item = await findLibraryItemByImageFileName(imageFileName);
+      const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
 
-      if (isVideoMediaFile(imageFileName)) {
+      if (isVideoMediaFile(imageFileName) && (!item || !item.mediaStorage || item.mediaStorage === "managed")) {
         await waitForImportedVideoNormalization(imagePath);
       }
 
@@ -400,15 +412,22 @@ app.whenReady().then(async () => {
     try {
       const url = new URL(request.url);
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
-      const thumbnailPath = await getFreshImageThumbnailPath(imageFileName);
+      const item = await findLibraryItemByImageFileName(imageFileName);
+      const thumbnailPath = item
+        ? await getFreshImageThumbnailPathForItem(item)
+        : await getFreshImageThumbnailPath(imageFileName);
 
       if (thumbnailPath) {
         return net.fetch(pathToFileURL(thumbnailPath).toString());
       }
 
-      const imagePath = getImagePath(imageFileName);
+      const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
 
-      warmImageThumbnails([imageFileName], 1);
+      if (item) {
+        warmLibraryItemThumbnails([item]);
+      } else {
+        warmImageThumbnails([imageFileName], 1);
+      }
 
       const imageStats = await fs.stat(imagePath).catch(() => null);
 
@@ -439,6 +458,13 @@ app.whenReady().then(async () => {
 
   await createWindow();
 
+  try {
+    await restoreExternalLibraryWatchers();
+    logStartupEvent("external-library-watchers:ready");
+  } catch (error) {
+    logger.warn("external-library", "watch:restore-failed", { message: String(error) });
+  }
+
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createWindow();
@@ -451,6 +477,15 @@ app.on("window-all-closed", () => {
     app.quit();
   }
 });
+
+app.on("before-quit", () => {
+  void shutdownExternalLibraryWatchers();
+});
+
+async function findLibraryItemByImageFileName(imageFileName: string) {
+  const library = await readLibraryFile();
+  return library.items.find((item) => item.imageFileName === imageFileName) ?? null;
+}
 
 function registerWindowControls(window: BrowserWindow): void {
   ipcMain.handle(ipcChannels.windowMinimize, () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLibraryStore } from "@/features/library/store/useLibraryStore";
 import type { LibraryItem } from "@/features/library/types/library";
+import { prioritizeMissingLibraryItems } from "@/features/library/utils/externalMediaStatus";
 import { toPromptCardData, PromptCardData } from "@/features/library/utils/promptFilters";
 
 const cardCache = new WeakMap<LibraryItem, PromptCardData>();
@@ -22,8 +23,9 @@ const IDLE_BATCH_SIZE = 64;
 
 export function usePromptCards(): PromptCardData[] {
   const items = useLibraryStore((state) => state.items);
-  const itemsRef = useRef(items);
-  itemsRef.current = items;
+  const prioritizedItems = useMemo(() => prioritizeMissingLibraryItems(items), [items]);
+  const itemsRef = useRef(prioritizedItems);
+  itemsRef.current = prioritizedItems;
   const previousCardsRef = useRef<PromptCardData[]>([]);
   const previousItemsRef = useRef<readonly LibraryItem[]>([]);
 
@@ -79,21 +81,21 @@ export function usePromptCards(): PromptCardData[] {
     // 删除后主进程返回的新数组里，未改条目若复用了旧对象引用，可直接复用旧 card。
     if (
       previousCards.length > 0 &&
-      previousItems.length === items.length &&
-      previousItems.every((item, index) => item === items[index])
+      previousItems.length === prioritizedItems.length &&
+      previousItems.every((item, index) => item === prioritizedItems[index])
     ) {
       const reused =
         previousCards.length === nextVisibleCount
           ? previousCards
-          : items.slice(0, nextVisibleCount).map(toCachedPromptCardData);
-      previousItemsRef.current = items;
+          : prioritizedItems.slice(0, nextVisibleCount).map(toCachedPromptCardData);
+      previousItemsRef.current = prioritizedItems;
       previousCardsRef.current = reused;
       return reused;
     }
 
-    const nextCards = items.slice(0, nextVisibleCount).map(toCachedPromptCardData);
-    previousItemsRef.current = items;
+    const nextCards = prioritizedItems.slice(0, nextVisibleCount).map(toCachedPromptCardData);
+    previousItemsRef.current = prioritizedItems;
     previousCardsRef.current = nextCards;
     return nextCards;
-  }, [items, visibleCount]);
+  }, [items.length, prioritizedItems, visibleCount]);
 }

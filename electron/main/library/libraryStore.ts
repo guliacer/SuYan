@@ -1,11 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LibraryFile, LibraryItem, VideoKeyframe } from "../../../src/features/library/types/library";
+import type { LibraryFile, LibraryItem, MediaStorage, VideoKeyframe } from "../../../src/features/library/types/library";
 import { normalizeNsfwRating } from "../../../src/features/library/utils/nsfwRating";
 import { normalizePromptType } from "../../../src/features/library/utils/promptType";
 import { AppError } from "../ipc/errors";
 import { getImagesDir, getLibraryDataDir, getLibraryPath } from "./libraryPaths";
 import { createDefaultLibrary, createDefaultSeedImage, getDefaultSeedImageFileNames, shouldEnableDefaultLibrarySeed } from "./defaultLibrarySeed";
+import { refreshExternalMediaHealth } from "./externalMediaHealth";
 
 const schemaVersion = 1;
 const defaultSeedMarkerFileName = ".default-library-seeded";
@@ -56,7 +57,7 @@ export async function ensureLibraryStorage(): Promise<void> {
   }
 }
 
-export async function readLibraryFile(): Promise<LibraryFile> {
+export async function readLibraryFile(options?: { refreshExternalHealth?: boolean }): Promise<LibraryFile> {
   await ensureLibraryStorage();
 
   const content = await fs.readFile(getLibraryPath(), "utf8");
@@ -66,7 +67,22 @@ export async function readLibraryFile(): Promise<LibraryFile> {
     throw new AppError("LIBRARY_SCHEMA_INVALID", "素材库文件结构不合法。");
   }
 
-  return parsed;
+  const normalizedLibrary = {
+    ...parsed,
+    items: parsed.items.map(normalizeItem),
+  };
+
+  if (!options?.refreshExternalHealth) {
+    return normalizedLibrary;
+  }
+
+  const healthyLibrary = await refreshExternalMediaHealth(normalizedLibrary);
+
+  if (healthyLibrary !== normalizedLibrary) {
+    await writeLibraryFile(healthyLibrary, { skipNormalize: true });
+  }
+
+  return healthyLibrary;
 }
 
 export async function writeLibraryFile(library: LibraryFile, options?: { skipNormalize?: boolean }): Promise<LibraryFile> {
@@ -114,6 +130,7 @@ export function normalizeItem(item: LibraryItem): LibraryItem {
     id: item.id,
     title: item.title,
     imageFileName: item.imageFileName,
+    mediaStorage: normalizeMediaStorage(item.mediaStorage),
     prompt: item.prompt,
     negativePrompt: item.negativePrompt,
     category: normalizeOptionalString(item.category),
@@ -160,6 +177,7 @@ function isLibraryItem(input: unknown): input is LibraryItem {
     typeof input.id === "string" &&
     typeof input.title === "string" &&
     typeof input.imageFileName === "string" &&
+    isOptionalMediaStorage(input.mediaStorage) &&
     typeof input.prompt === "string" &&
     typeof input.negativePrompt === "string" &&
     Array.isArray(input.tags) &&
@@ -191,6 +209,41 @@ function isOptionalNsfwRating(input: unknown): boolean {
 
 function isOptionalRemoteImageStatus(input: unknown): boolean {
   return input === undefined || input === null || input === "pending" || input === "downloaded";
+}
+
+function isOptionalMediaStorage(input: unknown): boolean {
+  return (
+    input === undefined ||
+    input === "managed" ||
+    (isRecord(input) &&
+      input.kind === "external" &&
+      typeof input.rootId === "string" &&
+      typeof input.relativePath === "string" &&
+      (input.size === undefined || input.size === null || (typeof input.size === "number" && Number.isFinite(input.size))) &&
+      (input.mtimeMs === undefined || input.mtimeMs === null || (typeof input.mtimeMs === "number" && Number.isFinite(input.mtimeMs))) &&
+      (input.status === undefined || input.status === "available" || input.status === "missing"))
+  );
+}
+
+function normalizeMediaStorage(input: LibraryItem["mediaStorage"]): MediaStorage {
+  if (
+    input &&
+    typeof input === "object" &&
+    input.kind === "external" &&
+    input.rootId.trim() &&
+    input.relativePath.trim()
+  ) {
+    return {
+      kind: "external",
+      rootId: input.rootId.trim(),
+      relativePath: input.relativePath.trim(),
+      size: normalizeOptionalNumber(input.size),
+      mtimeMs: normalizeOptionalNumber(input.mtimeMs),
+      status: input.status === "missing" ? "missing" : "available",
+    };
+  }
+
+  return "managed";
 }
 
 function isOptionalString(input: unknown): boolean {

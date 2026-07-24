@@ -1,4 +1,4 @@
-import type { LibraryFile, LibraryItem, VideoKeyframe } from "../types/library";
+import type { LibraryFile, LibraryItem, MediaStorage, VideoKeyframe } from "../types/library";
 import { normalizeNsfwRating } from "./nsfwRating";
 import { normalizePromptType } from "./promptType";
 
@@ -11,6 +11,7 @@ export function buildLibraryFile(items: LibraryItem[]): LibraryFile {
 
       return {
         ...item,
+        mediaStorage: normalizeMediaStorage(item.mediaStorage),
         title: item.title.trim(),
         prompt: item.prompt.trim(),
         negativePrompt: item.negativePrompt.trim(),
@@ -35,6 +36,27 @@ export function buildLibraryFile(items: LibraryItem[]): LibraryFile {
       };
     }),
   };
+}
+
+function normalizeMediaStorage(input: LibraryItem["mediaStorage"]): MediaStorage {
+  if (
+    input &&
+    typeof input === "object" &&
+    input.kind === "external" &&
+    input.rootId.trim() &&
+    input.relativePath.trim()
+  ) {
+    return {
+      kind: "external",
+      rootId: input.rootId.trim(),
+      relativePath: input.relativePath.trim(),
+      size: normalizeOptionalNumber(input.size),
+      mtimeMs: normalizeOptionalNumber(input.mtimeMs),
+      status: input.status === "missing" ? "missing" : "available",
+    };
+  }
+
+  return "managed";
 }
 
 function normalizeVideoKeyframes(input: VideoKeyframe[] | undefined): VideoKeyframe[] {
