@@ -69,10 +69,6 @@ Browse in everyday order. Each section lists capabilities, then shows a demo GIF
 
 Left sidebar **Import** → **Import images**, multi-select local files; paste and Word import also work.
 
-Mounted folders can be watched individually from **Material folders**; watching is off by default. While enabled, new media is indexed automatically, removals are marked missing without deleting either the index or source files, and uniquely identifiable renames update the stored relative path. Turning watching off stops automatic synchronization.
-
-If files were deleted on disk and only **source missing** indexes remain: open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and app thumbnail cache for that root only — it does **not** delete remaining files on disk or affect other folders.
-
 <img src="./photo/本地素材导入.gif" alt="Local import" width="860" />
 
 #### Network import
@@ -224,9 +220,25 @@ Send evidence to [Issues](https://github.com/guliacer/SuYan/issues). Verified ca
 </details>
 
 <details>
-<summary><b>Source files were deleted; library still shows "source missing". How do I clean it?</b></summary>
+<summary><b>How do I use images already on disk?</b></summary>
 
-**A:** Open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and thumbnail cache for that root only — it does **not** delete files that still exist on disk. See [Import](#-import) / mounted folders notes above.
+**A:** Left sidebar **Import** → **Add folder** scans existing image/video folders. Media stays in place; the app only stores indexes, size/mtime, and thumbnail cache — it does **not** copy source media. Deleting a library entry does not delete the original file.
+
+Each mounted folder can enable **Watch this folder** (off by default). While enabled, new media is indexed automatically; removals are marked missing without deleting the index or source files. Uniquely identifiable renames update the stored relative path; otherwise it becomes "old entry missing + new entry added". Turning watching off stops automatic synchronization.
+
+You can also validate, re-locate, incrementally rescan, or unmount from **Material folders**. After re-locating, items recover by original relative paths.
+
+ZIP shares read external sources and embed media into the package (no in-library copy required). External items are not compressed/transcoded in-app and are never overwritten in place; create a managed copy via normal import first if you need compression.
+
+</details>
+
+<details>
+<summary><b>How do I handle missing source files?</b></summary>
+
+**A:** If a mount is disconnected or files were moved/deleted on disk, cards show **source missing** (both masonry and batch manage).
+
+- If files only moved: **re-locate** the mount under **Material folders** to restore by relative paths.
+- If the originals are gone for good and only missing indexes remain: open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and app thumbnail cache for that root only — it does **not** delete remaining files on disk or affect other folders.
 
 </details>
 
