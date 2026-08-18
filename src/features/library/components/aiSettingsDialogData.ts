@@ -27,6 +27,9 @@ export type AiSettingsDialogProps = {
   onCopyApiKey: (profileId: string, draftApiKey?: string) => Promise<boolean>;
   onReadApiKey: (profileId: string) => Promise<string | null>;
   onNotify?: (message: StatusFeedbackMessage) => void;
+  /** store 层导入落地后的 UI 反馈回调（由 dlg 内部编排 import/export，
+   * 落地成功后用导入结果刷新 store，再通过 resetDrafts 重置内部 drafts）。 */
+  onApplyImportedSettings?: (settings: PublicAiProviderSettings) => void;
 };
 
 export type AiProviderProfileDraft = {

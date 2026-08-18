@@ -788,6 +788,31 @@ export function useAiSettings({
     setFeedbackText("规则已删除，正在自动保存。");
   }
 
+  function resetDrafts(nextSettings: PublicAiProviderSettings) {
+    setProfiles(createProfileDrafts(nextSettings));
+    setActionEntryOrder(normalizeAiSettingsActionOrder(nextSettings.actionOrder));
+    setActiveProfileId(nextSettings.activeProfileId);
+    setSelectedProfileId(nextSettings.activeProfileId);
+    setActionPreferences(nextSettings.actionPreferences);
+    setRecognitionSourcePreferences(normalizeAiRecognitionSourcePreferences(nextSettings.recognitionSourcePreferences));
+    setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
+    setRuleEditorOpen(false);
+    setManualModelDraft("");
+    setModelPicker(null);
+    setDeleteConfirmProfileId(null);
+    setClearConfirmProfileId(null);
+    setProfileActionsMenuId(null);
+    setEditingProfileNameId(null);
+    setRevealedBaseUrlProfileId(null);
+    setRevealedApiKeyProfileId(null);
+    setRevealedApiKeys({});
+    setDraggedProfileId(null);
+    setDragOverProfileId(null);
+    setDraggedActionEntryId(null);
+    setDragOverActionEntryId(null);
+    setFeedbackText("");
+  }
+
   return {
     // 外部直接传入的 props
     isBusy,
@@ -902,5 +927,7 @@ export function useAiSettings({
     saveRule,
     toggleModelCapability,
     toggleRuleSelection,
+    autoSave,
+    resetDrafts,
   };
 }

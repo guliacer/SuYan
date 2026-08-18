@@ -245,6 +245,7 @@ type LibraryState = {
   saveMaterialBrowserScrollTop: (scrollTop: number) => void;
   gradeAllImagesForNsfw: (options?: { force?: boolean }) => Promise<void>;
   saveAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<boolean | string>;
+  applyImportedAiSettings: (settings: PublicAiProviderSettings) => void;
   saveAiActionModelPreference: (
     action: AiFeatureAction,
     selection: { profileId: string; modelId: string },
@@ -868,6 +869,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ isBusy: false });
       return errorMessage;
     }
+  },
+
+  applyImportedAiSettings: (settings) => {
+    set({
+      aiSettings: settings,
+      aiErrorDialog: null,
+      aiAnalysisCircuitOpen: false,
+      statusMessage: successStatus("已导入 AI 设置备份。"),
+    });
   },
 
   saveAiActionModelPreference: async (action, selection) => {

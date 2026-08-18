@@ -364,6 +364,7 @@ export function LibraryView() {
   const saveNsfwSettings = useLibraryStore((state) => state.saveNsfwSettings);
   const gradeAllImagesForNsfw = useLibraryStore((state) => state.gradeAllImagesForNsfw);
   const saveAiSettings = useLibraryStore((state) => state.saveAiSettings);
+  const applyImportedAiSettings = useLibraryStore((state) => state.applyImportedAiSettings);
   const saveAiActionModelPreference = useLibraryStore((state) => state.saveAiActionModelPreference);
   const testAiSettings = useLibraryStore((state) => state.testAiSettings);
   const saveProxySettings = useLibraryStore((state) => state.saveProxySettings);
@@ -2275,6 +2276,7 @@ export function LibraryView() {
               return result.ok ? result.data.apiKey : null;
             }}
             onNotify={showStatusMessage}
+            onApplyImportedSettings={applyImportedAiSettings}
           />
         </Suspense>
       ) : null}

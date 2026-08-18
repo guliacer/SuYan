@@ -1,0 +1,63 @@
+TASK 12 EVIDENCE — 导入导出对话框 + store 接线
+========================================================
+Worker: continuation from session ses_fed6b2decffee7Ip4XxzmUzTX1
+Baseline commit: 499f24f (refactor(ai): split AiSettingsDialog into components and hooks)
+Date: 2026-08-18
+
+Scope (plan T12): 新增 AiSettingsImportDialog / AiSettingsExportDialog /
+ConfirmImportDialog（复用 ConfirmBubble）+ store 接线；导出普通/加密、导入
+预览→选模式→落地；应用后更新 store 并刷新 dialog drafts；导入全程暂停自动保存。
+
+=== CHANGES ===
+1. src/features/library/components/AiSettingsExportDialog.tsx（新增）：
+   - 普通导出（明文，不含 key）/ 加密完整备份（full）单选项；
+   - full 需两次输入密码一致校验；导出走 orchestrator 传入的 onExport。
+2. src/features/library/components/AiSettingsImportDialog.tsx（新增）：
+   - 密码输入（明文备份可留空）→ onPickFile 预览；
+   - 预览摘要：fileName / formatVersion / providerCount / newProviderCount /
+     modelCount / hasApiKeyProfiles / actionPreferencesCount；
+   - 三模式 merge（默认）/ add-new / replace，replace 触发 ConfirmBubble 二次确认；
+   - 应用走 orchestrator 传入的 onApply。
+3. src/features/library/components/AiSettingsDialog.tsx（编排）：
+   - Header 区新增「导出备份」「导入备份」入口按钮；
+   - handleExport / handlePickFile / handleApply：autoSave.pause() →
+     autoSave.flush()（失败可感知 → 用户报错）→ 调 window.suyanApi.* →
+     finally autoSave.resume()；
+   - handleApply 成功后 api.resetDrafts(nextSettings) 重置内部 drafts 并
+     onApplyImportedSettings?.(nextSettings) 同步 store。
+4. src/features/library/components/useAiSettings.ts：新增 resetDrafts(nextSettings)，
+   return 暴露 autoSave + resetDrafts；AiSettingsApi 不变。
+5. src/features/library/components/AiSettingsHeader.tsx：改为通用 title/description
+   （主 dialog header 组装含导入/导出按钮，故 header 只保留标题文案）。
+6. src/features/library/store/useLibraryStore.ts：
+   - LibraryState 新增 applyImportedAiSettings(settings: PublicAiProviderSettings)：void；
+   - 实现：set aiSettings + 清 aiErrorDialog/aiAnalysisCircuitOpen +
+     successStatus("已导入 AI 设置备份。")。
+7. src/features/library/components/LibraryView.tsx：AiSettingsDialog 挂载点新增
+   onApplyImportedSettings={applyImportedAiSettings}。
+
+=== 安全边界（Scope OUT 核验）===
+- 预览摘要绝不含明文 key：ImportDialog/ExportDialog 源码无 apiKey 字段，
+  预览只暴露 hasApiKeyProfiles 布尔（A3 主进程摘要契约）。
+- 完全替换模式有二次确认（ConfirmBubble）。
+- 导入/导出全程 autoSave.pause() + finally resume()；flush 失败不再静默。
+
+=== ACCEPTANCE ===
+[PASS] npx tsc --noEmit → 0 错误（renderer）
+[PASS] npx tsc --noEmit -p tsconfig.electron.json → 0 错误
+[PASS] npx vitest run tests/unit/aiSettingsImportExport.test.ts → 6/6 绿
+[PASS] npx vitest run（全量）→ 131 文件 / 954 测试绿（stressTest 性能计时
+      项并行时偶发超时，单独跑 8/8 绿，属既有 flaky 计时，与本次改动无关）
+
+=== COMMIT ===
+feat(ai): add backup import/export dialogs
+文件：src/features/library/components/AiSettingsDialog.tsx
+     src/features/library/components/AiSettingsExportDialog.tsx（新增）
+     src/features/library/components/AiSettingsImportDialog.tsx（新增）
+     src/features/library/components/AiSettingsHeader.tsx
+     src/features/library/components/useAiSettings.ts
+     src/features/library/components/aiSettingsDialogData.ts
+     src/features/library/store/useLibraryStore.ts
+     src/features/library/components/LibraryView.tsx
+     tests/unit/aiSettingsImportExport.test.ts（新增）
+     .omo/evidence/task-12-ai-settings-optimization.txt
