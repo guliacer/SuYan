@@ -20,6 +20,8 @@ import {
 } from "../../../src/features/library/types/ai";
 import { AppError } from "../ipc/errors";
 
+export type { AiProviderSettings } from "../../../src/features/library/types/ai";
+
 export type AiProviderSettingsCollection = {
   activeProfileId: string;
   actionOrder?: string[];

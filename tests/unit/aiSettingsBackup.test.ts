@@ -163,7 +163,9 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(text);
 
       expect(result.ok).toBe(true);
-      expect(result.data?.formatVersion).toBe(1);
+      if (result.ok) {
+        expect(result.data.formatVersion).toBe(1);
+      }
     });
 
     it("parses formatVersion 2 encrypted backup", async () => {
@@ -186,7 +188,9 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(envelopeText, "password");
 
       expect(result.ok).toBe(true);
-      expect(result.data?.formatVersion).toBe(1);
+      if (result.ok) {
+        expect(result.data.formatVersion).toBe(1);
+      }
       expect(mockDecryptBackup).toHaveBeenCalledTimes(1);
     });
 
@@ -198,9 +202,11 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(text);
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe(
-        "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
-      );
+      if (!result.ok) {
+        expect(result.error.code).toBe(
+          "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
+        );
+      }
     });
 
     it("returns error for unsupported version", () => {
@@ -211,18 +217,22 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(text);
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe(
-        "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
-      );
+      if (!result.ok) {
+        expect(result.error.code).toBe(
+          "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
+        );
+      }
     });
 
     it("returns error for invalid JSON", () => {
       const result = parseBackupFile("this is not valid JSON");
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe(
-        "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
-      );
+      if (!result.ok) {
+        expect(result.error.code).toBe(
+          "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
+        );
+      }
     });
 
     it("returns error when password missing for encrypted backup", async () => {
@@ -237,7 +247,9 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(JSON.stringify(envelope));
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe("AI_SETTINGS_BACKUP_DECRYPT_FAILED");
+      if (!result.ok) {
+        expect(result.error.code).toBe("AI_SETTINGS_BACKUP_DECRYPT_FAILED");
+      }
     });
 
     it("returns error when decrypt fails (wrong password)", async () => {
@@ -264,7 +276,9 @@ describe("AI settings backup", () => {
       );
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe("AI_SETTINGS_BACKUP_DECRYPT_FAILED");
+      if (!result.ok) {
+        expect(result.error.code).toBe("AI_SETTINGS_BACKUP_DECRYPT_FAILED");
+      }
     });
   });
 
@@ -338,7 +352,9 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(text);
 
       expect(result.ok).toBe(true);
-      expect(result.data).toEqual(plainBackup);
+      if (result.ok) {
+        expect(result.data).toEqual(plainBackup);
+      }
     });
 
     it("encrypted export → decrypt → parse returns identical structure", async () => {
@@ -362,7 +378,9 @@ describe("AI settings backup", () => {
       );
 
       expect(result.ok).toBe(true);
-      expect(result.data).toEqual(plainBackup);
+      if (result.ok) {
+        expect(result.data).toEqual(plainBackup);
+      }
     });
   });
 
@@ -371,9 +389,11 @@ describe("AI settings backup", () => {
       const result = parseBackupFile("{invalid json");
 
       expect(result.ok).toBe(false);
-      expect(result.error?.code).toBe(
-        "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
-      );
+      if (!result.ok) {
+        expect(result.error.code).toBe(
+          "AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION",
+        );
+      }
     });
 
     it("accepts well-formed backup with valid profiles", () => {
@@ -381,7 +401,9 @@ describe("AI settings backup", () => {
       const result = parseBackupFile(JSON.stringify(backup));
 
       expect(result.ok).toBe(true);
-      expect(result.data?.profiles).toHaveLength(2);
+      if (result.ok) {
+        expect(result.data.profiles).toHaveLength(2);
+      }
     });
   });
 });

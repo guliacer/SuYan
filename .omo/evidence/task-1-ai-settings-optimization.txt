@@ -43,6 +43,7 @@ npx tsc --noEmit -p tsconfig.electron.json → exit 0 (no errors)
 ## 6. Git Commit
 
 8491326 feat(ai): add scrypt+AES-256-GCM backup crypto module
+Note: A subsequent checkpoint commit (1bbf534) was created on top; the module commit is intact at 8491326.
 
 ## 7. Security Notes
 
