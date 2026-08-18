@@ -44,6 +44,18 @@ export type IpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string } };
 
+export type AiSettingsImportPreview = {
+  token: string;
+  fileName: string;
+  formatVersion: number;
+  providerCount: number;
+  newProviderCount: number;
+  modelCount: number;
+  hasApiKeyProfiles: boolean;
+  actionPreferencesCount: number;
+  errors?: string[];
+};
+
 export type ImportProgress = {
   current: number;
   total: number;
@@ -426,6 +438,14 @@ export type SuyanApi = {
   importZip: () => Promise<IpcResult<ImportZipData>>;
   readAiSettings: () => Promise<IpcResult<PublicAiProviderSettings>>;
   saveAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<IpcResult<PublicAiProviderSettings>>;
+  exportAiSettings: (payload: {
+    type: "plain" | "full";
+    password?: string;
+  }) => Promise<IpcResult<{ canceled: boolean; filePath?: string }>>;
+  importAiSettingsPreview: (payload: { password?: string }) =>
+    Promise<IpcResult<AiSettingsImportPreview>>;
+  importAiSettingsApply: (payload: { token: string; mode: "merge" | "replace" | "add-new" }) =>
+    Promise<IpcResult<PublicAiProviderSettings>>;
   copyAiApiKey: (profileId: string) => Promise<IpcResult<{ copied: true }>>;
   readAiApiKey: (profileId: string) => Promise<IpcResult<{ apiKey: string }>>;
   testAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<IpcResult<AiSettingsTestData>>;

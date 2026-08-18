@@ -110,6 +110,12 @@ const suyanApi: SuyanApi = {
   importZip: () => invoke(IpcChannelName.ArchiveImportZip),
   readAiSettings: () => invoke(IpcChannelName.AiSettingsRead),
   saveAiSettings: (settings: SaveAiProviderSettingsPayload) => invoke(IpcChannelName.AiSettingsSave, settings),
+  exportAiSettings: (payload: { type: "plain" | "full"; password?: string }) =>
+    invoke(IpcChannelName.AiSettingsExport, payload),
+  importAiSettingsPreview: (payload: { password?: string }) =>
+    invoke(IpcChannelName.AiSettingsImport, payload),
+  importAiSettingsApply: (payload: { token: string; mode: "merge" | "replace" | "add-new" }) =>
+    invoke(IpcChannelName.AiSettingsImportApply, payload),
   copyAiApiKey: (profileId: string) => invoke(IpcChannelName.AiApiKeyCopy, profileId),
   readAiApiKey: (profileId: string) => invoke(IpcChannelName.AiApiKeyRead, profileId),
   testAiSettings: (settings: SaveAiProviderSettingsPayload) => invoke(IpcChannelName.AiSettingsTest, settings),

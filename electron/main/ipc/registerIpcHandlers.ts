@@ -30,6 +30,11 @@ import {
   writeAiProviderSettings,
 } from "../ai/aiSettingsStore";
 import {
+  exportSettingsBackup,
+  importSettingsApply,
+  importSettingsPreview,
+} from "../ai/aiSettingsBackupService";
+import {
   analyzePromptWithRemoteAi,
   generateImagesWithRemoteAi,
   listAiProviderModels,
@@ -450,6 +455,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.aiSettingsRead, () => handleResult("ai:settings-read", () => readPublicAiProviderSettings()));
   ipcMain.handle(ipcChannels.aiSettingsSave, (_event, settings: SaveAiProviderSettingsPayload) =>
     handleResult("ai:settings-save", () => writeAiProviderSettings(settings)),
+  );
+  ipcMain.handle(ipcChannels.aiSettingsExport, (_event, payload: { type: "plain" | "full"; password?: string }) =>
+    handleResult("ai:settings-export", () => exportSettingsBackup(payload)),
+  );
+  ipcMain.handle(ipcChannels.aiSettingsImport, (_event, payload: { password?: string }) =>
+    handleResult("ai:settings-import", () => importSettingsPreview(payload)),
+  );
+  ipcMain.handle(
+    ipcChannels.aiSettingsImportApply,
+    (_event, payload: { token: string; mode: "merge" | "replace" | "add-new" }) =>
+      handleResult("ai:settings-import-apply", () => importSettingsApply(payload.token, payload.mode)),
   );
   ipcMain.handle(ipcChannels.aiApiKeyCopy, (_event, profileId: string) =>
     handleResult("ai:api-key-copy", async () => {
