@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const hookSource = readFileSync("src/features/library/hooks/useAutoSave.ts", "utf8");
 const wrapperSource = readFileSync("src/features/library/hooks/useAiSettingsAutoSave.ts", "utf8");
 const dialogSource = readFileSync("src/features/library/components/AiSettingsDialog.tsx", "utf8");
+const useAiSettingsSource = readFileSync("src/features/library/components/useAiSettings.ts", "utf8");
 
 describe("useAiSettingsAutoSave (source contract)", () => {
   it("exposes flush/pause/resume alongside isSaving", () => {
@@ -40,11 +41,11 @@ describe("useAiSettingsAutoSave (source contract)", () => {
   });
 
   it("dialog pauses auto-save while testing all profiles and resumes after", () => {
-    expect(dialogSource).toContain("useAiSettingsAutoSave");
-    expect(dialogSource).toContain("autoSave.pause()");
-    expect(dialogSource).toContain("autoSave.resume()");
+    expect(useAiSettingsSource).toContain("useAiSettingsAutoSave");
+    expect(useAiSettingsSource).toContain("autoSave.pause()");
+    expect(useAiSettingsSource).toContain("autoSave.resume()");
     // test-all pause is now unified through the hook (no separate enabled flag)
-    expect(dialogSource).not.toContain("enabled: canSaveSettings && !isTestingAllProfiles");
-    expect(dialogSource).toContain("enabled: canSaveSettings");
+    expect(useAiSettingsSource).not.toContain("enabled: canSaveSettings && !isTestingAllProfiles");
+    expect(useAiSettingsSource).toContain("enabled: canSaveSettings");
   });
 });
