@@ -38,6 +38,13 @@ export const uiErrorMessage: Record<string, string> = {
   ZIP_DATA_MISSING: "分享包缺少 data.json。",
   ZIP_IMAGE_MISSING: "分享包缺少图片文件。",
   ZIP_SCHEMA_INVALID: "分享包数据结构不合法。",
+  AI_SETTINGS_BACKUP_INVALID: "备份文件无效，请选择素言导出的 AI 设置备份文件。",
+  AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION: "备份文件版本不受支持，请更新软件后重试。",
+  AI_SETTINGS_BACKUP_DECRYPT_FAILED: "备份密码错误或备份文件已损坏。",
+  AI_SETTINGS_BACKUP_PASSWORD_REQUIRED: "加密备份需要输入密码。",
+  AI_SETTINGS_BACKUP_FILE_READ_FAILED: "读取备份文件失败，请检查文件是否可访问。",
+  AI_SETTINGS_BACKUP_FILE_WRITE_FAILED: "保存备份文件失败，请检查磁盘空间与权限。",
+  AI_SETTINGS_BACKUP_VALIDATION_FAILED: "备份内容校验失败，无法导入。",
   UNKNOWN_ERROR: "操作失败，请重试。",
 };
 
