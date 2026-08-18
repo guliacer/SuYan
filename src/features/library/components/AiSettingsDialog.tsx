@@ -907,8 +907,13 @@ export function AiSettingsDialog({
                 </div>
                 <div
                   ref={profileListRef}
-                  className="grid min-h-0 flex-1 auto-rows-max gap-1.5 overflow-y-auto overscroll-contain pr-1"
+                  className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pr-1"
                 >
+                  <div className="flex items-center justify-between text-xs font-semibold text-muted">
+                    <span>OpenAI 兼容</span>
+                    <span>{profiles.length}</span>
+                  </div>
+                  <div className="grid auto-rows-max gap-1">
                   {profiles.map((profile) => {
                     const isSelected = profile.id === selectedProfile?.id;
                     const keyState = resolveDraftApiKeyState(profile);
@@ -918,7 +923,7 @@ export function AiSettingsDialog({
 
                     return (
                       <button
-                        className={`grid min-h-14 gap-1 rounded-lg border px-2.5 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                        className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                           isSelected
                             ? "border-primary bg-primary-soft text-foreground"
                             : isDragOver
@@ -971,27 +976,21 @@ export function AiSettingsDialog({
                           setDragOverProfileId(null);
                         }}
                       >
-                        <span className="flex min-w-0 items-center justify-between gap-2">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <GripVertical aria-hidden="true" className="shrink-0 text-muted/55" size={14} />
-                            <span className="truncate text-sm font-semibold">{profile.name || "未命名 API"}</span>
-                          </span>
-                          {profile.id === activeProfileId ? <Star className="shrink-0 text-primary" size={13} /> : null}
-                        </span>
-                        <span className="flex min-w-0 items-center gap-2 text-[11px]">
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <GripVertical aria-hidden="true" className="shrink-0 text-muted/55" size={14} />
+                          <span className="truncate text-sm font-medium">{profile.name || "未命名 API"}</span>
                           <span
                             className={`size-2 shrink-0 rounded-full ${
                               isReady ? "bg-progress" : profile.enabled ? "bg-warning" : "bg-border"
                             }`}
                           />
-                          <span className={isReady ? "text-progress" : "text-muted"}>
-                            {isReady ? "可用" : profile.enabled ? "待完善" : "已停用"}
-                          </span>
-                          <span className="truncate">{keyState.willHaveApiKey ? profile.model : "未配置密钥"}</span>
+                          <span className="truncate text-[11px] text-muted">{keyState.willHaveApiKey ? profile.model : "未配置密钥"}</span>
+                          {profile.id === activeProfileId ? <Star className="shrink-0 text-primary" size={12} /> : null}
                         </span>
                       </button>
                     );
                   })}
+                    </div>
                 </div>
                 <div className="mt-3 border-t border-border pt-3">
                   <Button
@@ -1007,11 +1006,11 @@ export function AiSettingsDialog({
               </aside>
 
               {selectedProfile ? (
-                <div className="grid min-w-0 gap-0 bg-panel">
-                  <section className="grid gap-3 border-b border-border bg-panel px-6 py-5">
+                <div className="flex min-w-0 flex-col bg-panel">
+                  <section className="grid gap-2 border-b border-border bg-panel px-6 py-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-foreground">当前连接</p>
+                        <p className="text-xs font-medium text-muted">当前连接</p>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           {editingProfileNameId === selectedProfile.id ? (
                             <TextField
@@ -1158,7 +1157,7 @@ export function AiSettingsDialog({
                   </section>
 
                   <section className="grid gap-4 bg-panel px-6 py-5">
-                    <div className="grid gap-4">
+                    <div className="grid gap-4 min-[820px]:grid-cols-2 min-[820px]:items-start">
                       <label className="grid gap-2 text-sm font-medium text-muted">
                         接口地址
                         <div className="grid gap-2 min-[680px]:grid-cols-[minmax(0,1fr)_auto]">
