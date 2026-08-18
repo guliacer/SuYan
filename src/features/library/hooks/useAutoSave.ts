@@ -15,6 +15,13 @@ type UseAutoSaveOptions<T> = {
 
 type UseAutoSaveResult = {
   isSaving: boolean;
+  /** Manually persist the latest value now. Resolves true when the value is
+   * saved (or nothing needs saving), false when saving was skipped or failed. */
+  flush: () => Promise<boolean>;
+  /** Pause auto-save scheduling (in-flight flush still completes). */
+  pause: () => void;
+  /** Resume auto-save scheduling after a pause. */
+  resume: () => void;
 };
 
 /** Debounces local draft changes and persists the latest complete snapshot. */
@@ -39,11 +46,12 @@ export function useAutoSave<T>({
   const mountedRef = useRef(true);
   const enabledRef = useRef(enabled);
   const isBusyRef = useRef(isBusy);
+  const pausedRef = useRef(false);
   const onSaveRef = useRef(onSave);
   const onErrorRef = useRef(onError);
   const onSavedRef = useRef(onSaved);
   const serializeRef = useRef(serialize);
-  const flushRef = useRef<(() => Promise<void>) | null>(null);
+  const flushRef = useRef<(() => Promise<boolean>) | null>(null);
 
   valueRef.current = value;
   signatureRef.current = serialize(value);
@@ -69,18 +77,18 @@ export function useAutoSave<T>({
     }, delayMs);
   }
 
-  async function flush() {
+  async function flush(): Promise<boolean> {
     if (inFlightRef.current) {
-      return;
+      return false;
     }
 
-    if (!enabledRef.current || isBusyRef.current) {
-      return;
+    if (!enabledRef.current || isBusyRef.current || pausedRef.current) {
+      return false;
     }
 
     const requestSignature = signatureRef.current;
     if (requestSignature === lastSavedSignatureRef.current) {
-      return;
+      return true;
     }
 
     const requestRevision = revisionRef.current;
@@ -98,16 +106,22 @@ export function useAutoSave<T>({
         if (succeeded) {
           lastSavedSignatureRef.current = requestSignature;
           onSavedRef.current?.();
-        } else {
-          onErrorRef.current?.(
-            typeof result === "string" && result.trim() ? result : "自动保存失败，请稍后重试。",
-          );
+          return true;
         }
+
+        onErrorRef.current?.(
+          typeof result === "string" && result.trim() ? result : "自动保存失败，请稍后重试。",
+        );
+        return false;
       }
+
+      return false;
     } catch (error) {
       if (requestRevision === revisionRef.current) {
         onErrorRef.current?.(error instanceof Error ? error.message : "自动保存失败，请稍后重试。");
       }
+
+      return false;
     } finally {
       inFlightRef.current = false;
 
@@ -119,10 +133,29 @@ export function useAutoSave<T>({
         mountedRef.current &&
         signatureRef.current !== lastSavedSignatureRef.current &&
         enabledRef.current &&
-        !isBusyRef.current
+        !isBusyRef.current &&
+        !pausedRef.current
       ) {
         scheduleFlush();
       }
+    }
+  }
+
+  function pause() {
+    pausedRef.current = true;
+    clearTimer();
+  }
+
+  function resume() {
+    pausedRef.current = false;
+
+    if (
+      mountedRef.current &&
+      signatureRef.current !== lastSavedSignatureRef.current &&
+      enabledRef.current &&
+      !isBusyRef.current
+    ) {
+      scheduleFlush();
     }
   }
 
@@ -141,7 +174,7 @@ export function useAutoSave<T>({
       return;
     }
 
-    if (enabled && !isBusy) {
+    if (enabled && !isBusy && !pausedRef.current) {
       scheduleFlush();
     }
   }, [delayMs, enabled, isBusy, serialize, value]);
@@ -153,5 +186,5 @@ export function useAutoSave<T>({
     };
   }, []);
 
-  return { isSaving };
+  return { isSaving, flush, pause, resume };
 }

@@ -53,7 +53,7 @@ import {
   type StatusFeedbackMessage,
 } from "../utils/statusFeedback";
 import { maskAiBaseUrl, normalizeAiBaseUrl } from "../utils/aiBaseUrl";
-import { useAutoSave } from "../hooks/useAutoSave";
+import { useAiSettingsAutoSave } from "../hooks/useAiSettingsAutoSave";
 
 type AiSettingsDialogProps = {
   isBusy: boolean;
@@ -328,8 +328,8 @@ export function AiSettingsDialog({
     [actionEntryOrder, actionPreferences, activeProfileId, normalizedProfiles],
   );
 
-  useAutoSave({
-    enabled: canSaveSettings && !isTestingAllProfiles,
+  const autoSave = useAiSettingsAutoSave({
+    enabled: canSaveSettings,
     isBusy,
     onError: setFeedbackText,
     onSave,
@@ -542,6 +542,7 @@ export function AiSettingsDialog({
     }
 
     setIsTestingAllProfiles(true);
+    autoSave.pause();
     setFeedbackText(`正在测试全部 API（0/${testTargets.length}）...`);
 
     const failedIds = new Set<string>();
@@ -604,6 +605,7 @@ export function AiSettingsDialog({
       );
     } finally {
       setIsTestingAllProfiles(false);
+      autoSave.resume();
     }
   }
 
