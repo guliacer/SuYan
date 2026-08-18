@@ -1,0 +1,52 @@
+TASK 14 EVIDENCE — 打包交付
+========================================================
+Worker: continuation from session (T13 后收尾)
+Baseline commit: fec84b1 (test(ai): regression coverage and scope audit)
+Date: 2026-08-18
+
+Scope (plan T14): 执行 pnpm package:win（07 R1 强制），确认 release\win-unpacked
+素言.exe 与 resources\app.asar 更新到最新；EBUSY 按 07 R2 处理；打包前确认
+package.json version（0.3.0）高于已发布（0.2.10）；不覆盖旧 Release 附件（07 R5）；
+报告成功 + 产物更新时间。
+
+=== 打包前检查 ===
+- package.json version = 0.3.0（> 已发布 0.2.10）—— 满足版本隔离。
+- 打包前无运行中的素言/Electron/suyan-core 进程（tasklist 空），无需 EBUSY R2 处理。
+- 打包前旧产物 mtime：素言.exe / app.asar 均为 08:33（早于本次，需刷新）。
+
+=== 打包执行 ===
+[PASS] pnpm package:win → exit 0
+  链路：build:renderer（clean dist + vite build）→ build:electron（clean dist-electron
+  + tsc）→ build:rust-core（cargo release + stage bin/suyan-core.exe）→
+  obfuscate（23/117 sensitive）→ app-integrity.json（5 hashed files）→
+  electron-builder（nsis + zip）→ sync 回正式 release。
+  日志尾：electron-builder version=26.15.3，asar integrity 更新，zip/nsis 构建完成，
+  "Promoted staged package to release by syncing files."
+
+=== 产物验证（07 R1）===
+- release\win-unpacked\素言.exe              mtime 2026-08-18 17:05:42（本次刷新）
+- release\win-unpacked\resources\app.asar   mtime 2026-08-18 17:05:40（本次刷新）
+- release\素言-Portable-0.3.0.zip           mtime 2026-08-18 17:06:46（新版本号）
+- release\素言-Setup-0.3.0.exe              mtime 2026-08-18 17:07:07（新版本号）
+- 文件名均带 0.3.0，未触碰旧 0.2.10 / v0.1.0 Release 附件（07 R5 满足）。
+
+=== 安全与体积边界（07 R7/R8 + ffmpeg 记忆）===
+- release\win-unpacked\resources\bin 仅 suyan-core.exe（无 go-file-helper）。
+- release\win-unpacked\resources\vendor\node_modules 仅 jszip + sharp（@img/... 原生），
+  无 ffmpeg-static —— 满足「package:win 不得再带 ffmpeg-static」。
+- npx asar list app.asar：含 4 个备份模块
+  \dist-electron\electron\main\ai\aiSettingsBackup.js / aiSettingsBackupCrypto.js /
+  aiSettingsBackupService.js / aiSettingsMerge.js —— 本次备份功能已出货；
+  无 goFileHelper / ffmpeg-static / go-file-helper 孤儿产物（08 R8 满足）。
+- 便携数据发布目录 release\win-unpacked\data 保留未清空（mtime 17:02 不变，
+  升级未清空本地活数据，08 R3.2 / 便携目录记忆满足）。
+
+=== 结论 ===
+打包成功（exit 0），release\win-unpacked\素言.exe 与 resources\app.asar 均为本次
+最新产物，Setup/Portable 均带 0.3.0 版本号。无 EBUSY。四项边界（版本隔离 /
+无 ffmpeg-static / 无孤儿产物 / data 保留）全部满足。
+
+=== COMMIT ===
+chore(release): package win-unpacked build
+文件：.omo/evidence/task-14-ai-settings-optimization.txt（打包产物不入库，
+      仅落地交付证据与验收记录）
