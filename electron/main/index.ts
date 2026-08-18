@@ -23,7 +23,11 @@ import {
   configureHardwareAccelerationForBoot,
   readAppAccelerationStatus,
 } from "./app/gpuAccelerationSettings";
-import { prepareAppUserDataSync } from "./app/appStoragePath";
+import { isLocalPackageIterationRoot, prepareAppUserDataSync } from "./app/appStoragePath";
+import {
+  listLeftoverLocalIterationDataDirs,
+  migrateWebAssistantPartitions,
+} from "./webAssistant/webAssistantPartitionMigration";
 import { installGpuCrashGuard, watchWindowForGpuCrash } from "./app/gpuCrashGuard";
 import { assertRuntimeIntegrityOrExit } from "./app/runtimeIntegrity";
 import { startPerformanceMonitor } from "./performance/performanceMonitor";
@@ -33,6 +37,7 @@ import {
   restoreExternalLibraryWatchers,
   shutdownExternalLibraryWatchers,
 } from "./library/externalLibraryWatcher";
+import { startImportReceiver, stopImportReceiver } from "./library/importReceiver";
 import { minimumWindowSize } from "./window/windowStateModel";
 
 app.setName("素言");
@@ -48,13 +53,16 @@ if (!hasSingleInstanceLock) {
   process.exit(0);
 }
 
-// Packaged builds store library/settings under <install-or-portable-root>\data.
-// Development still uses %APPDATA%\SuYan. Legacy AppData libraries migrate once on upgrade.
+// Official installed / portable builds store library/settings under <root>\data.
+// `electron .` and local rebuilds reuse the live portable profile at
+// release\win-unpacked\data — the directory the user actually opens. Do not
+// switch those runs onto %APPDATA%\SuYan (that is a stale separate library).
 const appUserDataPreparation = prepareAppUserDataSync({
   isPackaged: app.isPackaged,
   execPath: process.execPath,
   appDataPath: app.getPath("appData"),
   portableExecutableDir: process.env.PORTABLE_EXECUTABLE_DIR,
+  cwd: process.cwd(),
 });
 if (appUserDataPreparation.reason === "not-writable") {
   // Data lives next to the executable by design. When that directory is read-only
@@ -83,6 +91,22 @@ if (appUserDataPreparation.reason === "not-writable") {
   });
 } else {
   app.setPath("userData", appUserDataPreparation.userDataPath);
+  const usesSharedDevProfile =
+    !app.isPackaged
+    || (appUserDataPreparation.packagedRoot !== null
+      && isLocalPackageIterationRoot(appUserDataPreparation.packagedRoot));
+  const partitionMigration = migrateWebAssistantPartitions({
+    userDataPath: appUserDataPreparation.userDataPath,
+    leftoverDataDirs: usesSharedDevProfile
+      ? listLeftoverLocalIterationDataDirs({
+        cwd: process.cwd(),
+        packagedRoot: appUserDataPreparation.packagedRoot,
+      })
+      : [],
+  });
+  if (partitionMigration.recoveredFrom.length > 0 || partitionMigration.renamed.length > 0) {
+    logStartupEvent("main:web-assistant-partitions-migrated", partitionMigration);
+  }
 }
 
 const canStartApp = appUserDataPreparation.reason !== "not-writable";
@@ -600,6 +624,14 @@ app.whenReady().then(async () => {
     logger.warn("external-library", "watch:restore-failed", { message: String(error) });
   }
 
+  // 本地收件服务（127.0.0.1，供 ComfyUI 等推送素材用）。启动失败不阻塞主流程。
+  try {
+    startImportReceiver();
+    logStartupEvent("import-receiver:ready");
+  } catch (error) {
+    logger.warn("import-receiver", "start-failed", { message: String(error) });
+  }
+
   app.on("activate", () => {
     const existing = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) ?? null;
     if (existing) {
@@ -618,6 +650,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   void shutdownExternalLibraryWatchers();
+  stopImportReceiver();
   void rustCoreRuntime.stop();
 });
 

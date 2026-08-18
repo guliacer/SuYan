@@ -7,12 +7,12 @@ const libraryViewSource = readFileSync(
 );
 
 describe("LibraryView home switch performance", () => {
-  it("keeps prewarmed lexicon workspaces mounted but hidden across canvas and home", () => {
+  it("keeps prewarmed lexicon workspaces mounted but hidden across canvas, web assistant and home", () => {
     expect(libraryViewSource).toContain(
-      '(mainView !== "home" && mainView !== "canvas") || mountedLexiconViews.size > 0',
+      '(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0',
     );
     expect(libraryViewSource).toContain(
-      'mainView === "home" || mainView === "canvas" ? "hidden" : ""',
+      'mainView === "home" || mainView === "canvas" || mainView === "webAssistant" ? "hidden" : ""',
     );
   });
 

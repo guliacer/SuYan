@@ -34,7 +34,7 @@ W:\提示词\.codex\rules\10-问题与解决方案记录.md
 第一版不得引入账号系统、云同步、远程后端、数据库服务、多语言系统或复杂插件体系。素材库必须使用本地 `library.json + images/` 目录完成。
 
 ## 正式包数据落盘
-安装版 / 便携版的用户数据必须在软件目录 `data\`（库为 `data\library\`），日志在 `logs\`；开发模式可用 `%APPDATA%\SuYan`。升级须自动从旧 AppData 迁移到本地 `data\`，不得继续以 AppData 为正式存储。见 `.codex/rules/08` R3、`07` R6、`09` R1。
+安装版 / 便携版的用户数据必须在软件目录 `data\`（库为 `data\library\`），日志在 `logs\`。本地开发（`electron .`）与 `release\win-unpacked` 共用便携目录 `release\win-unpacked\data`，**不得**切到 `%APPDATA%\SuYan`（那是另一份旧库）。正式包升级若本地 `data\` 尚无库，才从旧 AppData 迁入；不得把 AppData 合并进已有便携 `data\`。见 `.codex/rules/08` R3、`07` R6、`09` R1。
 
 ## 版本隔离
 首版 `v0.1.0`（标签 / 分支 `release/0.1.0` / GitHub Release 资产）已冻结，后续改动只在 `master` 以更高版本号进行，详见 `docs/VERSIONING.md` 与 `.codex/rules/07-打包与交付规范.md` 的 R5。
@@ -42,6 +42,15 @@ W:\提示词\.codex\rules\10-问题与解决方案记录.md
 ## 交付打包要求
 后续每次修改项目代码后，必须在完成就近验证后自动执行 `pnpm package:win`，确保 `release\win-unpacked\素言.exe` 与 `resources\app.asar` 更新到最新版本；交付说明中必须明确报告打包是否成功以及打包产物的更新时间。若打包失败，必须说明失败原因和下一步处理方式，不得只停留在 `pnpm build`。打包前确认 `package.json` version 高于已发布版本，产物不得覆盖旧版 Release 附件。
 
+
+## 本地收件服务（ComfyUI 发送到素言）
+
+- 主进程启动 `http` 服务，仅监听 `127.0.0.1:9477`：
+  - `GET /guli/suyan/health` → `{ok:true,data:{listening:true}}`
+  - `POST /guli/suyan/import`（multipart/form-data，64MB 上限）字段：多个 `images` 文件（png/jpg/webp）+ 文本 `prompt` / `negativePrompt` / `title` / `generationMethod`。
+- 实现位于 `electron/main/library/importReceiver.ts`，在 `index.ts` 的 `app.whenReady` 中调用 `startImportReceiver()`，`before-quit` 中 `stopImportReceiver()`。
+- 图片经由 `importImageBuffers()` 复用「粘贴导入」同一落盘路径，直接进入 `data\library\images\`；PNG 内嵌的 ComfyUI prompt/workflow 元数据会被 `promptImportParser` 自动解析建组。
+- 修改该服务后须跑 `npx tsc --noEmit -p tsconfig.electron.json` 验证。
 
 ## 缩略图显示强制规则
 

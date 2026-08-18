@@ -2223,7 +2223,7 @@ export async function inspectGeneratedImage(bytes: Buffer): Promise<GeneratedIma
       width?: number;
     };
     if (!metadata.width || !metadata.height) {
-      throw new Error("missing dimensions");
+      throw new Error("缺少图片尺寸信息。");
     }
     const hasAlpha = mime !== "image/jpeg" &&
       (metadata.hasAlpha === true || metadata.channels === 2 || metadata.channels === 4);
@@ -2262,14 +2262,23 @@ export function validateGeneratedImageSettings(
   }
 
   const requestedSize = parseExplicitImageGenerationSize(payload.size);
-  if (
-    requestedSize &&
-    (inspection.width !== requestedSize.width || inspection.height !== requestedSize.height)
-  ) {
-    throw new AppError(
-      "AI_IMAGE_OUTPUT_SIZE_MISMATCH",
-      `服务商未应用尺寸设置：请求 ${requestedSize.width}x${requestedSize.height}，实际返回 ${inspection.width}x${inspection.height}。`,
-    );
+  if (requestedSize) {
+    // 各图像模型会把任意 WxH 就近吸附到自己的原生尺寸桶（gpt-image-2 尤其如此），
+    // 逐像素精确匹配会把「比例已正确执行」的返回误判为失败。这里只校验比例口径：
+    // 1) 请求与返回的宽高比误差超过容差 → 视为比例没落实；
+    // 2) 返回分辨率不足请求短边一半 → 视为服务商无视尺寸明显降级。
+    const requestedRatio = requestedSize.width / requestedSize.height;
+    const actualRatio = inspection.width / inspection.height;
+    const ratioDrift = Math.abs(actualRatio - requestedRatio) / requestedRatio;
+    const halfScaleDropped =
+      Math.min(inspection.width, inspection.height) * 2 < Math.min(requestedSize.width, requestedSize.height);
+
+    if (ratioDrift > IMAGE_SIZE_RATIO_TOLERANCE || halfScaleDropped) {
+      throw new AppError(
+        "AI_IMAGE_OUTPUT_SIZE_MISMATCH",
+        `服务商未应用尺寸设置：请求 ${requestedSize.width}x${requestedSize.height}，实际返回 ${inspection.width}x${inspection.height}。`,
+      );
+    }
   }
 
   if (payload.background === "transparent" && !inspection.hasTransparency) {
@@ -2299,6 +2308,8 @@ function parseExplicitImageGenerationSize(
   }
   return { width: Number(match[1]), height: Number(match[2]) };
 }
+
+const IMAGE_SIZE_RATIO_TOLERANCE = 0.03;
 
 function normalizeImageGenerationCount(count: number | undefined): number {
   return Math.max(1, Math.min(4, Math.floor(count ?? 1)));

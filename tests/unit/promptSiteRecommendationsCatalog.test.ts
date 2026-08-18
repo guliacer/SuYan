@@ -13,6 +13,7 @@ const source = readFileSync(
   "src/features/library/components/recommendations/PromptSiteRecommendations.tsx",
   "utf8",
 );
+const sharedSitesSource = readFileSync("src/features/library/types/recommendationSites.ts", "utf8");
 const imagesRoot = path.join(
   "src",
   "features",
@@ -88,7 +89,8 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(source).toContain("https://kitty.fo/register?invite=hJmKTTDD");
     expect(source).toContain("https://github.com/guliacer/SuYan");
     expect(source).toContain("https://github.com/guliacer/TapRelay-remote-adapter-test");
-    expect(source).toContain("https://wisart.kuaileshifu.com/");
+    // 生图网站数组已抽到共享文件 recommendationSites.ts，最后一条在此断言。
+    expect(sharedSitesSource).toContain("https://wisart.kuaileshifu.com/");
   });
 
   it("ships the online recommendation screenshots and can resolve every catalog path", () => {

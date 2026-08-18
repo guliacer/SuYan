@@ -7,7 +7,7 @@ import { migrateLibraryFileCategories, LIBRARY_SCHEMA_VERSION_V2 } from "./categ
 
 export function migrateLibrary(input: unknown): LibraryFile {
   if (!isLibraryFile(input)) {
-    throw new Error("Unsupported library schemaVersion");
+    throw new Error("不支持的素材库 schemaVersion");
   }
 
   const taxonomy = input.categoryTaxonomy ?? createEmptyCategoryTaxonomy();

@@ -29,6 +29,11 @@ import type {
   DoubaoWebCanvasBounds,
   DoubaoWebCanvasStatus,
 } from "../features/library/types/canvas";
+import type {
+  WebAssistantBounds,
+  WebAssistantPrepareInput,
+  WebAssistantTargetId,
+} from "../features/library/types/webAssistant";
 import type { ProxyDetectionData, ProxySettings, ProxyTestData } from "../features/library/types/proxy";
 import type {
   AppAccelerationSettings,
@@ -439,6 +444,16 @@ export type SuyanApi = {
   showDoubaoWebCanvas: () => Promise<IpcResult<{ visible: true }>>;
   hideDoubaoWebCanvas: () => Promise<IpcResult<{ visible: false }>>;
   generateImagesWithDoubaoWeb: (payload: AiImageGenerationPayload) => Promise<IpcResult<AiImageGenerationData>>;
+  prepareWebAssistant: (input: WebAssistantPrepareInput) => Promise<IpcResult<{ platform: WebAssistantTargetId }>>;
+  setWebAssistantBounds: (
+    payload: { platform: WebAssistantTargetId; bounds: WebAssistantBounds; customUrl?: string | null },
+  ) => Promise<IpcResult<{ updated: true }>>;
+  showWebAssistant: (
+    platform?: WebAssistantTargetId,
+    customUrl?: string | null,
+  ) => Promise<IpcResult<{ visible: true }>>;
+  hideWebAssistant: (platform?: WebAssistantTargetId) => Promise<IpcResult<{ visible: false }>>;
+  disposeWebAssistant: () => Promise<IpcResult<{ disposed: true }>>;
   readProxySettings: () => Promise<IpcResult<ProxySettings>>;
   saveProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxySettings>>;
   testProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxyTestData>>;

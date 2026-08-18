@@ -164,6 +164,6 @@ describe("migrateLibrary", () => {
   });
 
   it("rejects missing schemaVersion", () => {
-    expect(() => migrateLibrary({ items: [] })).toThrow("Unsupported library schemaVersion");
+    expect(() => migrateLibrary({ items: [] })).toThrow("不支持的素材库 schemaVersion");
   });
 });

@@ -132,7 +132,7 @@ export async function readLibraryJsonWithBackupRestore(
 
   return {
     ok: false,
-    error: Object.assign(new Error(`Library file not found: ${libraryPath}`), { code: "ENOENT" }),
+    error: Object.assign(new Error(`找不到素材库文件: ${libraryPath}`), { code: "ENOENT" }),
   };
 }
 

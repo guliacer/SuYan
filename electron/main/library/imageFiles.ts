@@ -8,7 +8,10 @@ import { isAudioMediaFile, isVideoMediaFile } from "../../../src/features/librar
 import { normalizePromptType } from "../../../src/features/library/utils/promptType";
 import { AppError } from "../ipc/errors";
 import { logger } from "../appLogger";
-import { createImportedPromptPlaceholderImage } from "./defaultLibrarySeed";
+import {
+  buildImportedPromptPlaceholderSeed,
+  createImportedPromptPlaceholderImage,
+} from "./defaultLibrarySeed";
 import { getDeletableImageFileNames } from "./imageDeletion";
 import { prepareImageThumbnails, warmImageThumbnails } from "./imageThumbnails";
 import {
@@ -33,6 +36,7 @@ import {
 import { resolveMediaAbsolutePath } from "./mediaPathResolver";
 import {
   createEmptyPromptImportDraft,
+  mergePromptImportDrafts,
   parsePromptDraftFromImageMetadata,
   type PromptImportDraft,
 } from "../../shared/promptImportParser";
@@ -540,20 +544,27 @@ function buildImportedMediaItem(
   };
 }
 
-function readImportImageBufferMetadataDraft(fileName: string, data: Uint8Array): PromptImportDraft {
+function readImportImageBufferMetadataDraft(
+  fileName: string,
+  data: Uint8Array,
+  fallbackDraft?: PromptImportDraft,
+): PromptImportDraft {
   if (path.extname(fileName).toLowerCase() !== ".png") {
-    return createEmptyPromptImportDraft();
+    return fallbackDraft ?? createEmptyPromptImportDraft();
   }
 
   try {
-    return parsePromptDraftFromImageMetadata(data);
+    const parsed = parsePromptDraftFromImageMetadata(data);
+    if (!fallbackDraft) return parsed;
+    // 内嵌元数据优先；外置字段仅在 PNG 未嵌入该字段时补充（如 JPEG/WEBP 或压缩保存未带 prompt 的场景）。
+    return mergePromptImportDrafts(parsed, fallbackDraft);
   } catch (error) {
     logger.warn("media-import", "png-metadata:buffer-read-failed", {
       file: fileName,
       message: error instanceof Error ? error.message : String(error),
     });
 
-    return createEmptyPromptImportDraft();
+    return fallbackDraft ?? createEmptyPromptImportDraft();
   }
 }
 
@@ -600,7 +611,10 @@ export type GeneratedImageImportResult = ImportImageBuffersResult & {
  * Each image is parsed independently; identical embedded prompts are grouped
  * into the same prompt card group (shared title/prompt/negative/tags).
  */
-export async function importImageBuffers(images: ImportImageBufferInput[]): Promise<ImportImageBuffersResult> {
+export async function importImageBuffers(
+  images: ImportImageBufferInput[],
+  options?: { fallbackDraft?: PromptImportDraft },
+): Promise<ImportImageBuffersResult> {
   const validImages = images.filter((image) => image.data && image.data.byteLength > 0);
 
   if (validImages.length === 0) {
@@ -614,10 +628,11 @@ export async function importImageBuffers(images: ImportImageBufferInput[]): Prom
     };
   }
 
+  const fallbackDraft = options?.fallbackDraft;
   const prepared = validImages.map((image) => ({
     name: image.name,
     data: image.data,
-    draft: readImportImageBufferMetadataDraft(image.name, image.data),
+    draft: readImportImageBufferMetadataDraft(image.name, image.data, fallbackDraft),
   }));
   const plans = planImportImageGroups(prepared);
   const baseTime = Date.now();
@@ -1025,12 +1040,10 @@ async function isGeneratedPlaceholderImage(item: LibraryItem): Promise<boolean> 
 
 function getPlaceholderSeedCandidates(item: LibraryItem): string[] {
   const sourceUrl = extractSourceUrl(item.prompt);
-  const candidates = [
-    `${item.title}\n${item.prompt}\n${item.prompt}`,
+  return [
+    buildImportedPromptPlaceholderSeed(item.title, item.prompt),
     sourceUrl ? `${item.title}\n${item.prompt}\n${sourceUrl}` : "",
-  ];
-
-  return Array.from(new Set(candidates.map((candidate) => candidate.trim()).filter(Boolean)));
+  ].filter(Boolean);
 }
 
 function extractSourceUrl(prompt: string): string | null {

@@ -42,7 +42,7 @@ import type {
 } from "../types/ai";
 import { buildAiActionInstructions, normalizeAiRecognitionSourcePreferences } from "../types/ai";
 import { buildPublicAiSettingsPayload, updateAiActionModelPreference } from "../utils/aiSettingsDraft";
-import type { CanvasDraftSettings, CanvasGenerationResult } from "../types/canvas";
+import type { CanvasDraftSettings, CanvasGenerationResult, CanvasPhase } from "../types/canvas";
 import type {
   LibraryFile,
   LibraryItem,
@@ -179,9 +179,16 @@ type LibraryState = {
   canvasDraft: CanvasDraftSettings;
   canvasGenerationResults: CanvasGenerationResult[];
   canvasLastModel: string;
+  /** 画布是否正在生成（按钮置灰/转圈，跨视图保留）。 */
+  canvasIsGenerating: boolean;
+  /** 画布状态机阶段，跨视图保留。 */
+  canvasPhase: CanvasPhase;
+  /** 「理解中」阶段展示的关键词，跨视图保留。 */
+  canvasThinkingKeywords: string[];
   tagOrder: string[];
   likedImageIds: string[];
   starredRecommendations: string[];
+  webAssistantCustomUrls: string[];
   generationModelOrder: string[];
   hiddenGenerationModels: string[];
   themeMode: ThemeMode;
@@ -214,6 +221,12 @@ type LibraryState = {
   updateCanvasDraft: (patch: Partial<CanvasDraftSettings>) => void;
   setCanvasGenerationResults: (results: CanvasGenerationResult[]) => void;
   setCanvasLastModel: (model: string) => void;
+  /** 画布生成态机：thinking/generating/reveal/created/empty。
+   *  提到 store 是因为 CanvasView 切到素材库会被卸载，局部 state 全丢，
+   *  再切回时即使主进程后台还在生图也看不到「创作中」。store 让生成态跨视图保留。 */
+  setCanvasPhase: (phase: CanvasPhase) => void;
+  setCanvasThinkingKeywords: (keywords: string[]) => void;
+  setCanvasGenerating: (generating: boolean) => void;
   setSelectedItemId: (selectedItemId: string | null) => void;
   clearRecentImportPins: () => void;
   setThemeMode: (themeMode: ThemeMode) => Promise<void>;
@@ -329,6 +342,8 @@ type LibraryState = {
   importPromptLexiconImage: () => Promise<string | null>;
   toggleFavoriteImage: (itemId: string) => Promise<void>;
   toggleRecommendationStar: (url: string) => Promise<void>;
+  addWebAssistantCustomUrl: (url: string) => Promise<void>;
+  removeWebAssistantCustomUrl: (url: string) => Promise<void>;
   deleteItems: (itemIds: string[], deleteImages: boolean) => Promise<void>;
   deleteSelected: (deleteImages: boolean) => Promise<void>;
   copyImage: (imageFileName: string) => Promise<void>;
@@ -371,9 +386,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   canvasDraft: { ...defaultCanvasDraftSettings },
   canvasGenerationResults: [],
   canvasLastModel: "",
+  canvasIsGenerating: false,
+  canvasPhase: "empty",
+  canvasThinkingKeywords: [],
   tagOrder: [],
   likedImageIds: [],
   starredRecommendations: [],
+  webAssistantCustomUrls: [],
   generationModelOrder: [],
   hiddenGenerationModels: [],
   themeMode: "light",
@@ -567,6 +586,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   setCanvasGenerationResults: (results) => set({ canvasGenerationResults: results }),
 
   setCanvasLastModel: (model) => set({ canvasLastModel: model }),
+
+  setCanvasPhase: (phase) => set({ canvasPhase: phase }),
+
+  setCanvasThinkingKeywords: (keywords) => set({ canvasThinkingKeywords: keywords }),
+
+  setCanvasGenerating: (generating) => set({ canvasIsGenerating: generating }),
 
   setSelectedItemId: (selectedItemId) => set({ selectedItemId }),
   clearRecentImportPins: () => {
@@ -3119,6 +3144,57 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  addWebAssistantCustomUrl: async (url) => {
+    const current = get().webAssistantCustomUrls;
+    const normalized = url.trim();
+    if (current.includes(normalized)) {
+      set({ statusMessage: infoStatus("该网址已在「我的网址」中。") });
+      return;
+    }
+    // 上限 50 条：超出后丢弃最旧的一条，新网址前置。
+    const next = [normalized, ...current].slice(0, 50);
+    set({ webAssistantCustomUrls: next, statusMessage: null });
+
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { webAssistantCustomUrls: next }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data, {
+        statusMessage: successStatus("已保存到「我的网址」。"),
+      });
+    } else {
+      set({
+        webAssistantCustomUrls: current,
+        statusMessage: errorStatus(result.error.code, result.error.message),
+      });
+    }
+  },
+
+  removeWebAssistantCustomUrl: async (url) => {
+    const current = get().webAssistantCustomUrls;
+    const next = current.filter((item) => item !== url);
+    if (next.length === current.length) {
+      return;
+    }
+    set({ webAssistantCustomUrls: next, statusMessage: null });
+
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { webAssistantCustomUrls: next }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data, {
+        statusMessage: successStatus("已从「我的网址」移除。"),
+      });
+    } else {
+      set({
+        webAssistantCustomUrls: current,
+        statusMessage: errorStatus(result.error.code, result.error.message),
+      });
+    }
+  },
+
   deleteItems: async (itemIds, deleteImages) => {
     if (itemIds.length === 0) {
       return;
@@ -3432,6 +3508,7 @@ function buildLibraryViewSettings(
     tagOrder: state.tagOrder,
     likedImageIds: state.likedImageIds,
     starredRecommendations: state.starredRecommendations,
+    webAssistantCustomUrls: state.webAssistantCustomUrls,
     generationModelOrder: state.generationModelOrder,
     hiddenGenerationModels: state.hiddenGenerationModels,
     themeMode: state.themeMode,
@@ -3470,6 +3547,7 @@ function syncLibraryViewSettings(
     tagOrder: settings.tagOrder,
     likedImageIds: settings.likedImageIds,
     starredRecommendations: settings.starredRecommendations,
+    webAssistantCustomUrls: settings.webAssistantCustomUrls,
     generationModelOrder: settings.generationModelOrder,
     hiddenGenerationModels: settings.hiddenGenerationModels,
     themeMode: settings.themeMode,

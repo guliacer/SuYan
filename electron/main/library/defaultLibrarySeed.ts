@@ -184,10 +184,14 @@ export function createDefaultSeedImage(imageFileName: string): Buffer {
   const palette = seedImagePalettes[paletteIndex];
 
   if (!palette) {
-    throw new Error(`Unknown default seed image: ${imageFileName}`);
+    throw new Error(`未知的默认种子图片: ${imageFileName}`);
   }
 
   return createPatternPng(480, 320, palette, paletteIndex);
+}
+
+export function buildImportedPromptPlaceholderSeed(title: string, prompt: string): string {
+  return `${title}\n${prompt}\n${prompt}`;
 }
 
 export function createImportedPromptPlaceholderImage(seedText: string): Buffer {

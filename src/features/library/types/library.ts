@@ -138,6 +138,8 @@ export type LibraryViewSettings = {
   likedImageIds: string[];
   /** 资源推荐卡片的星标（按 URL 记录），星标项在所属分类内前置。 */
   starredRecommendations: string[];
+  /** 网页助手「我的网址」保存的自定义网址（按提交顺序，新的在前）。 */
+  webAssistantCustomUrls: string[];
   generationModelOrder: string[];
   hiddenGenerationModels: string[];
   themeMode: ThemeMode;

@@ -13,7 +13,10 @@ import {
 } from "../../shared/promptImportParser";
 import { AppError } from "../ipc/errors";
 import { logger } from "../appLogger";
-import { createImportedPromptPlaceholderImage } from "../library/defaultLibrarySeed";
+import {
+  buildImportedPromptPlaceholderSeed,
+  createImportedPromptPlaceholderImage,
+} from "../library/defaultLibrarySeed";
 import { warmImageThumbnails } from "../library/imageThumbnails";
 import { importImageFilePaths } from "../library/imageFiles";
 import { readClipboardFilePaths } from "./readClipboardFilePaths";
@@ -116,11 +119,10 @@ export async function importClipboardImage(): Promise<{
           getDraftSourceImageUrls(draft)[0] ?? draft.sourceImageUrl ?? draft.sourceImageUrls?.[0] ?? null;
         const id = randomUUID();
         const imageFileName = `${id}.png`;
+        const placeholderSeed = buildImportedPromptPlaceholderSeed(draft.title, draft.prompt);
         await fs.writeFile(
           getImagePath(imageFileName),
-          createImportedPromptPlaceholderImage(
-            `${draft.title}\n${draft.prompt}\n${draft.sourceUrl ?? clipboardText}`,
-          ),
+          createImportedPromptPlaceholderImage(placeholderSeed),
         );
         items = [
           createLibraryItemFromDraft(draft, id, imageFileName, now, {
@@ -177,9 +179,10 @@ export async function importClipboardImage(): Promise<{
     if (items.length === 0) {
       const id = randomUUID();
       const imageFileName = `${id}.png`;
+      const placeholderSeed = buildImportedPromptPlaceholderSeed(draft.title, draft.prompt);
       await fs.writeFile(
         getImagePath(imageFileName),
-        createImportedPromptPlaceholderImage(`${draft.title}\n${draft.prompt}\n${clipboardText}`),
+        createImportedPromptPlaceholderImage(placeholderSeed),
       );
       items = [createLibraryItemFromDraft(draft, id, imageFileName, now)];
     }
@@ -321,10 +324,11 @@ async function createRemoteLinkLibraryItemFromDraft(
 ): Promise<LibraryItem> {
   const id = randomUUID();
   const imageFileName = `${id}.png`;
+  const placeholderSeed = buildImportedPromptPlaceholderSeed(draft.title, draft.prompt);
 
   await fs.writeFile(
     getImagePath(imageFileName),
-    createImportedPromptPlaceholderImage(`${draft.title}\n${draft.prompt}\n${sourceImageUrl}`),
+    createImportedPromptPlaceholderImage(placeholderSeed),
   );
 
   return createLibraryItemFromDraft(draft, id, imageFileName, now, {

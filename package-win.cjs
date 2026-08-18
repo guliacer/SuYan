@@ -299,6 +299,11 @@ function createStagePackage() {
     packageManager: sourcePackage.packageManager,
     dependencies: {
       jszip: sourcePackage.dependencies.jszip,
+      // externalLibraryWatcher.ts 顶部裸 import chokidar，运行期 require("chokidar")
+      // 必须能从 app.asar/node_modules 解析到；和 jszip 一样声明进 staged
+      // package.json 的 dependencies，electron-builder 才会把它打进 asar，
+      // 否则打包后主进程一启动就抛 Cannot find module 'chokidar'。
+      chokidar: sourcePackage.dependencies.chokidar,
     },
   };
 

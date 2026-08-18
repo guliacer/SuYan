@@ -45,7 +45,7 @@ export async function syncExternalLibraryRoot(
   const result = state.result;
 
   if (!result) {
-    throw new Error("External library reconciliation did not run.");
+    throw new Error("外部素材库对账没有执行。");
   }
 
   warmLibraryItemThumbnails(result.importedItems);

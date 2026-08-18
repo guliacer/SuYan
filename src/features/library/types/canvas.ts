@@ -6,6 +6,10 @@ import type {
 
 export type CanvasSizeMode = "auto" | "ratio" | "custom";
 
+/** 右侧创意画布的状态机阶段。与 CanvasView 的局部 phase 同义，提到 store
+ *  后让生成态在切走画布再切回时保留（生成请求本身在主进程后台继续）。 */
+export type CanvasPhase = "empty" | "thinking" | "generating" | "reveal" | "created";
+
 export type CanvasBaseResolution = "1k" | "2k" | "4k";
 export type CanvasAspectRatio = "1:1" | "3:2" | "2:3" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9";
 export type CanvasGenerationProvider = "api" | "doubao-web";
@@ -80,6 +84,13 @@ export type CanvasDraftSettings = {
   count: number;
   transparentBackground: boolean;
   notificationEnabled: boolean;
+  /**
+   * 生成结果是否自动收录为素材。
+   * 默认 false（不再自动收录）：生成后结果只在画布内预览，可手动导出/复制；
+   * 用户在画布顶部手动开启后，生成完成才走入库链路落盘到素材库。
+   * 持久化字段（与 notificationEnabled 同级，随草稿保存）。
+   */
+  autoArchiveEnabled: boolean;
   /** 豆包网页画布：选中的模型标签（空串=跟随网页默认，不自动切换）。 */
   doubaoModel: string;
   /** 豆包网页画布：选中的风格标签（空串=跟随网页默认，不自动切换）。 */

@@ -47,6 +47,19 @@ import {
   setDoubaoWebCanvasBounds,
   showDoubaoWebCanvas,
 } from "../ai/doubaoWebCanvas";
+import {
+  disposeWebAssistant,
+  hideWebAssistant,
+  prepareWebAssistant,
+  setWebAssistantBounds,
+  showWebAssistant,
+} from "../webAssistant/webAssistantView";
+import {
+  type WebAssistantBounds,
+  type WebAssistantPlatform,
+  type WebAssistantPrepareInput,
+  type WebAssistantTargetId,
+} from "../../../src/features/library/types/webAssistant";
 import { importClipboardImage } from "../clipboard/readClipboardImage";
 import { exportLibraryZip, importLibraryZip } from "../library/archiveStore";
 import { chooseAndImportManagedDirectory } from "../library/directoryImport";
@@ -505,6 +518,45 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.doubaoWebCanvasGenerate, (event, payload: AiImageGenerationPayload) =>
     handleResult("doubao-web:generate", () => generateImagesWithDoubaoWeb(requireOwnerWindow(event), payload)),
   );
+  ipcMain.handle(ipcChannels.webAssistantPrepare, (event, input: unknown) =>
+    handleResult("web-assistant:prepare", () =>
+      Promise.resolve(
+        prepareWebAssistant(requireOwnerWindow(event), normalizeWebAssistantPrepareInput(input)),
+      ),
+    ),
+  );
+  ipcMain.handle(ipcChannels.webAssistantBounds, (event, payload: unknown) =>
+    handleResult("web-assistant:bounds", () => {
+      const boundsPayload = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+      return Promise.resolve(
+        setWebAssistantBounds(
+          requireOwnerWindow(event),
+          normalizeWebAssistantPlatform(boundsPayload.platform),
+          normalizeWebAssistantBounds(boundsPayload.bounds),
+          normalizeWebAssistantCustomUrl(boundsPayload.customUrl),
+        ),
+      );
+    }),
+  );
+  ipcMain.handle(ipcChannels.webAssistantShow, (event, platform?: unknown, customUrl?: unknown) =>
+    handleResult("web-assistant:show", () =>
+      Promise.resolve(
+        showWebAssistant(
+          requireOwnerWindow(event),
+          normalizeWebAssistantPlatform(platform),
+          normalizeWebAssistantCustomUrl(customUrl),
+        ),
+      ),
+    ),
+  );
+  ipcMain.handle(ipcChannels.webAssistantHide, (event, platform?: unknown) =>
+    handleResult("web-assistant:hide", () =>
+      Promise.resolve(hideWebAssistant(requireOwnerWindow(event), normalizeWebAssistantPlatform(platform))),
+    ),
+  );
+  ipcMain.handle(ipcChannels.webAssistantDispose, (event) =>
+    handleResult("web-assistant:dispose", () => Promise.resolve(disposeWebAssistant(requireOwnerWindow(event)))),
+  );
   ipcMain.handle(ipcChannels.proxySettingsRead, () =>
     handleResult("proxy:settings-read", () => readProxySettings()),
   );
@@ -654,6 +706,48 @@ function normalizeDoubaoWebCanvasBounds(input: unknown): {
   }
 
   return { x: values[0], y: values[1], width: values[2], height: values[3] };
+}
+
+function normalizeWebAssistantPlatform(input: unknown): WebAssistantTargetId | undefined {
+  if (typeof input !== "string" || input.length === 0) {
+    return undefined;
+  }
+  return input;
+}
+
+function normalizeWebAssistantCustomUrl(input: unknown): string | null {
+  if (typeof input !== "string") {
+    return null;
+  }
+  const trimmed = input.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+function normalizeWebAssistantBounds(input: unknown): WebAssistantBounds {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new AppError("WEB_ASSISTANT_BOUNDS_INVALID", "网页助手区域尺寸无效。");
+  }
+
+  const record = input as Record<string, unknown>;
+  const values = [record.x, record.y, record.width, record.height].map(Number);
+  if (!values.every(Number.isFinite) || values[2] <= 0 || values[3] <= 0) {
+    throw new AppError("WEB_ASSISTANT_BOUNDS_INVALID", "网页助手区域尺寸无效。");
+  }
+
+  return { x: values[0], y: values[1], width: values[2], height: values[3] };
+}
+
+function normalizeWebAssistantPrepareInput(input: unknown): WebAssistantPrepareInput {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new AppError("WEB_ASSISTANT_PREPARE_INVALID", "网页助手参数无效。");
+  }
+  const record = input as Record<string, unknown>;
+  const platform = normalizeWebAssistantPlatform(record.platform);
+  if (!platform) {
+    throw new AppError("WEB_ASSISTANT_PREPARE_INVALID", "网页助手平台不支持。");
+  }
+  const customUrl = typeof record.customUrl === "string" ? record.customUrl : null;
+  return { platform, customUrl: customUrl || null, reload: record.reload === true };
 }
 
 function logSlowIpc(channel: string, startedAt: number, ok: boolean): void {

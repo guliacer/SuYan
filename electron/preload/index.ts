@@ -130,6 +130,11 @@ const suyanApi: SuyanApi = {
   hideDoubaoWebCanvas: () => invoke(IpcChannelName.DoubaoWebCanvasHide),
   generateImagesWithDoubaoWeb: (payload: AiImageGenerationPayload) =>
     invoke(IpcChannelName.DoubaoWebCanvasGenerate, payload),
+  prepareWebAssistant: (input) => invoke(IpcChannelName.WebAssistantPrepare, input),
+  setWebAssistantBounds: (payload) => invoke(IpcChannelName.WebAssistantBounds, payload),
+  showWebAssistant: (platform, customUrl) => invoke(IpcChannelName.WebAssistantShow, platform, customUrl),
+  hideWebAssistant: (platform) => invoke(IpcChannelName.WebAssistantHide, platform),
+  disposeWebAssistant: () => invoke(IpcChannelName.WebAssistantDispose),
   readProxySettings: () => invoke(IpcChannelName.ProxySettingsRead),
   saveProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsSave, settings),
   testProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsTest, settings),

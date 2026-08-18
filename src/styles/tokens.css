@@ -665,7 +665,7 @@ body {
 
 .startup-scene__skip {
   position: absolute;
-  top: clamp(0.85rem, 2.2vh, 1.5rem);
+  bottom: clamp(0.85rem, 2.2vh, 1.5rem);
   right: clamp(0.85rem, 2vw, 1.75rem);
   z-index: 10;
   -webkit-app-region: no-drag;

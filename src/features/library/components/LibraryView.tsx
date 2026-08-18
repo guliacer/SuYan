@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Columns4,
   Clipboard,
+  Compass,
   Copy,
   Download,
   Eraser,
@@ -199,11 +200,16 @@ const PromptLibraryManagerView = lazy(() =>
 const CanvasView = lazy(() =>
   import("./CanvasView").then((module) => ({ default: module.CanvasView })),
 );
+const WebAssistantView = lazy(() =>
+  import("./WebAssistantView").then((module) => ({ default: module.WebAssistantView })),
+);
 
 const pageSize = 16;
 const gridVisibleTagCount = 5;
 const contentShellClassName = "mx-auto w-full max-w-[min(100%,1280px)]";
 const lexiconShellClassName = "mx-auto w-full max-w-[min(100%,1400px)]";
+// 网页助手是沉浸式工作区，不沿用素材浏览的 1280px 内容壳层。
+const webAssistantShellClassName = "mx-auto h-full min-h-0 w-full max-w-[1760px]";
 const contentShellMaxWidth = 1280;
 const lexiconShellMaxWidth = 1400;
 const pageGutterClassName = "px-3 min-[640px]:px-5 min-[900px]:px-6 min-[1024px]:px-8 min-[1440px]:px-10";
@@ -231,7 +237,7 @@ const STARTUP_PREWARM_VIEWS: LibraryMainView[] = ["categoryLexicon", "tagLexicon
 
 type CollectionMode = "all" | "featured";
 type GalleryMode = "masonry" | "grid";
-type LibraryMainView = "home" | "canvas" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
+type LibraryMainView = "home" | "canvas" | "webAssistant" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
 type LibrarySidebarActiveView =
   | LibraryMainView
   | "aiSettings"
@@ -829,7 +835,6 @@ export function LibraryView() {
     clearRecentImportPins();
   }, [activeTag, clearRecentImportPins, collectionMode, randomSeed, searchQuery, sortDirection, sortMode]);
 
-
   useEffect(() => {
     if (recentImportPinIds.length === 0 || mainView !== "home") {
       return;
@@ -842,6 +847,15 @@ export function LibraryView() {
     });
   }, [mainView, recentImportPinIds]);
 
+  // 网页助手与创作画布都用 WebContentsView 叠加在主窗口上，两者不可同时可见。
+  // 进入网页助手时主动隐藏豆包网页画布；切走网页助手时销毁站点 view，释放渲染进程。
+  useEffect(() => {
+    if (mainView === "webAssistant") {
+      void window.suyanApi.hideDoubaoWebCanvas();
+      return;
+    }
+    void window.suyanApi.hideWebAssistant();
+  }, [mainView]);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -1943,6 +1957,7 @@ export function LibraryView() {
             onOpenAbout={() => setIsAboutOpen(true)}
             onOpenAiSettings={openAiSettings}
             onOpenCanvas={() => openMainView("canvas")}
+            onOpenWebAssistant={() => openMainView("webAssistant")}
             onOpenNsfwSettings={openNsfwSettings}
             onOpenSystemPreferences={() => openSystemPreferences()}
             onOpenCategoryLexicon={() => openMainView("categoryLexicon")}
@@ -2061,15 +2076,25 @@ export function LibraryView() {
                 onOpenAiSettings={openAiSettings}
                 onOptimizePrompt={optimizePromptWithAi}
                 onSaveAiActionModelPreference={saveAiActionModelPreference}
-                  onNotify={showStatusMessage}
+                onNotify={showStatusMessage}
               />
             </Suspense>
           ) : null}
 
-          {(mainView !== "home" && mainView !== "canvas") || mountedLexiconViews.size > 0 ? (
+          {mainView === "webAssistant" ? (
+            <section className={`h-full min-h-0 py-4 min-[1024px]:py-5 ${pageGutterClassName}`}>
+              <div className={webAssistantShellClassName}>
+                <Suspense fallback={<DeferredViewFallback />}>
+                  <WebAssistantView onNotify={showStatusMessage} />
+                </Suspense>
+              </div>
+            </section>
+          ) : null}
+
+          {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0 ? (
             <section
               className={`py-4 min-[1024px]:py-5 ${pageGutterClassName} ${
-                mainView === "home" || mainView === "canvas" ? "hidden" : ""
+                mainView === "home" || mainView === "canvas" || mainView === "webAssistant" ? "hidden" : ""
               }`}
             >
               <div className={`${lexiconShellClassName} grid gap-4`}>
@@ -2332,6 +2357,7 @@ type LibrarySidebarProps = {
   onOpenAbout: () => void;
   onOpenAiSettings: () => void;
   onOpenCanvas: () => void;
+  onOpenWebAssistant: () => void;
   onOpenNsfwSettings: () => void;
   onOpenSystemPreferences: () => void;
   onOpenCategoryLexicon: () => void;
@@ -2363,6 +2389,7 @@ function LibrarySidebar({
   onOpenAbout,
   onOpenAiSettings,
   onOpenCanvas,
+  onOpenWebAssistant,
   onOpenNsfwSettings,
   onOpenSystemPreferences,
   onOpenCategoryLexicon,
@@ -2455,6 +2482,13 @@ function LibrarySidebar({
             isCompact={isCompact}
             label={"\u521b\u4f5c\u753b\u5e03"}
             onClick={onOpenCanvas}
+          />
+          <SidebarActionButton
+            active={activeView === "webAssistant"}
+            icon={<Compass size={17} />}
+            isCompact={isCompact}
+            label="网页助手"
+            onClick={onOpenWebAssistant}
           />
           <div className="relative min-w-0" ref={importMenuRef}>
             <SidebarActionButton

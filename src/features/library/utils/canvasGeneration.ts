@@ -32,6 +32,7 @@ export const defaultCanvasDraftSettings: CanvasDraftSettings = {
   count: 1,
   transparentBackground: false,
   notificationEnabled: false,
+  autoArchiveEnabled: false,
   doubaoModel: "",
   doubaoStyle: "",
   promptOrigin: null,
@@ -118,6 +119,7 @@ export function normalizeCanvasDraftSettings(input: unknown): CanvasDraftSetting
     count: normalizeCount(input.count),
     transparentBackground,
     notificationEnabled: input.notificationEnabled === true,
+    autoArchiveEnabled: input.autoArchiveEnabled === true,
     doubaoModel: normalizeDoubaoOption(input.doubaoModel, doubaoModelOptions),
     doubaoStyle: normalizeDoubaoOption(input.doubaoStyle, doubaoStyleOptions),
     // 与 referenceImageDataUrl 同理：归一化保留（updateCanvasDraft 每次 patch 都会过这里），

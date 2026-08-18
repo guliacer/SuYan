@@ -229,7 +229,7 @@ async function createVideoThumbnailPath(
     });
   } catch {
     await extractVideoFrameToPath(sourcePath, tempPath, { atSec: 0, maxWidth: maxThumbnailSide }).catch(() => {
-      throw new Error("VIDEO_THUMBNAIL_FAILED");
+      throw new Error("视频缩略图生成失败。");
     });
   }
 

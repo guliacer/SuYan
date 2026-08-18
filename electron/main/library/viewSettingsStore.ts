@@ -150,6 +150,7 @@ export function normalizeLibraryViewSettings(input: unknown): LibraryViewSetting
     tagOrder: Array.isArray(input.tagOrder) ? uniqueStrings(input.tagOrder) : [],
     likedImageIds: Array.isArray(input.likedImageIds) ? uniqueStrings(input.likedImageIds) : [],
     starredRecommendations: Array.isArray(input.starredRecommendations) ? uniqueStrings(input.starredRecommendations) : [],
+    webAssistantCustomUrls: Array.isArray(input.webAssistantCustomUrls) ? uniqueStrings(input.webAssistantCustomUrls) : [],
     generationModelOrder: Array.isArray(input.generationModelOrder) ? uniqueStrings(input.generationModelOrder) : [],
     hiddenGenerationModels: Array.isArray(input.hiddenGenerationModels) ? uniqueStrings(input.hiddenGenerationModels) : [],
     themeMode: normalizeThemeMode(input.themeMode),
@@ -184,6 +185,9 @@ function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
     (input.starredRecommendations === undefined ||
       (Array.isArray(input.starredRecommendations) &&
         input.starredRecommendations.every((url) => typeof url === "string"))) &&
+    (input.webAssistantCustomUrls === undefined ||
+      (Array.isArray(input.webAssistantCustomUrls) &&
+        input.webAssistantCustomUrls.every((url) => typeof url === "string"))) &&
     Array.isArray(input.generationModelOrder) &&
     input.generationModelOrder.every((model) => typeof model === "string") &&
     Array.isArray(input.hiddenGenerationModels) &&
@@ -215,6 +219,7 @@ function createDefaultViewSettings(): LibraryViewSettings {
     tagOrder: [],
     likedImageIds: [],
     starredRecommendations: [],
+    webAssistantCustomUrls: [],
     generationModelOrder: [],
     hiddenGenerationModels: [],
     themeMode: "light",

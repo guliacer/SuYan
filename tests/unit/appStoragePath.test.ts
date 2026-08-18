@@ -37,14 +37,15 @@ function seedLibrary(userDataDir: string, title: string): void {
 }
 
 describe("app storage path", () => {
-  it("keeps development userData under AppData/SuYan", () => {
+  it("keeps development userData on the live portable profile", () => {
     expect(
       resolveAppUserDataPath({
         isPackaged: false,
         execPath: "D:\\workspace\\node_modules\\electron\\electron.exe",
         appDataPath: "C:\\Users\\Tester\\AppData\\Roaming",
+        cwd: "W:\\提示词",
       }),
-    ).toBe(path.join("C:\\Users\\Tester\\AppData\\Roaming", "SuYan"));
+    ).toBe(path.join("W:\\提示词", "release", "win-unpacked", "data"));
   });
 
   it("stores installed build data under the install directory data folder", () => {
@@ -57,14 +58,56 @@ describe("app storage path", () => {
     ).toBe(path.join("D:\\Apps\\SuYan", "data"));
   });
 
-  it("stores release win-unpacked development runs under the unpacked data folder", () => {
+  it("keeps local win-unpacked rebuilds on the portable data directory", () => {
     expect(
       resolveAppUserDataPath({
         isPackaged: true,
         execPath: "W:\\提示词\\release\\win-unpacked\\素言.exe",
         appDataPath: "C:\\Users\\Tester\\AppData\\Roaming",
       }),
-    ).toBe(path.join("W:\\提示词\\release\\win-unpacked", "data"));
+    ).toBe(path.join("W:\\提示词", "release", "win-unpacked", "data"));
+  });
+
+  it("makes electron . and the local packaged exe share the same portable data", () => {
+    const workspace = "W:\\提示词";
+    const appDataPath = "C:\\Users\\Tester\\AppData\\Roaming";
+    expect(
+      resolveAppUserDataPath({
+        isPackaged: false,
+        execPath: `${workspace}\\node_modules\\electron\\electron.exe`,
+        appDataPath,
+        cwd: workspace,
+      }),
+    ).toBe(
+      resolveAppUserDataPath({
+        isPackaged: true,
+        execPath: `${workspace}\\release\\win-unpacked\\素言.exe`,
+        appDataPath,
+      }),
+    );
+  });
+
+  it("does not migrate AppData into a local packaged rebuild", () => {
+    const root = makeTempRoot("local-packaged");
+    const appDataPath = path.join(root, "AppData");
+    const unpackDir = path.join(root, "release", "win-unpacked");
+    fs.mkdirSync(unpackDir, { recursive: true });
+    seedLibrary(path.join(appDataPath, "SuYan"), "stale-appdata");
+    seedLibrary(path.join(unpackDir, "data"), "portable-live");
+
+    const result = prepareAppUserDataSync({
+      isPackaged: true,
+      execPath: path.join(unpackDir, "素言.exe"),
+      appDataPath,
+    });
+
+    expect(result.reason).toBe("already-ready");
+    expect(result.migrated).toBe(false);
+    expect(result.userDataPath).toBe(path.join(unpackDir, "data"));
+    const library = JSON.parse(
+      fs.readFileSync(path.join(result.userDataPath, "library", "library.json"), "utf8"),
+    ) as { items: Array<{ title: string }> };
+    expect(library.items[0]?.title).toBe("portable-live");
   });
 
   it("uses portable executable directory instead of temp unpack path", () => {
@@ -192,9 +235,12 @@ describe("data directory write probe", () => {
       isPackaged: false,
       execPath: path.join(root, "node_modules", "electron", "electron.exe"),
       appDataPath,
+      cwd: root,
     });
 
     expect(result.reason).toBe("dev");
+    expect(result.userDataPath).toBe(path.join(root, "release", "win-unpacked", "data"));
     expect(fs.existsSync(result.userDataPath)).toBe(true);
+    expect(fs.existsSync(path.join(appDataPath, "SuYan"))).toBe(false);
   });
 });

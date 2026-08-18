@@ -25,6 +25,7 @@ import {
   parseRemotePromptAnalysisV2Content,
   resolveVisionImagePayloadPolicy,
   requestChatCompletions,
+  validateGeneratedImageSettings,
 } from "../../electron/main/ai/remoteAiClient";
 
 const imageProviderSettings = {
@@ -515,6 +516,28 @@ describe("remoteAiClient", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("accepts provider size bucketing when the aspect ratio is preserved", () => {
+    const base = { format: "png" as const, hasAlpha: false, hasTransparency: false, mime: "image/png" as const };
+
+    // gpt-image-2 把 640x960 (2:3) 吸附到 1024x1536 (2:3)：比例一致，应放行。
+    expect(() => validateGeneratedImageSettings(
+      { ...base, width: 1024, height: 1536 },
+      { size: "640x960", outputFormat: "png" },
+    )).not.toThrow();
+
+    // 比例明显偏了（1:1 vs 2:3），应拒绝。
+    expect(() => validateGeneratedImageSettings(
+      { ...base, width: 1024, height: 1024 },
+      { size: "640x960", outputFormat: "png" },
+    )).toThrowError(/未应用尺寸设置/);
+
+    // 短边被砍到一半以下：即便比例一致也视为服务商无视尺寸降级。
+    expect(() => validateGeneratedImageSettings(
+      { ...base, width: 300, height: 450 },
+      { size: "640x960", outputFormat: "png" },
+    )).toThrowError(/未应用尺寸设置/);
   });
 
   it("rejects transparent-background output without an alpha channel", async () => {

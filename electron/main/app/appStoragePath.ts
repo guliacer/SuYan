@@ -6,6 +6,8 @@ export type AppStoragePathOptions = {
   execPath: string;
   appDataPath: string;
   portableExecutableDir?: string;
+  /** Workspace root for `electron .`. Dev always reuses `release\win-unpacked\data`. */
+  cwd?: string;
 };
 
 export type AppUserDataMigrationResult = {
@@ -33,18 +35,26 @@ const migrationMarkerFileName = "migrated-to-local-data.json";
 
 /**
  * Resolve where Electron `userData` (and thus library/settings) should live.
- * - Development (`electron .` from source): stable %APPDATA%\SuYan
- * - Packaged install / portable / release\win-unpacked: <software-root>\data
+ * - Development (`electron .` from source): the live portable profile at
+ *   `<cwd>\release\win-unpacked\data` — the directory the user actually opens
+ * - Local package iteration (`release\win-unpacked` / `release-next\...`):
+ *   `<software-root>\data`, same folder `package:win` already preserves
+ * - Real installed / portable builds: `<software-root>\data`
  *
- * When iterating via release\win-unpacked\素言.exe, data stays next to the exe
- * and packaging must preserve that `data` folder (see package-win promote).
+ * Do not send local iteration to %APPDATA%\SuYan. That folder is a stale July
+ * profile and would resurrect deleted materials / drop current model settings.
  */
 export function resolveAppUserDataPath(options: AppStoragePathOptions): string {
   if (!options.isPackaged) {
-    return path.join(options.appDataPath, "SuYan");
+    return resolveLocalIterationUserDataPath(options.cwd ?? process.cwd());
   }
 
   return path.join(resolvePackagedSoftwareRoot(options), "data");
+}
+
+/** The portable profile that `electron .` and `release\win-unpacked\素言.exe` share. */
+export function resolveLocalIterationUserDataPath(workspaceRoot: string): string {
+  return path.join(path.resolve(workspaceRoot), "release", "win-unpacked", "data");
 }
 
 export function resolvePackagedSoftwareRoot(options: AppStoragePathOptions): string {
@@ -53,6 +63,16 @@ export function resolvePackagedSoftwareRoot(options: AppStoragePathOptions): str
   }
 
   return path.dirname(path.resolve(options.execPath));
+}
+
+/** Local rebuild output, not a user-facing install/portable directory. */
+export function isLocalPackageIterationRoot(softwareRoot: string): boolean {
+  const normalized = path.resolve(softwareRoot).replaceAll("\\", "/").toLowerCase();
+  return (
+    normalized.includes("/release/win-unpacked")
+    || normalized.includes("/release-next/")
+    || normalized.includes("/release-ui-preview/")
+  );
 }
 
 export function listLegacyUserDataCandidates(appDataPath: string): string[] {
@@ -118,16 +138,35 @@ export function probeDirectoryWritable(dirPath: string): DirectoryWritability {
  * so upgrades stop reading/writing the old C: location.
  */
 export function prepareAppUserDataSync(options: AppStoragePathOptions): AppUserDataMigrationResult {
-  const userDataPath = resolveAppUserDataPath(options);
   const packagedRoot = options.isPackaged ? resolvePackagedSoftwareRoot(options) : null;
+  const userDataPath = resolveAppUserDataPath(options);
+  const isLocalIteration =
+    !options.isPackaged
+    || (packagedRoot !== null && isLocalPackageIterationRoot(packagedRoot));
 
-  if (!options.isPackaged) {
+  if (isLocalIteration) {
+    // Portable `data\` is the live profile. Never migrate %APPDATA%\SuYan into it.
+    if (options.isPackaged) {
+      const writability = probeDirectoryWritable(userDataPath);
+      if (!writability.writable) {
+        return {
+          userDataPath,
+          packagedRoot,
+          migrated: false,
+          reason: "not-writable",
+          errorMessage: writability.message,
+          writeErrorCode: writability.code,
+        };
+      }
+    }
     ensureDirSync(userDataPath);
     return {
       userDataPath,
       packagedRoot,
       migrated: false,
-      reason: "dev",
+      reason: options.isPackaged
+        ? (hasLibraryUserData(userDataPath) ? "already-ready" : "fresh")
+        : "dev",
     };
   }
 
