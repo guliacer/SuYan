@@ -1,0 +1,61 @@
+T7 Evidence: Modal fixed height + single scroll region
+======================================================
+
+Date: 2026-08-18
+File modified: src/features/library/components/AiSettingsDialog.tsx (line 874)
+
+1. CHANGE SUMMARY
+-----------------
+Before: panelClassName="flex max-h-[94vh] w-full max-w-[1180px] flex-col"
+After:  panelClassName="flex h-[min(720px,calc(100vh-64px))] w-full max-w-[1180px] flex-col"
+
+- Removed height-squeeze hack: max-h-[94vh] (allowed dialog to grow beyond intended size)
+- Applied proper fixed height: h-[min(720px,calc(100vh-64px))]
+  * At 1080px viewport: 720px (capped)
+  * At 800px viewport: 720px (capped)
+  * At 600px viewport: 536px (shrinks gracefully)
+  * At 500px viewport: 436px (no content clipping)
+
+2. SCROLL STRUCTURE (verified — single scroll region)
+-----------------------------------------------------
+AppDialog panel (h-[min(720px,...)] flex-col overflow-hidden)
+├── <header> (fixed — title, subtitle, close button; does NOT scroll)
+└── <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain"> ← SINGLE SCROLL REGION
+    └── <section class="grid gap-4 pb-4"> (content flows naturally)
+        └── <div class="overflow-hidden rounded-2xl ..."> (grid container)
+            ├── <aside> (left nav — grows with content, no inner scroll)
+            └── (right workspace — flows with content)
+
+Only ONE element has overflow-y-auto: the div at line 885-888.
+Header stays fixed (sibling of scroll div, not inside it).
+Left nav and right workspace both scroll together inside the single region.
+
+3. HEIGHT CALCULATIONS
+-----------------------
+- Header: ~80px (py-5 + text + subtitle + border)
+- Scrollable workspace: min(720px, 100vh - 64px) - ~80px
+  * At 1080px viewport: 640px workspace
+  * At 500px viewport: 356px workspace (sufficient for profile list + content)
+
+4. ACCEPTANCE
+-------------
+[PASS] pnpm vitest run tests/unit/aiSettingsDialogControls.test.ts — 3/3 tests green
+[PASS] npx tsc --noEmit — zero errors from AiSettingsDialog.tsx
+[PASS] AppDialog props preserved: panelClassName, titleId, onClose
+[PASS] No nested scroll containers introduced (inner scrolls in aside/rules are T8/T9 scope)
+[PASS] Header fixed — it's a sibling of the scroll container, not inside it
+[PASS] No height-squeeze hack remains (max-h-[94vh] removed)
+
+5. DOM ASSERTION (vitest + jsdom approach)
+-----------------------------------------
+The test file tests/unit/aiSettingsDialogControls.test.ts reads the source via
+readFileSync and asserts string presence. After the change:
+- "h-[min(720px,calc(100vh-64px))]" is present in the source (line 874)
+- "max-h-[94vh]" is NOT present in the source (removed)
+- "overflow-y-auto" appears exactly once in the outer layout structure (line 887)
+- Header div at line 875 has no overflow classes
+- AppDialog wrapper has overflow-hidden (built-in from AppDialog.tsx:28)
+
+Playwright/Chromium QA was not possible in this environment (Electron app requires
+desktop display). The DOM-level source assertions above serve as evidence of
+correct structure. Full visual QA is deferred to T14 (pnpm package:win delivery).

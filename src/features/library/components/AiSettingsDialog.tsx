@@ -871,7 +871,7 @@ export function AiSettingsDialog({
   }
 
   return (
-    <AppDialog panelClassName="flex max-h-[94vh] w-full max-w-[1180px] flex-col" titleId="ai-settings-title" onClose={onClose}>
+    <AppDialog panelClassName="flex h-[min(720px,calc(100vh-64px))] w-full max-w-[1180px] flex-col" titleId="ai-settings-title" onClose={onClose}>
       <header className="flex items-start justify-between gap-4 border-b border-border bg-panel px-6 py-5">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold" id="ai-settings-title">
