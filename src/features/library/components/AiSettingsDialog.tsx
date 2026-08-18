@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  ChevronDown,
   Clipboard,
   Copy,
   Eye,
@@ -171,6 +172,7 @@ export function AiSettingsDialog({
     () => normalizeAiRecognitionSourcePreferences(settings.recognitionSourcePreferences),
   );
   const [ruleEditor, setRuleEditor] = useState<RuleEditorState>({ editingRuleId: null, instructions: "", label: "" });
+  const [ruleEditorOpen, setRuleEditorOpen] = useState(false);
   const [manualModelDraft, setManualModelDraft] = useState("");
   const [modelPicker, setModelPicker] = useState<ModelPickerState | null>(null);
   const [isTestingAllProfiles, setIsTestingAllProfiles] = useState(false);
@@ -818,6 +820,7 @@ export function AiSettingsDialog({
       instructions: rule.instructions,
       label: rule.label,
     });
+    setRuleEditorOpen(true);
   }
 
   function saveRule(action: AiFeatureAction) {
@@ -849,6 +852,7 @@ export function AiSettingsDialog({
       rulePresetIds: nextPresetIds,
     });
     setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
+    setRuleEditorOpen(false);
     setFeedbackText(editingRuleId ? "规则已更新，正在自动保存。" : "规则已新增，正在自动保存。");
   }
 
@@ -865,6 +869,7 @@ export function AiSettingsDialog({
 
     if (ruleEditor.editingRuleId === ruleId) {
       setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
+      setRuleEditorOpen(false);
     }
 
     setFeedbackText("规则已删除，正在自动保存。");
@@ -1721,53 +1726,75 @@ export function AiSettingsDialog({
                         </div>
                       </div>
 
-                      <div className="grid gap-3 rounded-md border border-border bg-panel p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-xs font-semibold text-foreground">
-                            {isEditingRule ? "编辑规则" : "新增规则"}
-                          </p>
-                          {isEditingRule ? (
-                            <Button
-                              className="min-h-8 px-2 py-1 text-xs"
-                              icon={<X size={13} />}
-                              variant="ghost"
-                              onClick={() => setRuleEditor({ editingRuleId: null, instructions: "", label: "" })}
-                            >
-                              取消编辑
-                            </Button>
-                          ) : null}
-                        </div>
-                        <label className="grid gap-2 text-xs font-medium text-muted">
-                          规则名称
-                          <TextField
-                            placeholder="例如：中文细节反推"
-                            value={ruleEditor.label}
-                            onChange={(event) => setRuleEditor((current) => ({ ...current, label: event.target.value }))}
-                          />
-                        </label>
-                        <label className="grid gap-2 text-xs font-medium text-muted">
-                          规则内容
-                          <TextArea
-                            aria-label={`${selectedActionMeta.label}规则内容`}
-                            className={isEditingRule ? "min-h-[560px]" : "min-h-32"}
-                            placeholder={selectedActionMeta.rulePlaceholder}
-                            resizeMode="vertical"
-                            value={ruleEditor.instructions}
-                            onChange={(event) =>
-                              setRuleEditor((current) => ({ ...current, instructions: event.target.value }))
+                      <div className="overflow-hidden rounded-md border border-border bg-panel">
+                        <button
+                          aria-expanded={ruleEditorOpen}
+                          className="flex min-h-11 w-full items-center justify-between gap-2 px-3 text-left text-xs font-semibold text-foreground outline-none transition-colors hover:bg-primary-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25"
+                          type="button"
+                          onClick={() => {
+                            if (ruleEditorOpen && isEditingRule) {
+                              setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
                             }
+                            setRuleEditorOpen((open) => !open);
+                          }}
+                        >
+                          <span>{isEditingRule ? "编辑规则" : "新增规则"}</span>
+                          <ChevronDown
+                            className={`shrink-0 text-muted transition-transform ${ruleEditorOpen ? "rotate-180" : ""}`}
+                            size={16}
                           />
-                        </label>
-                        <div className="flex justify-end">
-                          <Button
-                            disabled={!ruleEditor.label.trim() || !ruleEditor.instructions.trim()}
-                            icon={<Check size={14} />}
-                            variant="primary"
-                            onClick={() => saveRule(selectedAction)}
-                          >
-                            {isEditingRule ? "保存规则" : "添加规则"}
-                          </Button>
-                        </div>
+                        </button>
+
+                        {ruleEditorOpen ? (
+                          <div className="grid gap-3 border-t border-border p-3">
+                            {isEditingRule ? (
+                              <div className="flex justify-end">
+                                <Button
+                                  className="min-h-8 px-2 py-1 text-xs"
+                                  icon={<X size={13} />}
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
+                                    setRuleEditorOpen(false);
+                                  }}
+                                >
+                                  取消编辑
+                                </Button>
+                              </div>
+                            ) : null}
+                            <label className="grid gap-2 text-xs font-medium text-muted">
+                              规则名称
+                              <TextField
+                                placeholder="例如：中文细节反推"
+                                value={ruleEditor.label}
+                                onChange={(event) => setRuleEditor((current) => ({ ...current, label: event.target.value }))}
+                              />
+                            </label>
+                            <label className="grid gap-2 text-xs font-medium text-muted">
+                              规则内容
+                              <TextArea
+                                aria-label={`${selectedActionMeta.label}规则内容`}
+                                className="min-h-40"
+                                placeholder={selectedActionMeta.rulePlaceholder}
+                                resizeMode="vertical"
+                                value={ruleEditor.instructions}
+                                onChange={(event) =>
+                                  setRuleEditor((current) => ({ ...current, instructions: event.target.value }))
+                                }
+                              />
+                            </label>
+                            <div className="flex justify-end">
+                              <Button
+                                disabled={!ruleEditor.label.trim() || !ruleEditor.instructions.trim()}
+                                icon={<Check size={14} />}
+                                variant="primary"
+                                onClick={() => saveRule(selectedAction)}
+                              >
+                                {isEditingRule ? "保存规则" : "添加规则"}
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>

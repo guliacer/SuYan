@@ -1,0 +1,51 @@
+TASK 9 EVIDENCE — AI 规则区 UI 重构
+=======================================
+Worker: continuation from session ses_fed6b2decffee7Ip4XxzmUzTX1
+Baseline commit: 676d635 (refactor(ai): restructure connection settings layout)
+Date: 2026-08-18
+
+Scope (plan T9): 重排 AiSettingsDialog.tsx 规则区（约 1416-1772 行）：
+- 左 6 分组导航保留
+- 右当前 Action 工作区
+- 规则列表紧凑化（SelectedRulesList 单行 + 选中态）
+- 新增规则折叠（折叠面板点开才编辑，收起显示规则名/描述摘要）
+- 编辑态不再 min-h-[560px] 撑满
+- CustomInstructionsEditor 保留原始行为
+必须：不改 9 个 action、6 分组、规则 preset/custom 数据与保存 payload；不同时展开全部编辑器。
+
+=== CHANGES ===
+核心改动：将常驻展开的"新增规则/编辑规则"表单改为折叠面板。
+1. 新增导入：ChevronDown 图标（lucide-react）。
+2. 新增 state：ruleEditorOpen (boolean)，表示规则编辑器折叠面板展开状态。
+3. editRule() 现在会 setRuleEditorOpen(true)（点击规则行的铅笔图标 → 展开编辑面板）。
+4. saveRule() 成功后 setRuleEditorOpen(false)（保存后自动收起）。
+5. deleteRule() 若删的是正在编辑的规则 → setRuleEditorOpen(false)。
+6. JSX 表单重构：
+   Before: 常驻展开的 <div> 内含标题 + 名称/内容输入框 + 保存按钮；编辑器高度 min-h-[560px]（编辑态）撑满右侧。
+   After: 可折叠面板
+     - 折叠头（按钮，aria-expanded=ruleEditorOpen，ChevronDown 旋转指示）
+     - 标题行："{isEditingRule ? 编辑规则 : 新增规则}"，含规则名/描述摘要
+     - 点开展开正文：名称输入 + 规则内容(TextArea min-h-40，不再 min-h-[560px]) + 保存/取消按钮
+   - 编辑器高度从 min-h-[560px] 降至 min-h-40（统一新增/编辑），不再撑满工作区。
+
+=== PRESERVED (计划约束核验) ===
+- 9 个 AiFeatureAction 未变；6 个分组 aiSettingsActionEntries 未改
+- 规则 preset/custom 数据流未改：toggleRuleSelection/clearActionRules/saveRule/deleteRule/editRule 的 patchActionPreference payload 逐字未动（rules/rulePresetIds/customInstructions 字段不变）
+- 保存 payload 未动：actionOrder/actionPreferences/recognitionSourcePreferences 处理逻辑未改
+- 左侧 6 分组导航（orderedActionEntries）与拖拽排序保留
+- 规则列表（SelectedRulesList 表格单行 + 选中态）已符合紧凑化要求，未改动
+- CustomInstructionsEditor 相关逻辑未动（selectedActionCustomInstructions 仍参与 hasCustomRules 判定）
+
+=== ACCEPTANCE ===
+[PASS] npx tsc --noEmit → 0 错误（renderer）
+[PASS] npx vitest run tests/unit/aiSettingsDialogControls.test.ts → 3/3 绿
+[PASS] npx vitest run（全量）→ 129 文件 / 943 测试 全绿
+[PASS] 源码断言：editRule→setRuleEditorOpen(true)、saveRule→setRuleEditorOpen(false)、
+       min-h-[560px] 已移除、ChevronDown 折叠指示存在
+
+Playwright 视觉 QA 延至 T14 打包后（同 T7/T8 先例）。
+
+=== COMMIT ===
+refactor(ai): restructure rules section with collapsible editors
+文件：src/features/library/components/AiSettingsDialog.tsx
+     .omo/evidence/task-9-ai-settings-optimization.txt
