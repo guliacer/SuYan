@@ -39,7 +39,7 @@ W:\提示词\.codex\rules\10-问题与解决方案记录.md
 安装版 / 便携版的用户数据必须在软件目录 `data\`（库为 `data\library\`），日志在 `logs\`。本地开发（`electron .`）与 `release\win-unpacked` 共用便携目录 `release\win-unpacked\data`，**不得**切到 `%APPDATA%\SuYan`（那是另一份旧库）。正式包升级若本地 `data\` 尚无库，才从旧 AppData 迁入；不得把 AppData 合并进已有便携 `data\`。见 `.codex/rules/08` R3、`07` R6、`09` R1。
 
 ## 版本隔离
-`v0.1.0` 与 `v0.2.10` 已发布版本保持冻结；当前 `master` 的 `0.3.x` 是未发布迭代线，允许按补丁版本连续升级（如 `0.3.0` → `0.3.1` → `0.3.2`）。在用户明确推送到 GitHub 前，不把 `0.3.x` 视为已发布锁定版本，也不提前创建或修改 Release 标签；用户推送后再以实际推送版本建立新的锁定点。详见 `docs/VERSIONING.md` 与 `.codex/rules/07-打包与交付规范.md` 的 R5。
+`v0.1.0`、`v0.2.10` 与 `v0.3.6` 已发布版本保持冻结；当前 `master` 指向 `v0.3.6` 发布提交。后续修改必须升级到更高版本号，不回改已发布版本；详见 `docs/VERSIONING.md` 与 `.codex/rules/07-打包与交付规范.md` 的 R5。
 
 ## 交付打包要求
 后续每次修改项目代码后，必须在完成就近验证后自动执行 `pnpm package:win`。开发阶段该命令只更新 `release\win-unpacked\素言.exe` 与 `resources\app.asar`，不生成 NSIS 安装版或 Portable ZIP；交付说明中必须明确报告快速打包是否成功以及产物更新时间。准备推送 GitHub 或创建正式 Release 时，才执行 `pnpm package:win:release` 生成全量安装包和 ZIP。若打包失败，必须说明失败原因和下一步处理方式，不得只停留在 `pnpm build`。打包前确认 `package.json` version 高于已发布版本，产物不得覆盖旧版 Release 附件。

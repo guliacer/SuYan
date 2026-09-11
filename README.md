@@ -116,7 +116,7 @@
 
 ### 使用发布包
 
-从 [GitHub Releases](https://github.com/guliacer/SuYan/releases) 下载当前可用版本的安装包或便携版。当前仓库的 `0.3.6` 是尚未发布的迭代线；GitHub 上的最新正式版以 Releases 页面为准。
+从 [GitHub Releases](https://github.com/guliacer/SuYan/releases) 下载当前可用版本的安装包或便携版。当前正式版为 `v0.3.6`，GitHub 上的最新版本以 Releases 页面为准。
 
 如果 GitHub 下载较慢，也可以使用网盘镜像：
 
@@ -181,7 +181,7 @@ GULI_IDENTITY_SCOPES=openid email profile offline_access
 
 ## 更新日志
 
-### v0.3.6（当前开发版本，尚未发布）
+### v0.3.6（当前正式版）
 
 本版本相较于 GitHub 最新正式版 `v0.2.10`，集中完善了账号、创作、归档和交付链路：
 

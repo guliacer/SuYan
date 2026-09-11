@@ -115,7 +115,7 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 ### Use a release build
 
-Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The repository's `0.3.6` is currently an unpublished development line; the latest public version is the one shown on the Releases page.
+Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.6`; the latest version is always shown on the Releases page.
 
 If GitHub downloads are slow, mirror downloads are also available:
 
@@ -180,7 +180,7 @@ Register `suyan://oauth/callback` with the identity service. Discovery, authoriz
 
 ## Changelog
 
-### v0.3.6 (current development line, unpublished)
+### v0.3.6 (current release)
 
 Compared with the latest public `v0.2.10`, this release line adds:
 
