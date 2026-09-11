@@ -120,6 +120,7 @@ function coerceTagCandidate(input: unknown): RemoteAnalysisTagCandidate | null {
   const normalizedLabel = normalizeText(input.normalizedLabel ?? input.normalized);
   return {
     label,
+    ...(typeof input.group === "string" ? { group: input.group.trim().slice(0, 100) } : {}),
     ...(normalizedLabel && normalizedLabel !== label ? { normalizedLabel } : {}),
     dimension: coerceDimension(input.dimension ?? input.family ?? input.type),
     confidence: clampConfidence(input.confidence ?? input.score),
@@ -176,7 +177,7 @@ function looksLikeV2(input: Record<string, unknown>): boolean {
  * Returns `null` when the payload does not look like V2 (so callers can fall
  * back to the legacy V1 parser) or when it carries no usable category/tag.
  */
-export function normalizeRemotePromptAnalysisV2(input: unknown): RemotePromptAnalysisV2 | null {
+export function normalizeRemotePromptAnalysisV2(input: unknown, options: { allowEmptyTags?: boolean } = {}): RemotePromptAnalysisV2 | null {
   if (!isPlainRecord(input) || !looksLikeV2(input)) return null;
 
   const categories = enforceSinglePrimary(
@@ -202,9 +203,12 @@ export function normalizeRemotePromptAnalysisV2(input: unknown): RemotePromptAna
       }
     : { rating: "unknown", confidence: 0, evidence: [] };
 
-  // A V2 envelope with no actionable category or tag is treated as a miss so
-  // the legacy parser can raise its own "no usable result" error consistently.
-  if (categories.length === 0 && tags.length === 0) return null;
+  // An intentional, well-formed empty tag result is valid only for tag tasks.
+  // Malformed/dropped candidates must still fail instead of masquerading as an empty success.
+  const explicitEmptyTags = options.allowEmptyTags && (input.schemaVersion === 2 || input.schemaVersion === "2") &&
+    Array.isArray(input.categories) && input.categories.length === 0 && Array.isArray(input.tags) && input.tags.length === 0 &&
+    typeof input.summary === "string";
+  if (categories.length === 0 && tags.length === 0 && !explicitEmptyTags) return null;
 
   return {
     schemaVersion: 2,

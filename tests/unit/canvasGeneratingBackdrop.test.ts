@@ -1,82 +1,49 @@
-import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
+import { LocaleProvider } from "../../src/components/LocaleProvider";
+import { CreativeCanvas } from "../../src/features/library/components/CanvasView";
+import type { CanvasPhase } from "../../src/features/library/types/canvas";
 
-const canvasSource = readFileSync("src/features/library/components/CanvasView.tsx", "utf8");
-const tokenSource = readFileSync("src/styles/tokens.css", "utf8");
+const sample = { dataUrl: "data:image/png;base64,fixture", saved: false, requestPrompt: "春日山野" };
+function render(phase: CanvasPhase, result = sample) {
+  return renderToStaticMarkup(createElement(LocaleProvider, null, createElement(CreativeCanvas, {
+    phase, results: phase === "created" || phase === "reveal" ? [result] : [],
+    lastModel: "test-image-model", thinkingKeywords: ["春日", "山野"],
+    blurPreviewSrc: "", generationElapsedMs: null, lockedHeight: null,
+    webCanvasEnabled: false, webCanvasLoginVisible: false, webCanvasLoading: false,
+    webCanvasHostRef: { current: null }, archivingIndex: null, archivingBatch: false,
+    onOpenPreview: vi.fn(), onDownload: vi.fn(), onCopyImage: vi.fn(), onArchive: vi.fn(),
+  })));
+}
 
-describe("CanvasView generating backdrop", () => {
-  it("renders decorative ambient, dot, prism, and shine layers behind the status card", () => {
-    const stage = canvasSource.match(/function CanvasMotionBackdrop[\s\S]*?function CanvasResultStage/)?.[0] ?? "";
-
-    expect(stage).toContain('className="canvas-ambient-glow"');
-    expect(stage).toContain('className="canvas-dot-field"');
-    expect(stage).toContain('className="canvas-prism-sweep"');
-    expect(stage).toContain('className="canvas-glass-shine"');
-    expect(stage.indexOf("canvas-dot-field")).toBeLessThan(stage.indexOf("canvas-status-card"));
+describe("Canvas workspace states", () => {
+  it("announces the real phase and keeps result actions out of the waiting state", () => {
+    expect(render("thinking")).toMatch(/role="status">正在理解你的想法/);
+    const generating = render("generating");
+    expect(generating).toMatch(/role="status">正在创作/);
+    expect(generating).toContain("春日");
+    expect(generating).toContain("山野");
+    expect(generating).not.toContain('aria-label="复制"');
+    expect(generating).not.toContain('data-canvas-mode="result"');
   });
 
-  it("reuses the motion backdrop for generated results instead of a gray fill", () => {
-    const resultStage = canvasSource.match(/function CanvasResultStage[\s\S]*?function CanvasResultCard/)?.[0] ?? "";
-    const resultCard = canvasSource.match(/function CanvasResultCard[\s\S]*?function ResultHoverButton/)?.[0] ?? "";
-
-    expect(resultStage).toContain("CanvasMotionBackdrop blurPreviewSrc={active.dataUrl}");
-    expect(resultCard).toContain('className="relative flex min-h-0 flex-1 items-center justify-center bg-transparent"');
-    expect(resultCard).toContain("bg-transparent transition");
+  it("keeps a single artwork, model metadata, and all accessible result actions", () => {
+    const result = render("created");
+    expect(result.match(/alt="生成结果 \d+"/g)).toHaveLength(1);
+    expect(result).toContain("test-image-model");
+    expect(result).toContain("春日山野");
+    for (const name of ["大图", "导出", "收录", "复制"]) {
+      expect(result).toContain(`aria-label="${name}"`);
+    }
+    expect(result).not.toMatch(/aria-label="复制"[^>]* disabled=""/);
+    expect(render("created", { ...sample, saved: true })).toMatch(/aria-label="已收录"[^>]* disabled=""/);
   });
 
-  it("randomizes the initial phase of every roaming light layer per generating session", () => {
-    expect(canvasSource).toContain("function randomPhaseDelay(periodSeconds: number)");
-    expect(canvasSource).toContain('"--canvas-ambient-delay": randomPhaseDelay(28)');
-    expect(canvasSource).toContain('"--canvas-breathe-delay": randomPhaseDelay(21)');
-    expect(canvasSource).toContain('"--canvas-dot-delay": randomPhaseDelay(42)');
-    expect(canvasSource).toContain('"--canvas-prism-delay": randomPhaseDelay(19)');
-    expect(canvasSource).toContain('"--canvas-aurora-delay": randomPhaseDelay(37)');
-    expect(canvasSource).toContain('"--canvas-flare-delay": randomPhaseDelay(29)');
-    expect(canvasSource).toContain("style={motionStyle}");
-  });
-
-  it("derives eight ambient colors from existing light and dark theme tokens", () => {
-    const glassBlock = tokenSource.match(/\.canvas-glass\s*\{[\s\S]*?\n}/)?.[0] ?? "";
-
-    expect(glassBlock).toContain("--canvas-ambient-sage");
-    expect(glassBlock).toContain("var(--color-capsule-sage-foreground)");
-    expect(glassBlock).toContain("var(--color-capsule-mist-foreground)");
-    expect(glassBlock).toContain("var(--color-capsule-clay-foreground)");
-    expect(glassBlock).toContain("var(--color-capsule-lavender-foreground)");
-    expect(glassBlock).toContain("var(--color-capsule-rose-foreground)");
-    expect(glassBlock).toContain("var(--color-capsule-sand-foreground)");
-    expect(glassBlock).toContain("--canvas-ambient-aqua");
-    expect(glassBlock).toContain("--canvas-ambient-coral");
-  });
-
-  it("uses independently phased slow motion and stops every decorative layer for reduced motion", () => {
-    expect(tokenSource).toContain("@keyframes canvas-ambient-drift");
-    expect(tokenSource).toContain("@keyframes canvas-ambient-breathe");
-    expect(tokenSource).toContain("@keyframes canvas-dot-drift");
-    expect(tokenSource).toContain("@keyframes canvas-prism-wander");
-    expect(tokenSource).toContain("@keyframes canvas-aurora-orbit");
-    expect(tokenSource).toContain("@keyframes canvas-flare-wander");
-    expect(tokenSource).toContain("animation: canvas-ambient-drift 28s");
-    expect(tokenSource).toContain("animation: canvas-dot-drift 42s");
-    expect(tokenSource).toContain("animation: canvas-prism-wander 19s");
-    expect(tokenSource).toContain("animation: canvas-aurora-orbit 37s");
-    expect(tokenSource).toContain("animation: canvas-flare-wander 29s");
-
-    const prismStart = tokenSource.indexOf("@keyframes canvas-prism-wander");
-    const prismEnd = tokenSource.indexOf("@keyframes canvas-aurora-orbit", prismStart);
-    const prismKeyframes = tokenSource.slice(prismStart, prismEnd);
-    expect(prismKeyframes).not.toContain("background-position:");
-    expect(prismKeyframes.match(/translate3d\(/g)?.length).toBeGreaterThanOrEqual(5);
-
-    const reducedMotionStart = tokenSource.indexOf("@media (prefers-reduced-motion: reduce)");
-    const reducedMotionBlock = tokenSource.slice(reducedMotionStart, reducedMotionStart + 1800);
-    expect(reducedMotionBlock).toContain(".canvas-ambient-glow");
-    expect(reducedMotionBlock).toContain(".canvas-ambient-glow::before");
-    expect(reducedMotionBlock).toContain(".canvas-dot-field");
-    expect(reducedMotionBlock).toContain(".canvas-prism-sweep");
-    expect(reducedMotionBlock).toContain(".canvas-glass-shine");
-    expect(reducedMotionBlock).toContain(".canvas-glass-shine::before");
-    expect(reducedMotionBlock).toContain(".canvas-glass-shine::after");
-    expect(reducedMotionBlock).toContain("animation: none !important");
+  it("reserves the completion announcement for returned results", () => {
+    expect(render("empty")).not.toContain('role="status"');
+    expect(render("reveal")).toContain('role="status"');
+    expect(render("created")).not.toContain('role="status"');
+    expect(render("created")).toContain('data-canvas-mode="result"');
   });
 });

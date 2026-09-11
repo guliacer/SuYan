@@ -10,6 +10,8 @@ import { warmLibraryItemThumbnails } from "./imageThumbnails";
 import { updateLibraryFile } from "./libraryStore";
 import { createExternalLibraryItem, isSupportedExternalMediaPath } from "./externalLibraryScanner";
 import { mapWithConcurrency } from "./asyncMap";
+import { getAuthorInfo } from "../account/accountService";
+import { attributeLocalImports } from "./workAttribution";
 
 export type ExternalLibraryChangeSet = {
   addedOrChangedPaths: readonly string[];
@@ -36,9 +38,16 @@ export async function syncExternalLibraryRoot(
   root: LibraryRoot,
   changes: ExternalLibraryChangeSet,
 ): Promise<ExternalLibraryReconcileResult> {
+  const importAuthor = getAuthorInfo();
   const state: { result?: ExternalLibraryReconcileResult } = {};
   const persisted = await updateLibraryFile(async (library) => {
     const result = await reconcileExternalLibraryEvents(library, root, changes);
+    if (result.importedItems.length) {
+      const attributed = await attributeLocalImports(result.importedItems, importAuthor);
+      const byId = new Map(attributed.map(item => [item.id, item]));
+      result.importedItems = attributed;
+      result.library = { ...result.library, items: result.library.items.map(item => byId.get(item.id) ?? item) };
+    }
     state.result = result;
     return result.changedCount === 0 ? null : result.library;
   }, { skipNormalize: true });

@@ -9,7 +9,6 @@ import {
   buildAiPromptOptionAnalysis,
   buildAiPromptOptionValues,
   buildGeneratedPromptOptionValues,
-  buildPromptAnalysisFromSavedCapsules,
   buildPromptOptionAnalysis,
   filterPromptOptionValues,
   getNegativePromptValues,
@@ -135,18 +134,6 @@ describe("promptAnalysis", () => {
     expect(tagResult.suggestedTags).not.toContain("柔和窗边自然光影");
   });
 
-  it("does not restore category or tag metadata as saved parameter capsules", () => {
-    const result = buildPromptAnalysisFromSavedCapsules(
-      "{{category: \u8fd1\u666f}}, {{tags: \u9999\u6c34}}, {{imageStyle: \u6d6e\u4e16\u7ed8}}",
-    );
-
-    expect(result).not.toBeNull();
-    expect(result?.sections.map((section) => section.variable)).toEqual(["imageStyle"]);
-    expect(result?.suggestedTags).toEqual([]);
-    expect(result?.suggestedCategories).toEqual([]);
-    expect(result?.primaryCategory).toBe("\u672a\u5206\u7c7b");
-  });
-
   it("filters empty dimension names from concrete image tags", () => {
     expect(
       normalizeConcretePromptTags([
@@ -256,66 +243,13 @@ describe("promptAnalysis", () => {
     expect(nextPrompt).not.toContain("{{pose:");
   });
 
-  it("restores only the new capsule variables from saved prompts", () => {
-    const analysis = buildPromptAnalysisFromSavedCapsules(
-      "旧风格：{{style: 电影感写真}}\n图像风格：{{imageStyle: 浮世绘 Ukiyo-e}}\n画面比例：{{aspectRatio: 1:1 方形构图}}\n旧光线：{{lighting: 柔和自然光}}",
+  it("restores only the new parameter values from saved prompts", () => {
+    const analysis = analyzePromptText(
+      "旧风格：{{style: 电影感写真}}，图像风格：{imageStyle: 浮世绘 Ukiyo-e}，画面比例：{{aspectRatio: 1:1 方形构图}}",
     );
 
-    expect(analysis).not.toBeNull();
-    expect(analysis?.sections.map((section) => section.variable)).toEqual(["imageStyle", "aspectRatio"]);
-    expect(analysis?.chips.map((chip) => chip.templateText)).toContain("{{imageStyle: 浮世绘 Ukiyo-e}}");
-    expect(analysis?.chips.some((chip) => chip.variable === "style" || chip.variable === "lighting")).toBe(false);
-  });
-
-  it("restores extended portrait capsule variables from saved prompts", () => {
-    const analysis = buildPromptAnalysisFromSavedCapsules(
-      "镜头器材：{{lensEquipment: 85mm定焦}}\n底妆：{{baseMakeup: 水光透亮底妆}}\n场地大类：{{locationScene: 顶层公寓}}\n前景遮挡：{{foregroundOcclusion: 薄纱前景遮挡}}",
-    );
-
-    expect(analysis).not.toBeNull();
-    expect(analysis?.sections.map((section) => section.label)).toEqual([
-      "镜头器材",
-      "底妆",
-      "场地大类",
-      "前景遮挡",
-    ]);
-    expect(analysis?.chips.map((chip) => chip.templateText)).toContain("{{locationScene: 顶层公寓}}");
-  });
-
-  it("corrects saved capsule variables when the value clearly belongs to another type", () => {
-    const analysis = buildPromptAnalysisFromSavedCapsules("{{hairAccessory: 一位美丽少女}}，刺绣细节");
-
-    expect(analysis).not.toBeNull();
-    expect(analysis?.sections.map((section) => section.key)).toEqual(["identity_attribute"]);
-    expect(analysis?.sections[0]).toMatchObject({
-      label: "基础身份属性",
-      variable: "identityAttribute",
-      values: ["一位美丽少女"],
-    });
-    expect(analysis?.chips[0]?.templateText).toBe("{{identityAttribute: 一位美丽少女}}");
-  });
-
-  it("uses bracketed prompt fragments as default replaceable capsules", () => {
-    const prompt = "一张【水梨】广告海报，画面比例[3:4]，整体（清爽夏日氛围），风格为（冰爽水雾水果广告海报）";
-    const savedAnalysis = buildPromptAnalysisFromSavedCapsules(prompt);
-    const localAnalysis = analyzePromptText(prompt);
-
-    expect(savedAnalysis).not.toBeNull();
-    expect(savedAnalysis?.chips.map((chip) => chip.templateText)).toEqual(
-      expect.arrayContaining([
-        "{{foodMainIngredient: 水梨}}",
-        "{{aspectRatio: 3:4}}",
-        "{{atmosphere: 清爽夏日氛围}}",
-        "{{commercialVisualStyle: 冰爽水雾水果广告海报}}",
-      ]),
-    );
-    expect(localAnalysis.chips.map((chip) => chip.templateText)).toEqual(
-      expect.arrayContaining([
-        "{{foodMainIngredient: 水梨}}",
-        "{{aspectRatio: 3:4}}",
-        "{{atmosphere: 清爽夏日氛围}}",
-      ]),
-    );
+    expect(analysis.sections.map((section) => section.variable)).toEqual(["imageStyle", "styleClassification", "photographyStyle", "aspectRatio"]);
+    expect(analysis.chips.every((chip) => chip.variable !== "style")).toBe(true);
   });
 
   it("builds local replacement options from the reset rule bank", () => {

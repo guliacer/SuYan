@@ -1,9 +1,14 @@
-import { BrowserWindow, clipboard, dialog, ipcMain } from "electron";
+import { previewTagOrganization, applyTagOrganization, undoTagOrganization } from "../library/tagOrganizationStore";
+import { BrowserWindow, clipboard, ipcMain } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { readTodoCalendar, updateTodoCalendar, getTodoHolidayYear } from "../library/todoCalendarStore";
+import type { TodoCalendarChange } from "../../../src/types/todoCalendar";
 import fs from "node:fs/promises";
 import type {
   AiAnalyzePromptPayload,
   AiImageGenerationPayload,
   AiOptimizePromptPayload,
+  AiPreparePromptEntryPayload,
   AiSummarizePromptTitlePayload,
   AiReverseImagePromptPayload,
   AiTranslatePromptPayload,
@@ -16,10 +21,26 @@ import type {
   PromptLexiconKind,
 } from "../../../src/features/library/types/library";
 import type { ProxySettings } from "../../../src/features/library/types/proxy";
+import { copyGeneratedImageToClipboard } from "../clipboard/copyGeneratedImage";
+import {
+  builtinModuleIds,
+  type BuiltinModuleId,
+} from "../../../src/features/library/utils/moduleRegistry";
+import type {
+  PromptCategoryDeleteInput, PromptCategoryInput, PromptCategoryUpdate, PromptClipboardCreateInput,
+  PromptCopyInput, PromptInput, PromptReorderInput, PromptUpdate,
+} from "../../../src/features/prompts/types";
+import type { CreateTodoProjectInput, CreateTodoTaskInput, CreateTodoWidgetInput, TodoLibraryReplaceInput, UpdateTodoProjectInput, UpdateTodoTaskInput, UpdateTodoWidgetInput } from "../../../src/features/prompts/types";
+import type {
+  AccountOAuthProfileSelection,
+  AccountProfileUpdateInput,
+} from "../../../src/features/account/types/account";
 import { IpcChannelName, ipcChannels } from "../../shared/ipcChannels";
+import { generateWithWorkAuthor, syncWorksToAccount } from "../library/workAttribution";
 import { openExternalUrl } from "../app/externalUrl";
 import { openAppDataDirectory } from "../app/dataDirectory";
 import { checkForAppUpdates } from "../app/updateChecker";
+import { readAppUpdatePreferences, writeAppUpdatePreferences } from "../app/updatePreferences";
 import {
   readAppAccelerationStatus,
   writeAppAccelerationSettings,
@@ -36,6 +57,7 @@ import {
 } from "../ai/aiSettingsBackupService";
 import {
   analyzePromptWithRemoteAi,
+  preparePromptEntryWithAi,
   generateImagesWithRemoteAi,
   listAiProviderModels,
   optimizePromptWithRemoteAi,
@@ -44,6 +66,7 @@ import {
   testAiProviderSettings,
   translatePromptWithRemoteAi,
 } from "../ai/promptAnalysisService";
+import { classifyLocalNsfwImage } from "../ai/localNsfwClassifier";
 import {
   generateImagesWithDoubaoWeb,
   hideDoubaoWebCanvas,
@@ -53,9 +76,13 @@ import {
   showDoubaoWebCanvas,
 } from "../ai/doubaoWebCanvas";
 import {
+  captureWebAssistant,
   disposeWebAssistant,
+  executeWebAssistantScript,
   hideWebAssistant,
+  importWebAssistantCapture,
   prepareWebAssistant,
+  setWebAssistantVisibility,
   setWebAssistantBounds,
   showWebAssistant,
 } from "../webAssistant/webAssistantView";
@@ -101,6 +128,7 @@ import { getImageThumbnailPath, getImagePath } from "../library/libraryPaths";
 import { resolveMediaAbsolutePath } from "../library/mediaPathResolver";
 import {
   findLibraryItemByImageFileName,
+  findLibraryItemById,
   readLibraryFile,
   saveLibraryFileFromRenderer,
 } from "../library/libraryStore";
@@ -119,6 +147,51 @@ import {
 } from "../library/externalLibraryWatcher";
 import { downloadRemoteMaterialForItem } from "../library/remoteMaterialDownload";
 import { readLibraryViewSettings, writeLibraryViewSettings } from "../library/viewSettingsStore";
+import { chooseThemeBackgroundImage, removeThemeBackgroundImage } from "../library/themeBackgroundStore";
+import {
+  copyPrompt,
+  createPromptCategory,
+  createPrompt,
+  createPrompts,
+  deletePromptCategory,
+  deletePrompts,
+  duplicatePrompt,
+  exportPromptLibrary,
+  importPromptLibrary,
+  listPrompts,
+  mergePromptCategories,
+  movePromptsToCategory,
+  readPromptAccount,
+  readPromptClipboard,
+  reorderPromptCategories,
+  reorderPrompts,
+  setPromptFavorite,
+  updatePromptCategory,
+  updatePrompt,
+  normalizePromptGithubProject,
+} from "../library/promptStore";
+import {
+  completeTodoTask,
+  createTodoProject,
+  createTodoTask,
+  createTodoWidget,
+  deleteTodoProject,
+  deleteTodoTask,
+  deleteTodoWidget,
+  listTodos,
+  reorderTodoProjects,
+  reorderTodoWidgets,
+  replaceTodoLibrary,
+  updateTodoProject,
+  updateTodoTask,
+  updateTodoWidget,
+} from "../library/todoStore";
+import { importTodoFiles } from "../library/todoImport";
+import { exportTodoLibrary } from "../library/todoExchange";
+import { importTodoLibraries } from "../library/todoStore";
+import type { TodoExportOptions, TodoLibraryFile } from "../../../src/features/prompts/types";
+import { choosePromptContentImage, savePromptContentImageFromDataUrl } from "../library/promptContentImageStore";
+import { fetchGithubProject } from "../library/githubProject";
 import {
   importStartupGalleryImages,
   importStartupGalleryImageFromClipboard,
@@ -133,8 +206,9 @@ import {
   testProxySettings,
   writeProxySettings,
 } from "../network/proxySettingsStore";
-import { logStartupEvent, logger } from "../startupLog";
-import { exportLogs } from "../appLogger";
+import { logStartupEvent } from "../startupLog";
+import { exportLogs, logger } from "../appLogger";
+import { runExportTask } from "../app/exportTask";
 import { reportLibrarySize } from "../performance/performanceMonitor";
 import {
   cancelCompress,
@@ -146,13 +220,34 @@ import {
 } from "../batch";
 import {
   checkModuleInstalled,
+  installModuleFromDownload,
   installModuleFromGithub,
   installModuleFromLocal,
 } from "../modules/moduleInstaller";
+import { openNsfwModuleDownloadPage, removeNsfwModule } from "../modules/nsfwModuleInstaller";
 import {
   installFfmpegComponentFromDownload,
   installFfmpegComponentFromLocal,
+  openFfmpegComponentDownloadPage,
+  removeFfmpegComponent,
 } from "../modules/ffmpegComponentInstall";
+import {
+  getAccountStatus,
+  getCurrentUser,
+  cancelOAuthLogin,
+  loginWithEmail,
+  logoutAccount,
+  refreshAccountSessionForced,
+  registerWithEmail,
+  startOAuthLogin,
+  startOAuthLink,
+  unlinkOAuthIdentity,
+  confirmOAuthLogin,
+  choosePendingOAuthAvatar,
+  updateCurrentAccountProfile,
+  chooseCurrentAccountAvatar,
+  removeCurrentAccountAvatar,
+} from "../account/accountService";
 import { AppError, toErrorPayload } from "./errors";
 
 type IpcResult<T> = { ok: true; data: T } | { ok: false; error: { code: string; message: string } };
@@ -177,6 +272,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.appUpdateCheck, () =>
     handleResult("app:update-check", () => checkForAppUpdates()),
   );
+  ipcMain.handle(ipcChannels.appUpdatePreferencesRead, () =>
+    handleResult("app:update-preferences-read", async () => readAppUpdatePreferences()),
+  );
+  ipcMain.handle(ipcChannels.appUpdatePreferencesSave, (_event, preferences: unknown) =>
+    handleResult("app:update-preferences-save", () => writeAppUpdatePreferences(preferences)),
+  );
   ipcMain.handle(ipcChannels.appAccelerationStatusRead, () =>
     handleResult("app:acceleration-status-read", async () => readAppAccelerationStatus()),
   );
@@ -194,11 +295,141 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.librarySave, (_event, library: LibraryFile) =>
     handleResult("library:save", () => saveLibraryFileFromRenderer(library)),
   );
+  ipcMain.handle(ipcChannels.tagOrganizationPreview, () => handleResult("tags:organization-preview", previewTagOrganization));
+  ipcMain.handle(ipcChannels.tagOrganizationApply, (_event, request) => handleResult("tags:organization-apply", () => applyTagOrganization(request)));
+  ipcMain.handle(ipcChannels.tagOrganizationUndo, () => handleResult("tags:organization-undo", undoTagOrganization));
+  ipcMain.handle(ipcChannels.promptList, () => handleResult("prompt:list", () => listPrompts()));
+  ipcMain.handle(ipcChannels.promptCreate, (_event, input: PromptInput) =>
+    handleResult("prompt:create", () => createPrompt(input)),
+  );
+  ipcMain.handle(ipcChannels.promptUpdate, (_event, input: PromptUpdate) =>
+    handleResult("prompt:update", () => updatePrompt(input)),
+  );
+  ipcMain.handle(ipcChannels.promptDelete, (_event, ids: string[]) =>
+    handleResult("prompt:delete", () => deletePrompts(normalizePromptIds(ids))),
+  );
+  ipcMain.handle(ipcChannels.promptCopy, (_event, input: PromptCopyInput) =>
+    handleResult("prompt:copy", () => copyPrompt(input)),
+  );
+  ipcMain.handle(ipcChannels.promptFavorite, (_event, id: string, favorite: boolean) =>
+    handleResult("prompt:favorite", () => setPromptFavorite(normalizePromptId(id), favorite === true)),
+  );
+  ipcMain.handle(ipcChannels.promptDuplicate, (_event, id: string) =>
+    handleResult("prompt:duplicate", () => duplicatePrompt(normalizePromptId(id))),
+  );
+  ipcMain.handle(ipcChannels.promptCreateMany, (_event, inputs: PromptClipboardCreateInput[]) =>
+    handleResult("prompt:create-many", () => createPrompts(normalizeClipboardPromptInputs(inputs))),
+  );
+  ipcMain.handle(ipcChannels.promptClipboardRead, () =>
+    handleResult("prompt:clipboard-read", () => readPromptClipboard()),
+  );
+  ipcMain.handle(ipcChannels.promptContentImageChoose, () =>
+    handleResult("prompt:content-image-choose", () => choosePromptContentImage()),
+  );
+  ipcMain.handle(ipcChannels.promptContentImageSave, (_event, dataUrl: unknown) =>
+    handleResult("prompt:content-image-save", () => {
+      if (typeof dataUrl !== "string" || dataUrl.length > 20_000_000) {
+        throw new AppError("PROMPT_IMAGE_INVALID", "图片数据无效或过大。");
+      }
+      return savePromptContentImageFromDataUrl(dataUrl);
+    }),
+  );
+  ipcMain.handle(ipcChannels.promptAccountRead, (_event, id: string) =>
+    handleResult("prompt:account-read", () => readPromptAccount(normalizePromptId(id))),
+  );
+  ipcMain.handle(ipcChannels.promptReorder, (_event, input: PromptReorderInput) =>
+    handleResult("prompt:reorder", () => reorderPrompts(normalizePromptReorderInput(input))),
+  );
+  ipcMain.handle(ipcChannels.promptMoveToCategory, (_event, ids: string[], categoryId?: string) =>
+    handleResult("prompt:move-to-category", () => movePromptsToCategory(normalizePromptIds(ids), normalizeOptionalPromptId(categoryId))),
+  );
+  ipcMain.handle(ipcChannels.promptCategoryCreate, (_event, input: PromptCategoryInput) =>
+    handleResult("prompt:category-create", () => createPromptCategory(normalizePromptCategoryInput(input))),
+  );
+  ipcMain.handle(ipcChannels.promptCategoryUpdate, (_event, input: PromptCategoryUpdate) =>
+    handleResult("prompt:category-update", () => updatePromptCategory({ ...normalizePromptCategoryInput(input), id: normalizePromptId(input?.id) })),
+  );
+  ipcMain.handle(ipcChannels.promptCategoryDelete, (_event, input: PromptCategoryDeleteInput) =>
+    handleResult("prompt:category-delete", () => deletePromptCategory(normalizePromptCategoryDeleteInput(input))),
+  );
+  ipcMain.handle(ipcChannels.promptCategoryReorder, (_event, ids: string[]) =>
+    handleResult("prompt:category-reorder", () => reorderPromptCategories(normalizePromptIds(ids))),
+  );
+  ipcMain.handle(ipcChannels.promptCategoryMerge, (_event, sourceId: string, targetId: string) =>
+    handleResult("prompt:category-merge", () => mergePromptCategories(normalizePromptId(sourceId), normalizePromptId(targetId))),
+  );
+  ipcMain.handle(ipcChannels.promptExport, (event) =>
+    handleResult("prompt:export", () => runExportTask(event.sender, "导出灵感库", () => exportPromptLibrary())),
+  );
+  ipcMain.handle(ipcChannels.promptImport, () =>
+    handleResult("prompt:import", () => importPromptLibrary()),
+  );
+  ipcMain.handle(ipcChannels.promptGithubProjectFetch, (_event, url: unknown) =>
+    handleResult("prompt:github-project-fetch", () => fetchGithubProject(typeof url === "string" ? url : "")),
+  );
+  ipcMain.handle(ipcChannels.todoList, () => handleResult("todo:list", () => listTodos()));
+  ipcMain.handle(ipcChannels.todoCalendarRead, () => handleResult("todo:calendar-read", () => readTodoCalendar()));
+  ipcMain.handle(ipcChannels.todoCalendarUpdate, (_event, change: TodoCalendarChange) => handleResult("todo:calendar-update", () => updateTodoCalendar(change)));
+  ipcMain.handle(ipcChannels.todoHolidayYear, (_event, year: number, refresh?: boolean) => handleResult("todo:holiday-year", () => getTodoHolidayYear(year, refresh)));
+  ipcMain.handle(ipcChannels.todoTaskCreate, (_event, input: CreateTodoTaskInput) =>
+    handleResult("todo:task-create", () => createTodoTask(input)),
+  );
+  ipcMain.handle(ipcChannels.todoTaskUpdate, (_event, id: string, patch: UpdateTodoTaskInput) =>
+    handleResult("todo:task-update", () => updateTodoTask(normalizeTodoId(id), patch)),
+  );
+  ipcMain.handle(ipcChannels.todoTaskDelete, (_event, id: string) =>
+    handleResult("todo:task-delete", () => deleteTodoTask(normalizeTodoId(id))),
+  );
+  ipcMain.handle(ipcChannels.todoTaskComplete, (_event, id: string) =>
+    handleResult("todo:task-complete", () => completeTodoTask(normalizeTodoId(id))),
+  );
+  ipcMain.handle(ipcChannels.todoLibraryReplace, (_event, library: TodoLibraryReplaceInput) =>
+    handleResult("todo:library-replace", () => replaceTodoLibrary(library)),
+  );
+  ipcMain.handle(ipcChannels.todoImportFiles, () =>
+    handleResult("todo:import-files", () => importTodoFiles()),
+  );
+  ipcMain.handle(ipcChannels.todoExport, (event, options?: TodoExportOptions) =>
+    handleResult("todo:export", () => runExportTask(event.sender, "导出待办事项", () => exportTodoLibrary(options))),
+  );
+  ipcMain.handle(ipcChannels.todoImportLibraries, (_event, libraries: TodoLibraryFile[]) =>
+    handleResult("todo:import-libraries", () => importTodoLibraries(libraries)),
+  );
+  ipcMain.handle(ipcChannels.todoProjectCreate, (_event, input: CreateTodoProjectInput) =>
+    handleResult("todo:project-create", () => createTodoProject(input)),
+  );
+  ipcMain.handle(ipcChannels.todoProjectUpdate, (_event, id: string, patch: UpdateTodoProjectInput) =>
+    handleResult("todo:project-update", () => updateTodoProject(normalizeTodoId(id), patch)),
+  );
+  ipcMain.handle(ipcChannels.todoProjectDelete, (_event, id: string) =>
+    handleResult("todo:project-delete", () => deleteTodoProject(normalizeTodoId(id))),
+  );
+  ipcMain.handle(ipcChannels.todoProjectReorder, (_event, ids: string[]) =>
+    handleResult("todo:project-reorder", () => reorderTodoProjects(normalizeTodoIds(ids))),
+  );
+  ipcMain.handle(ipcChannels.todoWidgetCreate, (_event, input: CreateTodoWidgetInput) =>
+    handleResult("todo:widget-create", () => createTodoWidget(input)),
+  );
+  ipcMain.handle(ipcChannels.todoWidgetUpdate, (_event, id: string, patch: UpdateTodoWidgetInput) =>
+    handleResult("todo:widget-update", () => updateTodoWidget(normalizeTodoId(id), patch)),
+  );
+  ipcMain.handle(ipcChannels.todoWidgetDelete, (_event, id: string) =>
+    handleResult("todo:widget-delete", () => deleteTodoWidget(normalizeTodoId(id))),
+  );
+  ipcMain.handle(ipcChannels.todoWidgetReorder, (_event, ids: string[]) =>
+    handleResult("todo:widget-reorder", () => reorderTodoWidgets(normalizeTodoIds(ids))),
+  );
   ipcMain.handle(ipcChannels.libraryViewSettingsRead, () =>
     handleResult("library:view-settings-read", () => readLibraryViewSettings()),
   );
   ipcMain.handle(ipcChannels.libraryViewSettingsSave, (_event, settings: LibraryViewSettings) =>
     handleResult("library:view-settings-save", () => writeLibraryViewSettings(settings)),
+  );
+  ipcMain.handle(ipcChannels.themeBackgroundChoose, (event) =>
+    handleResult("theme-background:choose", () => chooseThemeBackgroundImage(BrowserWindow.fromWebContents(event.sender))),
+  );
+  ipcMain.handle(ipcChannels.themeBackgroundRemove, (_event, imageFileName: string | null) =>
+    handleResult("theme-background:remove", () => removeThemeBackgroundImage(imageFileName)),
   );
   ipcMain.handle(ipcChannels.libraryRootsList, () => handleResult("library:roots-list", () => readLibraryRoots()));
   ipcMain.handle(ipcChannels.libraryRootOrderSet, (_event, rootIds: unknown) =>
@@ -345,13 +576,21 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.imageCopy, (_event, imageFileName: string) =>
     handleResult("image:copy", async () => {
+      if (typeof imageFileName === "string" && imageFileName.startsWith("data:")) {
+        await copyGeneratedImageToClipboard(imageFileName);
+        return { copied: true };
+      }
       const hydratedImageFileName = await hydrateRemoteMaterialByImageFileName(imageFileName);
       await copyImageToClipboard(hydratedImageFileName);
       return { copied: true };
     }),
   );
-  ipcMain.handle(ipcChannels.imageExport, (_event, imageFileName: string) =>
-    handleResult("image:export", async () => exportImageToLocal(await hydrateRemoteMaterialByImageFileName(imageFileName))),
+  ipcMain.handle(ipcChannels.imageExport, (event, source: unknown) =>
+    handleResult("image:export", () => runExportTask(event.sender, "导出作品", async () => {
+      if (typeof source === "string") return exportImageToLocal(await hydrateRemoteMaterialByImageFileName(source));
+      const { exportGeneratedWork } = await import("../library/exportGeneratedWork");
+      return exportGeneratedWork(source);
+    })),
   );
   ipcMain.handle(ipcChannels.imageThumbnailResolve, (_event, imageFileName: string) =>
     handleResult("image:thumbnail-resolve", async () => {
@@ -408,9 +647,9 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(
     ipcChannels.canvasReferenceImageSave,
-    (_event, dataUrl: string, sourceFileName?: string, previousFileName?: string) =>
+    (_event, dataUrl: string, sourceFileName?: string) =>
       handleResult("canvas:reference-image-save", () =>
-        saveCanvasReferenceImage(dataUrl, sourceFileName, previousFileName),
+        saveCanvasReferenceImage(dataUrl, sourceFileName),
       ),
   );
   ipcMain.handle(ipcChannels.canvasReferenceImageRead, (_event, fileName: string) =>
@@ -422,8 +661,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.lexiconImageImport, () =>
     handleResult("lexicon:image-import", () => importPromptLexiconImage()),
   );
-  ipcMain.handle(ipcChannels.lexiconExport, (_event, kind: PromptLexiconKind, items: PromptLexiconEntry[]) =>
-    handleResult("lexicon:export-json", () => exportPromptLexicon(kind, items)),
+  ipcMain.handle(ipcChannels.lexiconExport, (event, kind: PromptLexiconKind, items: PromptLexiconEntry[]) =>
+    handleResult("lexicon:export-json", () => runExportTask(event.sender, "导出词库", () => exportPromptLexicon(kind, items))),
   );
   ipcMain.handle(ipcChannels.lexiconImport, (_event, kind: PromptLexiconKind) =>
     handleResult("lexicon:import-json", () => importPromptLexicon(kind)),
@@ -448,16 +687,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.videoReferenceImageImportUrl, (_event, itemId: string, url: string) =>
     handleResult("video:reference-image-import-url", () => importReferenceImageFromUrlForItem(itemId, url)),
   );
-  ipcMain.handle(ipcChannels.archiveExportZip, (_event, itemIds: string[]) =>
-    handleResult("archive:export-zip", () => exportLibraryZip(itemIds)),
+  ipcMain.handle(ipcChannels.archiveExportZip, (event, itemIds: string[], authorChoice?: "keep" | "associate") =>
+    handleResult("archive:export-zip", () => runExportTask(event.sender, "导出提示词分享包", () => exportLibraryZip(itemIds, authorChoice))),
   );
   ipcMain.handle(ipcChannels.archiveImportZip, () => handleResult("archive:import-zip", () => importLibraryZip()));
   ipcMain.handle(ipcChannels.aiSettingsRead, () => handleResult("ai:settings-read", () => readPublicAiProviderSettings()));
   ipcMain.handle(ipcChannels.aiSettingsSave, (_event, settings: SaveAiProviderSettingsPayload) =>
     handleResult("ai:settings-save", () => writeAiProviderSettings(settings)),
   );
-  ipcMain.handle(ipcChannels.aiSettingsExport, (_event, payload: { type: "plain" | "full"; password?: string }) =>
-    handleResult("ai:settings-export", () => exportSettingsBackup(payload)),
+  ipcMain.handle(ipcChannels.aiSettingsExport, (event, payload: { type: "plain" | "full" | "account"; password?: string }) =>
+    handleResult("ai:settings-export", () => runExportTask(event.sender, "导出 AI 设置", () => exportSettingsBackup(payload))),
   );
   ipcMain.handle(ipcChannels.aiSettingsImport, (_event, payload: { password?: string }) =>
     handleResult("ai:settings-import", () => importSettingsPreview(payload)),
@@ -499,6 +738,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.aiAnalyzePrompt, (_event, payload: AiAnalyzePromptPayload) =>
     handleResult("ai:analyze-prompt", () => analyzePromptWithRemoteAi(payload)),
   );
+  ipcMain.handle(ipcChannels.aiPreparePromptEntry, (_event, payload: AiPreparePromptEntryPayload) =>
+    handleResult("ai:prepare-prompt-entry", () => preparePromptEntryWithAi(payload)),
+  );
   ipcMain.handle(ipcChannels.aiOptimizePrompt, (_event, payload: AiOptimizePromptPayload) =>
     handleResult("ai:optimize-prompt", () => optimizePromptWithRemoteAi(payload)),
   );
@@ -512,7 +754,7 @@ export function registerIpcHandlers(): void {
     handleResult("ai:reverse-image-prompt", () => reverseImagePromptWithRemoteAi(payload)),
   );
   ipcMain.handle(ipcChannels.aiGenerateImages, (_event, payload: AiImageGenerationPayload) =>
-    handleResult("ai:generate-images", () => generateImagesWithRemoteAi(payload)),
+    handleResult("ai:generate-images", () => generateWithWorkAuthor(() => generateImagesWithRemoteAi(payload))),
   );
   ipcMain.handle(ipcChannels.doubaoWebCanvasPrepare, (event) =>
     handleResult("doubao-web:prepare", () => prepareDoubaoWebCanvas(requireOwnerWindow(event))),
@@ -532,7 +774,7 @@ export function registerIpcHandlers(): void {
     handleResult("doubao-web:hide", () => Promise.resolve(hideDoubaoWebCanvas(requireOwnerWindow(event)))),
   );
   ipcMain.handle(ipcChannels.doubaoWebCanvasGenerate, (event, payload: AiImageGenerationPayload) =>
-    handleResult("doubao-web:generate", () => generateImagesWithDoubaoWeb(requireOwnerWindow(event), payload)),
+    handleResult("doubao-web:generate", () => generateWithWorkAuthor(() => generateImagesWithDoubaoWeb(requireOwnerWindow(event), payload))),
   );
   ipcMain.handle(ipcChannels.webAssistantPrepare, (event, input: unknown) =>
     handleResult("web-assistant:prepare", () =>
@@ -565,6 +807,22 @@ export function registerIpcHandlers(): void {
       ),
     ),
   );
+  ipcMain.handle(ipcChannels.webAssistantVisibility, (event, visible: unknown) =>
+    handleResult("web-assistant:visibility", () =>
+      Promise.resolve(setWebAssistantVisibility(requireOwnerWindow(event), visible === true)),
+    ),
+  );
+  ipcMain.handle(ipcChannels.webAssistantCapture, (event, platform?: unknown, customUrl?: unknown) =>
+    handleResult("web-assistant:capture", () =>
+      Promise.resolve(
+        captureWebAssistant(
+          requireOwnerWindow(event),
+          normalizeWebAssistantPlatform(platform),
+          normalizeWebAssistantCustomUrl(customUrl),
+        ),
+      ),
+    ),
+  );
   ipcMain.handle(ipcChannels.webAssistantHide, (event, platform?: unknown) =>
     handleResult("web-assistant:hide", () =>
       Promise.resolve(hideWebAssistant(requireOwnerWindow(event), normalizeWebAssistantPlatform(platform))),
@@ -572,6 +830,33 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.webAssistantDispose, (event) =>
     handleResult("web-assistant:dispose", () => Promise.resolve(disposeWebAssistant(requireOwnerWindow(event)))),
+  );
+  ipcMain.handle(
+    ipcChannels.webAssistantExecuteScript,
+    (event, platform: unknown, script: unknown, customUrl?: unknown) =>
+      handleResult("web-assistant:execute-script", () =>
+        Promise.resolve(
+          executeWebAssistantScript(
+            requireOwnerWindow(event),
+            normalizeWebAssistantPlatform(platform),
+            normalizeWebAssistantScript(script),
+            normalizeWebAssistantCustomUrl(customUrl),
+          ),
+        ),
+      ),
+  );
+  ipcMain.handle(
+    ipcChannels.webAssistantImportCapture,
+    (event, platform: unknown, options: unknown) =>
+      handleResult("web-assistant:import-capture", () =>
+        Promise.resolve(
+          importWebAssistantCapture(
+            requireOwnerWindow(event),
+            normalizeWebAssistantPlatform(platform),
+            normalizeWebAssistantImportCaptureOptions(options),
+          ),
+        ),
+      ),
   );
   ipcMain.handle(ipcChannels.proxySettingsRead, () =>
     handleResult("proxy:settings-read", () => readProxySettings()),
@@ -608,23 +893,61 @@ export function registerIpcHandlers(): void {
     return { ok: true, data: { canceled: true } };
   });
 
-  ipcMain.handle(ipcChannels.moduleCheckInstalled, (_event, moduleId: string) =>
-    handleResult("module:check-installed", () => checkModuleInstalled(moduleId as never)),
+  ipcMain.handle(ipcChannels.moduleCheckInstalled, (_event, moduleId: unknown) =>
+    handleResult("module:check-installed", async () => {
+      const normalizedModuleId = normalizeBuiltinModuleId(moduleId);
+      const status = await checkModuleInstalled(normalizedModuleId);
+      logger.info("main", "module:check-installed", {
+        moduleId: normalizedModuleId,
+        installed: status.installed,
+      });
+      return status;
+    }),
   );
 
-  ipcMain.handle(ipcChannels.moduleInstallLocal, (event, moduleId: string) =>
+  ipcMain.handle(ipcChannels.moduleInstallLocal, (event, moduleId: unknown) =>
     handleResult("module:install-local", () =>
-      installModuleFromLocal(moduleId as never, (progress) => {
+      installModuleFromLocal(normalizeBuiltinModuleId(moduleId), (progress) => {
         event.sender.send(IpcChannelName.ModuleInstallProgress, progress);
       }),
     ),
   );
 
+  ipcMain.handle(ipcChannels.moduleInstallDownload, (event, moduleId: unknown) =>
+    handleResult("module:install-download", () =>
+      installModuleFromDownload(normalizeBuiltinModuleId(moduleId), (progress) => {
+        event.sender.send(IpcChannelName.ModuleInstallProgress, progress);
+      }),
+    ),
+  );
+
+  ipcMain.handle(ipcChannels.moduleNsfwClassify, (_event, itemId: unknown) =>
+    handleResult("module:nsfw-classify", async () => {
+      if (typeof itemId !== "string" || itemId.trim().length === 0) {
+        throw new AppError("NSFW_ITEM_INVALID", "待分级素材无效。");
+      }
+      const item = await findLibraryItemById(itemId.trim());
+      if (!item || !item.imageFileName) {
+        throw new AppError("NSFW_ITEM_NOT_FOUND", "找不到待分级图片。");
+      }
+      const imagePath = await resolveMediaAbsolutePath(item);
+      return classifyLocalNsfwImage(imagePath);
+    }),
+  );
+
+  ipcMain.handle(ipcChannels.moduleNsfwOpenDownloadPage, () =>
+    handleResult("module:nsfw-open-download-page", () => openNsfwModuleDownloadPage()),
+  );
+
+  ipcMain.handle(ipcChannels.moduleNsfwRemove, () =>
+    handleResult("module:nsfw-remove", () => removeNsfwModule()),
+  );
+
   ipcMain.handle(
     ipcChannels.moduleInstallGithub,
-    (event, moduleId: string, githubOwner: string) =>
+    (event, moduleId: unknown, githubOwner: unknown) =>
       handleResult("module:install-github", () =>
-        installModuleFromGithub(moduleId as never, githubOwner, (progress) => {
+        installModuleFromGithub(normalizeBuiltinModuleId(moduleId), typeof githubOwner === "string" ? githubOwner : "", (progress) => {
           event.sender.send(IpcChannelName.ModuleInstallProgress, progress);
         }),
       ),
@@ -646,8 +969,73 @@ export function registerIpcHandlers(): void {
     ),
   );
 
-  ipcMain.handle(ipcChannels.logExport, (_event, options?: unknown) =>
-    handleResult("log:export", () => exportLogs(normalizeLogExportOptions(options))),
+  ipcMain.handle(ipcChannels.componentFfmpegOpenDownloadPage, () =>
+    handleResult("component:ffmpeg-open-download-page", () => openFfmpegComponentDownloadPage()),
+  );
+
+  ipcMain.handle(ipcChannels.componentFfmpegRemove, () =>
+    handleResult("component:ffmpeg-remove", () => removeFfmpegComponent()),
+  );
+
+  ipcMain.handle(ipcChannels.logExport, (event, options?: unknown) =>
+    handleResult("log:export", () => runExportTask(event.sender, "导出应用日志", () => exportLogs(normalizeLogExportOptions(options)))),
+  );
+
+  ipcMain.handle(ipcChannels.accountGetStatus, () =>
+    handleResult("account:get-status", () => Promise.resolve(getAccountStatus())),
+  );
+  ipcMain.handle(ipcChannels.librarySyncWorks, (_event, input) =>
+    handleResult("library:sync-works", () => syncWorksToAccount(input)),
+  );
+  ipcMain.handle(ipcChannels.accountGetCurrentUser, () =>
+    handleResult("account:get-current-user", () => Promise.resolve(getCurrentUser())),
+  );
+  ipcMain.handle(ipcChannels.accountRegisterEmail, (_event, input: unknown) =>
+    handleResult("account:register-email", () => registerWithEmail(input)),
+  );
+  ipcMain.handle(ipcChannels.accountLoginEmail, (_event, input: unknown) =>
+    handleResult("account:login-email", () => loginWithEmail(input)),
+  );
+  ipcMain.handle(ipcChannels.accountStartOAuth, (_event, input: unknown) =>
+    handleResult("account:start-oauth", () =>
+      startOAuthLogin(input),
+    ),
+  );
+  ipcMain.handle(ipcChannels.accountStartOAuthLink, (_event, input: unknown) =>
+    handleResult("account:start-oauth-link", () => startOAuthLink(input)),
+  );
+  ipcMain.handle(ipcChannels.accountConfirmOAuth, (_event, selection: unknown) =>
+    handleResult("account:confirm-oauth", () =>
+      confirmOAuthLogin(selection as AccountOAuthProfileSelection | undefined),
+    ),
+  );
+  ipcMain.handle(ipcChannels.accountSelectOAuthAvatar, () =>
+    handleResult("account:select-oauth-avatar", () => choosePendingOAuthAvatar()),
+  );
+  ipcMain.handle(ipcChannels.accountCancelOAuth, () =>
+    handleResult("account:cancel-oauth", () => Promise.resolve(cancelOAuthLogin())),
+  );
+  ipcMain.handle(ipcChannels.accountLogout, () =>
+    handleResult("account:logout", () => logoutAccount()),
+  );
+  ipcMain.handle(ipcChannels.accountRefresh, () =>
+    handleResult("account:refresh", () => refreshAccountSessionForced()),
+  );
+  ipcMain.handle(ipcChannels.accountUpdateProfile, (_event, input: unknown) =>
+    handleResult("account:update-profile", () =>
+      updateCurrentAccountProfile(input as AccountProfileUpdateInput),
+    ),
+  );
+  ipcMain.handle(ipcChannels.accountChooseAvatar, () =>
+    handleResult("account:choose-avatar", () => chooseCurrentAccountAvatar()),
+  );
+  ipcMain.handle(ipcChannels.accountRemoveAvatar, () =>
+    handleResult("account:remove-avatar", () => removeCurrentAccountAvatar()),
+  );
+  ipcMain.handle(ipcChannels.accountUnlinkIdentity, (_event, provider: unknown) =>
+    handleResult("account:unlink-identity", () =>
+      unlinkOAuthIdentity(typeof provider === "string" ? provider : ""),
+    ),
   );
 }
 
@@ -739,6 +1127,32 @@ function normalizeWebAssistantCustomUrl(input: unknown): string | null {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+/** 页面操作脚本只放行纯 ASCII 表达式，避免富文本/注释/复杂语法被注入到第三方站点。 */
+function normalizeWebAssistantScript(input: unknown): string {
+  if (typeof input !== "string" || input.length === 0 || input.length > 2000) {
+    throw new AppError("WEB_ASSISTANT_SCRIPT_INVALID", "页面操作脚本无效。");
+  }
+  if (!/^[\w\s"._()\[\]{}<>/\\;:,?*&|!+=\- '#%]*$/.test(input)) {
+    throw new AppError("WEB_ASSISTANT_SCRIPT_INVALID", "页面操作脚本包含不合规字符。");
+  }
+  return input;
+}
+
+/** 保存网页截图入素材库时，仅透传两个可选文本字段，其余一律丢弃。 */
+function normalizeWebAssistantImportCaptureOptions(input: unknown): {
+  title?: string | null;
+  prompt?: string | null;
+  customUrl?: string | null;
+} | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return null;
+  }
+  const record = input as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title.trim().slice(0, 200) || null : null;
+  const prompt = typeof record.prompt === "string" ? record.prompt.slice(0, 100000) || null : null;
+  return { title, prompt, customUrl: normalizeWebAssistantCustomUrl(record.customUrl) };
+}
+
 function normalizeWebAssistantBounds(input: unknown): WebAssistantBounds {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new AppError("WEB_ASSISTANT_BOUNDS_INVALID", "网页助手区域尺寸无效。");
@@ -780,6 +1194,83 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function normalizeBuiltinModuleId(input: unknown): BuiltinModuleId {
+  if (typeof input === "string" && (builtinModuleIds as readonly string[]).includes(input)) {
+    return input as BuiltinModuleId;
+  }
+  throw new AppError("MODULE_ID_INVALID", "功能模块标识无效。");
+}
+
+function normalizePromptId(input: unknown): string {
+  if (typeof input !== "string" || !input.trim()) {
+    throw new AppError("PROMPT_ID_INVALID", "灵感标识无效。");
+  }
+  return input.trim();
+}
+
+function normalizePromptIds(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    throw new AppError("PROMPT_IDS_INVALID", "灵感标识列表无效。");
+  }
+  return [...new Set(input.map(normalizePromptId))];
+}
+
+function normalizeTodoId(input: unknown): string {
+  if (typeof input !== "string" || !input.trim()) {
+    throw new AppError("TODO_ID_INVALID", "待办标识无效。");
+  }
+  return input.trim();
+}
+
+function normalizeTodoIds(input: unknown): string[] {
+  if (!Array.isArray(input)) throw new AppError("TODO_IDS_INVALID", "待办标识列表无效。");
+  return [...new Set(input.map(normalizeTodoId))];
+}
+
+function normalizeOptionalPromptId(input: unknown): string | undefined {
+  return typeof input === "string" && input.trim() ? input.trim() : undefined;
+}
+
+function normalizePromptCategoryInput(input: unknown): PromptCategoryInput {
+  if (!isPlainRecord(input) || typeof input.name !== "string") {
+    throw new AppError("PROMPT_CATEGORY_INVALID", "灵感分类参数无效。");
+  }
+  return {
+    name: input.name,
+    ...(typeof input.icon === "string" ? { icon: input.icon } : {}),
+    ...(typeof input.color === "string" ? { color: input.color } : {}),
+    ...(typeof input.description === "string" ? { description: input.description } : {}),
+  };
+}
+
+function normalizePromptCategoryDeleteInput(input: unknown): PromptCategoryDeleteInput {
+  if (!isPlainRecord(input)) throw new AppError("PROMPT_CATEGORY_DELETE_INVALID", "删除分类参数无效。");
+  return { id: normalizePromptId(input.id), targetCategoryId: normalizeOptionalPromptId(input.targetCategoryId), deleteEntries: input.deleteEntries === true };
+}
+
+function normalizePromptReorderInput(input: unknown): PromptReorderInput {
+  if (!isPlainRecord(input)) throw new AppError("PROMPT_REORDER_INVALID", "提示词排序参数无效。");
+  return { promptIds: normalizePromptIds(input.promptIds), targetCategoryId: normalizeOptionalPromptId(input.targetCategoryId), beforePromptId: normalizeOptionalPromptId(input.beforePromptId), afterPromptId: normalizeOptionalPromptId(input.afterPromptId) };
+}
+
+function normalizeClipboardPromptInputs(input: unknown): PromptClipboardCreateInput[] {
+  if (!Array.isArray(input)) throw new AppError("PROMPT_CLIPBOARD_INVALID", "剪贴板提示词参数无效。");
+  return input.slice(0, 200).map((entry) => {
+    if (!isPlainRecord(entry) || typeof entry.content !== "string") throw new AppError("PROMPT_CLIPBOARD_INVALID", "剪贴板灵感内容无效。");
+    const type = entry.type === "github-project" ? "github-project" : undefined;
+    const github = type ? normalizePromptGithubProject(entry.github) : undefined;
+    return {
+      content: entry.content,
+      ...(typeof entry.title === "string" ? { title: entry.title } : {}),
+      categoryId: normalizeOptionalPromptId(entry.categoryId),
+      tagIds: Array.isArray(entry.tagIds) ? entry.tagIds.filter((tag): tag is string => typeof tag === "string") : [],
+      ...(type ? { type } : {}),
+      ...(typeof entry.sourceUrl === "string" ? { sourceUrl: entry.sourceUrl } : {}),
+      ...(github ? { github } : {}),
+    };
+  });
+}
+
 function normalizeGeneratedImageImportPayload(input: unknown): GeneratedImageImportPayload {
   const record = isPlainRecord(input) ? input : {};
   const rawImages = Array.isArray(record.images) ? record.images : [];
@@ -790,6 +1281,8 @@ function normalizeGeneratedImageImportPayload(input: unknown): GeneratedImageImp
       .filter(isPlainRecord)
       .map((image) => ({
         dataUrl: typeof image.dataUrl === "string" ? image.dataUrl : "",
+        attributionId: typeof image.attributionId === "string" ? image.attributionId : undefined,
+        mediaType: image.mediaType === "video" ? "video" as const : "image" as const,
         revisedPrompt: typeof image.revisedPrompt === "string" ? image.revisedPrompt : null,
       }))
       .filter((image) => image.dataUrl.trim().length > 0),
@@ -809,7 +1302,7 @@ function normalizeGeneratedImageImportPayload(input: unknown): GeneratedImageImp
         : undefined,
       categoryConfidence: typeof metadata.categoryConfidence === "number" ? metadata.categoryConfidence : undefined,
       categorySource:
-        metadata.categorySource === "system" || metadata.categorySource === "user" || metadata.categorySource === "ai"
+        metadata.categorySource === "system" || metadata.categorySource === "user" || metadata.categorySource === "ai" || metadata.categorySource === "local"
           ? metadata.categorySource
           : undefined,
     },
@@ -901,6 +1394,10 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+function isVideoFileName(fileName: string): boolean {
+  return /\.(?:mp4|webm|mov|mkv|avi|m4v|wmv)$/i.test(fileName.trim());
 }
 
 async function mapWithConcurrency<T, TResult>(

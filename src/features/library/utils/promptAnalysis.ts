@@ -1,4 +1,7 @@
 import { uniqueTags } from "./buildLibraryFile";
+import { shouldAdmitAnalyzedTag } from "./tagQuality";
+import { buildAnalyzedTagEntry, canonicalTagLabel, findKnownTag, proposeTagGroup, tagKey } from "./tagKnowledge";
+import type { PromptImageLexiconEntry } from "../types/library";
 import {
   photographyCategoryLabels,
   resolvePhotographyCategory,
@@ -8,21 +11,15 @@ import {
 } from "./photographyCategories";
 import { normalizeImageTag, sanitizeMaterialTags } from "./tagNormalization";
 import {
-  parsePromptTemplateSegments,
   getPromptSectionKeyByVariable,
   normalizePromptSectionValue,
   promptSectionMeta,
   promptSplitSectionOrder,
-  resolvePromptSectionKeyForValue,
   resolvePromptTemplateText,
   splitPromptToTemplate,
   type PromptSplitSection,
   type PromptSplitSectionKey,
 } from "./promptSplit";
-import {
-  isReservedPromptMetadataVariable,
-  resolvePromptParameterDefinition,
-} from "./promptParameterSchema";
 
 export type PromptReplacementChip = {
   id: string;
@@ -41,6 +38,7 @@ export type PromptAnalysisResult = {
   chips: PromptReplacementChip[];
   sections: PromptAnalysisSection[];
   suggestedTags: string[];
+  tagEntries?: import("../types/library").PromptImageLexiconEntry[];
   suggestedCategories: string[];
   primaryCategory: string;
   template: string;
@@ -49,7 +47,7 @@ export type PromptAnalysisResult = {
     categoryId: string;
     confidence: number;
     reason: string;
-    source: "system" | "user" | "ai";
+    source: "system" | "user" | "ai" | "local";
   }>;
   taxonomyBand?: "high" | "mid" | "low" | "none";
   taxonomyPrimaryCategoryId?: string | null;
@@ -376,7 +374,7 @@ const promptAnalysisSectionPriority: Partial<Record<PromptSplitSectionKey, numbe
 /** Tag-only entry point. It never returns parameter sections or replacement chips. */
 export function analyzePromptTags(
   prompt: string,
-  options: Partial<CategoryInput> = {},
+  options: Partial<CategoryInput> & { knownTagEntries?: readonly PromptImageLexiconEntry[] } = {},
 ): PromptAnalysisResult {
   const splitResult = splitPromptToTemplate(prompt);
   const parameterValueKeys = new Set(
@@ -386,20 +384,32 @@ export function analyzePromptTags(
       .filter(Boolean),
   );
   const residualPromptFragments = resolvePromptTemplateText(prompt)
-    .split(/[?,??;?.!??!?\n]+/u)
+    .split(/[,，、;；。.!！?？\n]+/u)
     .map((fragment) => fragment.trim())
     .filter(Boolean);
   const tagCandidates = uniqueTags([...splitResult.suggestedTags, ...residualPromptFragments]).filter(
-    (tag) => !parameterValueKeys.has(tag.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-Hans-CN")),
+    (tag) => !parameterValueKeys.has(tag.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-Hans-CN"))
+      || /^(?:人物|服饰|动物|物品|食物|自然环境|建筑空间)\//.test(proposeTagGroup(canonicalTagLabel(tag))),
   );
 
+  const known = options.knownTagEntries ?? [];
+  const labels = normalizeConcretePromptTags(tagCandidates.filter(tag => shouldAdmitAnalyzedTag(tag, [], prompt)), {
+    category: options.currentCategory,
+    maxCount: 15,
+  });
+  const tagEntries = labels.map(raw => {
+    const label = canonicalTagLabel(raw, known);
+    const explicit = tagKey(prompt).includes(tagKey(raw));
+    return buildAnalyzedTagEntry(label, {
+      dimension: "local", confidence: explicit ? 1 : 0.6,
+      evidence: explicit ? [`原文明确写明“${raw}”`] : [],
+    }, findKnownTag(label, known));
+  }).filter((entry, index, entries) => entries.findIndex(other => tagKey(other.label) === tagKey(entry.label)) === index);
   return {
     chips: [],
     sections: [],
-    suggestedTags: normalizeConcretePromptTags(tagCandidates, {
-      category: options.currentCategory,
-      maxCount: 15,
-    }),
+    suggestedTags: tagEntries.map(entry => entry.label),
+    tagEntries,
     suggestedCategories: [],
     primaryCategory: "未分类",
     template: "",
@@ -412,25 +422,19 @@ export function analyzePromptText(prompt: string, options: Partial<CategoryInput
     ...section,
     chips: buildReplacementChips(section),
   }));
-  const explicitCapsuleAnalysis = buildPromptAnalysisFromSavedCapsules(prompt, options);
-  const mergedSections = mergePromptAnalysisSections(explicitCapsuleAnalysis?.sections ?? [], detectedSections);
-  // Explicit user capsules stay intact; auto-detected analysis is compacted to top replaceable params.
+  // Auto-detected analysis is compacted to the top replaceable params.
   // Negative sections are preserved for extraction (UI hides them via omitNegativeAnalysisSections).
-  const sections = (
-    explicitCapsuleAnalysis
-      ? mergedSections
-      : [
-          ...compactPromptAnalysisSections(prompt, mergedSections),
-          ...mergedSections.filter((section) => !isPromptAnalysisReplaceableSection(section.key)),
-        ]
-  ).sort(
+  const sections = [
+    ...compactPromptAnalysisSections(prompt, detectedSections),
+    ...detectedSections.filter((section) => !isPromptAnalysisReplaceableSection(section.key)),
+  ].sort(
     (first, second) => promptSplitSectionOrder.indexOf(first.key) - promptSplitSectionOrder.indexOf(second.key),
   );
   const normalizedParameterSections = normalizePromptAnalysisSections(
     prompt,
     sections.filter((section) => isPromptAnalysisReplaceableSection(section.key)),
     {
-      maxSections: explicitCapsuleAnalysis ? maxPromptAnalysisSections : maxPromptAnalysisChips,
+      maxSections: maxPromptAnalysisChips,
       requireSourceValue: true,
       blockedLabels: [options.currentCategory ?? "", ...(options.knownCategories ?? [])],
     },
@@ -563,19 +567,15 @@ export function normalizePromptAnalysisSections(
       continue;
     }
 
-    const definition = resolvePromptParameterDefinition({
-      key: section.key,
-      variable: section.variable,
-      value: section.values[0],
-    });
-    if (!definition) {
+    const meta = promptSectionMeta[section.key];
+    if (!meta) {
       continue;
     }
 
     // The stable parameter schema is the authority. Never trust a remote
     // label/variable to cross into the category or tag metadata domains.
-    const canonicalSectionKey = definition.key;
-    const variable = definition.variable;
+    const canonicalSectionKey = meta.key;
+    const variable = meta.variable;
     const variableKey = normalizeVariable(variable).toLowerCase();
     if (!variableKey || seenVariables.has(variableKey)) {
       continue;
@@ -609,10 +609,10 @@ export function normalizePromptAnalysisSections(
     seenVariables.add(variableKey);
     const normalizedSection: PromptAnalysisSection = {
       key: canonicalSectionKey,
-      label: definition.label,
+      label: meta.label,
       variable,
       values: value,
-      chips: value.map((item, index) => buildReplacementChip(canonicalSectionKey, definition.label, variable, item, index)),
+      chips: value.map((item, index) => buildReplacementChip(canonicalSectionKey, meta.label, variable, item, index)),
     };
     normalized.push(normalizedSection);
   }
@@ -704,119 +704,6 @@ export function isolateCategoryAnalysisResult(analysis: PromptAnalysisResult): P
   };
 }
 
-function mergePromptAnalysisSections(
-  prioritySections: readonly PromptAnalysisSection[],
-  fallbackSections: readonly PromptAnalysisSection[],
-): PromptAnalysisSection[] {
-  const groupedSections = new Map<string, PromptAnalysisSection>();
-
-  for (const section of [...prioritySections, ...fallbackSections]) {
-    const existingSection = groupedSections.get(section.variable);
-    const values = uniqueTags(section.values);
-
-    if (values.length === 0) {
-      continue;
-    }
-
-    if (existingSection) {
-      existingSection.values = uniqueTags([...existingSection.values, ...values]);
-      existingSection.chips = existingSection.values.map((value, index) =>
-        buildReplacementChip(existingSection.key, existingSection.label, existingSection.variable, value, index),
-      );
-      continue;
-    }
-
-    groupedSections.set(section.variable, {
-      ...section,
-      values,
-      chips: values.map((value, index) => buildReplacementChip(section.key, section.label, section.variable, value, index)),
-    });
-  }
-
-  return Array.from(groupedSections.values()).sort(
-    (first, second) => promptSplitSectionOrder.indexOf(first.key) - promptSplitSectionOrder.indexOf(second.key),
-  );
-}
-
-export function buildPromptAnalysisFromSavedCapsules(
-  prompt: string,
-  _options: Partial<CategoryInput> = {},
-): PromptAnalysisResult | null {
-  const capsuleSegments = parsePromptTemplateSegments(prompt).filter((segment) => segment.type === "parameter");
-
-  if (capsuleSegments.length === 0) {
-    return null;
-  }
-
-  const groupedSections = new Map<string, PromptAnalysisSection>();
-
-  for (const segment of capsuleSegments) {
-    const declaredSectionKey = getPromptSectionKeyByVariable(segment.variable);
-    if (!declaredSectionKey && isReservedPromptMetadataVariable(segment.variable)) {
-      continue;
-    }
-
-    const sectionKey = segment.source.startsWith("{{")
-      ? getSupportedSectionKeyByVariable(segment.variable, segment.value)
-      : declaredSectionKey;
-    const definition = resolvePromptParameterDefinition({
-      key: sectionKey,
-      variable: segment.variable,
-      value: segment.value,
-    });
-
-    if (!definition) {
-      continue;
-    }
-
-    const canonicalSectionKey = definition.key;
-    const value = normalizePromptSectionValue(canonicalSectionKey, segment.value);
-
-    if (!value) {
-      continue;
-    }
-
-    const existingSection = groupedSections.get(definition.variable);
-
-    if (existingSection) {
-      existingSection.values = uniqueTags([...existingSection.values, value]);
-      existingSection.chips = existingSection.values.map((value, index) =>
-        buildReplacementChip(existingSection.key, existingSection.label, existingSection.variable, value, index),
-      );
-      continue;
-    }
-
-    groupedSections.set(definition.variable, {
-      key: canonicalSectionKey,
-      label: definition.label,
-      variable: definition.variable,
-      values: uniqueTags([value]),
-      chips: [buildReplacementChip(canonicalSectionKey, definition.label, definition.variable, value, 0)],
-    });
-  }
-
-  if (groupedSections.size === 0) {
-    return null;
-  }
-
-  const sections = Array.from(groupedSections.values()).sort(
-    (first, second) => promptSplitSectionOrder.indexOf(first.key) - promptSplitSectionOrder.indexOf(second.key),
-  );
-  const chips = sections.flatMap((section) => section.chips);
-  return {
-    chips,
-    sections,
-    // Saved capsule values belong to the parameter lexicon only. This path is
-    // intentionally category/tag-blind so restoring a template cannot mutate
-    // either taxonomy or feature-tag state.
-    suggestedTags: [],
-    suggestedCategories: [],
-    primaryCategory: "未分类",
-    template: prompt.trim(),
-  };
-
-}
-
 export function applyAnalysisTemplate(currentPrompt: string, analysis: PromptAnalysisResult): string {
   return analysis.template.trim() || currentPrompt;
 }
@@ -836,15 +723,10 @@ export function applyAnalysisInlineChips(currentPrompt: string, analysis: Prompt
     return applyAnalysisTemplate(currentPrompt, analysis);
   }
 
-  const nextPrompt = parsePromptTemplateSegments(currentPrompt)
-    .map((segment) => {
-      if (segment.type === "parameter") {
-        return segment.source;
-      }
-
-      return chips.reduce((text, chip) => replaceFirstPromptValue(text, chip.value, chip.templateText), segment.text);
-    })
-    .join("");
+  const nextPrompt = chips.reduce(
+    (text, chip) => replaceFirstPromptValue(text, chip.value, chip.templateText),
+    source,
+  );
 
   if (nextPrompt !== currentPrompt) {
     return nextPrompt.trim();
@@ -2498,10 +2380,6 @@ function getContextualOptions(sectionKey: PromptSplitSectionKey, _context: strin
 
 function getSectionKeyByVariable(variable: string): PromptSplitSectionKey {
   return getPromptSectionKeyByVariable(variable) ?? "other";
-}
-
-function getSupportedSectionKeyByVariable(variable: string, value?: string): PromptSplitSectionKey | null {
-  return value === undefined ? getPromptSectionKeyByVariable(variable) : resolvePromptSectionKeyForValue(variable, value);
 }
 
 function normalizeVariable(input: string): string {

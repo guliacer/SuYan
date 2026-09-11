@@ -1,5 +1,6 @@
 import {
   builtinModuleDefinitions,
+  canDeleteBuiltinModule,
   canDisableBuiltinModule,
   isBuiltinModuleEnabled,
   isBuiltinModuleInstalled,
@@ -19,7 +20,7 @@ export const moduleCategoryOrder: readonly BuiltinModuleCategory[] = [
 export const moduleCategoryLabels: Record<BuiltinModuleCategory, string> = {
   core: "核心",
   prompt: "提示词",
-  runtime: "运行时",
+  runtime: "依赖",
   batch: "批量工具",
 };
 
@@ -32,11 +33,17 @@ export type ModuleManagementRow = {
   /** 依赖级联后的有效可用状态。 */
   effectivelyEnabled: boolean;
   canDisable: boolean;
+  /** 仅必需模块不可删除。 */
+  canDelete: boolean;
+  /** 内置非视频模块移除后可直接恢复；视频依赖需重新安装组件。 */
+  canRestore: boolean;
   /** 可切换启用：已安装且非必需。 */
   canToggleEnabled: boolean;
   /** 依赖未满足导致自身 enabled 无效。 */
   blockedByDependencies: boolean;
   dependencyLabels: string[];
+  /** 直接依赖当前模块的功能，供删除确认明确告知影响。 */
+  dependentLabels: string[];
 };
 
 /**
@@ -48,9 +55,13 @@ export function buildModuleManagementRows(state: BuiltinModuleState): ModuleMana
     const rawEnabled = definition.required ? true : state[definition.id]?.enabled === true;
     const effectivelyEnabled = isBuiltinModuleEnabled(definition.id, state);
     const canDisable = canDisableBuiltinModule(definition.id);
+    const canDelete = canDeleteBuiltinModule(definition.id);
     const dependencyLabels = definition.dependencies
       .map((dependencyId) => builtinModuleDefinitions.find((entry) => entry.id === dependencyId)?.label)
       .filter((label): label is string => Boolean(label));
+    const dependentLabels = builtinModuleDefinitions
+      .filter((entry) => entry.dependencies.includes(definition.id))
+      .map((entry) => entry.label);
 
     return {
       definition,
@@ -58,9 +69,16 @@ export function buildModuleManagementRows(state: BuiltinModuleState): ModuleMana
       rawEnabled,
       effectivelyEnabled,
       canDisable,
+      canDelete,
+      canRestore:
+        canDelete &&
+        !installed &&
+        definition.id !== "video-runtime" &&
+        definition.id !== "nsfw-runtime",
       canToggleEnabled: canDisable && installed,
       blockedByDependencies: installed && rawEnabled && !effectivelyEnabled,
       dependencyLabels,
+      dependentLabels,
     };
   });
 }
@@ -96,4 +114,8 @@ export function resolveVideoRuntimeStateAfterProbe(
 
 export function isVideoRuntimeModule(moduleId: BuiltinModuleId): boolean {
   return moduleId === "video-runtime";
+}
+
+export function isNsfwRuntimeModule(moduleId: BuiltinModuleId): boolean {
+  return moduleId === "nsfw-runtime";
 }

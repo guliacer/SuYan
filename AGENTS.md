@@ -30,17 +30,19 @@ W:\提示词\.codex\rules\10-问题与解决方案记录.md
 ## 不可绕过边界
 后续实现必须以 `Electron + React + TypeScript + Vite + pnpm` 为唯一桌面端方案。渲染进程不得直接访问 Node.js、文件系统或系统剪切板；所有桌面能力必须经由 `preload + contextBridge + ipcRenderer/ipcMain` 暴露的白名单 API。
 
-## 第一版非目标
-第一版不得引入账号系统、云同步、远程后端、数据库服务、多语言系统或复杂插件体系。素材库必须使用本地 `library.json + images/` 目录完成。
+## 功能范围与首版遗留约束
+- **首版（v0.1.0 / v0.2.10）约束**：首版不得引入账号系统、云同步、远程后端、数据库服务、多语言系统或复杂插件体系；素材库必须使用本地 `library.json + images/` 目录完成。该约束随版本推进逐步放开。
+- **当前 0.3.x 已批准范围**：账号登录（邮箱注册 / Google / Linux.do / GitHub 四渠道）和本地化界面（默认简体中文，可切换 English）已由用户确认为正式功能；未具备个人开放平台资质的社交 OAuth 渠道不纳入账号配置。登录态与「导出携带用户名/头像」的改造方案见 `docs/项目功能全景与账号登录改造指南.md`，**实施标准见 `docs/账号登录实施总方案.md`（Phase 0 → Phase 8）**。
+- **仍未批准**：云同步、自建远程后端、数据库服务、复杂插件体系，除非用户另行确认。素材库主存储仍必须使用本地 `library.json + images/`；账号数据按 `.codex/rules/08` R1.1 以本地 JSON（敏感字段 safeStorage 加密）落盘。语言设置只翻译软件 UI，不翻译用户自己的提示词、标签、分类、素材标题和内容。
 
 ## 正式包数据落盘
 安装版 / 便携版的用户数据必须在软件目录 `data\`（库为 `data\library\`），日志在 `logs\`。本地开发（`electron .`）与 `release\win-unpacked` 共用便携目录 `release\win-unpacked\data`，**不得**切到 `%APPDATA%\SuYan`（那是另一份旧库）。正式包升级若本地 `data\` 尚无库，才从旧 AppData 迁入；不得把 AppData 合并进已有便携 `data\`。见 `.codex/rules/08` R3、`07` R6、`09` R1。
 
 ## 版本隔离
-首版 `v0.1.0`（标签 / 分支 `release/0.1.0` / GitHub Release 资产）已冻结，后续改动只在 `master` 以更高版本号进行，详见 `docs/VERSIONING.md` 与 `.codex/rules/07-打包与交付规范.md` 的 R5。
+`v0.1.0` 与 `v0.2.10` 已发布版本保持冻结；当前 `master` 的 `0.3.x` 是未发布迭代线，允许按补丁版本连续升级（如 `0.3.0` → `0.3.1` → `0.3.2`）。在用户明确推送到 GitHub 前，不把 `0.3.x` 视为已发布锁定版本，也不提前创建或修改 Release 标签；用户推送后再以实际推送版本建立新的锁定点。详见 `docs/VERSIONING.md` 与 `.codex/rules/07-打包与交付规范.md` 的 R5。
 
 ## 交付打包要求
-后续每次修改项目代码后，必须在完成就近验证后自动执行 `pnpm package:win`，确保 `release\win-unpacked\素言.exe` 与 `resources\app.asar` 更新到最新版本；交付说明中必须明确报告打包是否成功以及打包产物的更新时间。若打包失败，必须说明失败原因和下一步处理方式，不得只停留在 `pnpm build`。打包前确认 `package.json` version 高于已发布版本，产物不得覆盖旧版 Release 附件。
+后续每次修改项目代码后，必须在完成就近验证后自动执行 `pnpm package:win`。开发阶段该命令只更新 `release\win-unpacked\素言.exe` 与 `resources\app.asar`，不生成 NSIS 安装版或 Portable ZIP；交付说明中必须明确报告快速打包是否成功以及产物更新时间。准备推送 GitHub 或创建正式 Release 时，才执行 `pnpm package:win:release` 生成全量安装包和 ZIP。若打包失败，必须说明失败原因和下一步处理方式，不得只停留在 `pnpm build`。打包前确认 `package.json` version 高于已发布版本，产物不得覆盖旧版 Release 附件。
 
 
 ## 本地收件服务（ComfyUI 发送到素言）

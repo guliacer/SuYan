@@ -54,10 +54,34 @@ export const FFMPEG_COMPONENT_ID = "ffmpeg";
 /** FFmpeg 可执行文件名（win32-x64）。用于解析安装目录与自检。 */
 export const FFMPEG_EXECUTABLE_NAME = "ffmpeg.exe";
 
-// 素言按需组件的固定 Release 基址（suyan-components 仓库）。客户端仅从此固定地址拉取，Renderer 不得指定。
+// 素言按需组件的固定 Release 仓库与标签。客户端仅使用内置版本，Renderer 不得指定 URL、标签或执行路径。
+export const COMPONENT_RELEASE_REPOSITORY_URL = "https://github.com/guliacer/suyan-components";
+export const FFMPEG_COMPONENT_RELEASE_TAG = `ffmpeg-${FFMPEG_COMPONENT_VERSION}`;
+/** 给用户在浏览器中打开的固定 Release 页面。 */
+export const FFMPEG_COMPONENT_RELEASE_PAGE_URL =
+  `${COMPONENT_RELEASE_REPOSITORY_URL}/releases/tag/${FFMPEG_COMPONENT_RELEASE_TAG}`;
+// 素言按需组件的固定 Release 下载基址（suyan-components 仓库）。
 // 当前为开发/预发布：ffmpeg 6.0-suyan.1，由开发签名密钥签发；正式 GA 前应轮换密钥并重新签发/发布。
 export const COMPONENT_RELEASE_BASE_URL =
-  "https://github.com/guliacer/suyan-components/releases/download/ffmpeg-6.0-suyan.1";
+  `${COMPONENT_RELEASE_REPOSITORY_URL}/releases/download/${FFMPEG_COMPONENT_RELEASE_TAG}`;
+
+/** 本地 NSFW 组件使用同一套签名 Release 基础设施，但使用独立的版本标签与组件目录。 */
+export const NSFW_COMPONENT_ID = "nsfw-runtime";
+export const NSFW_COMPONENT_VERSION = "1.0.0";
+export const NSFW_COMPONENT_PLATFORM = CURRENT_COMPONENT_PLATFORM;
+export const NSFW_COMPONENT_RELEASE_TAG = `nsfw-${NSFW_COMPONENT_VERSION}`;
+export const NSFW_COMPONENT_RELEASE_PAGE_URL =
+  `${COMPONENT_RELEASE_REPOSITORY_URL}/releases/tag/${NSFW_COMPONENT_RELEASE_TAG}`;
+export const NSFW_COMPONENT_RELEASE_BASE_URL =
+  `${COMPONENT_RELEASE_REPOSITORY_URL}/releases/download/${NSFW_COMPONENT_RELEASE_TAG}`;
+
+/** NSFW 模型与 onnxruntime-node 体积较大，仍保留 ZIP Bomb / 超大下载保护。 */
+export const NSFW_COMPONENT_LIMITS: ComponentExtractLimits = {
+  maxArchiveBytes: 512 * 1024 * 1024,
+  maxEntryBytes: 256 * 1024 * 1024,
+  maxTotalUncompressedBytes: 768 * 1024 * 1024,
+  maxEntries: 4096,
+};
 
 // 素言按需组件的签名验签公钥（Ed25519 SPKI PEM）。留空时验签 fail-closed（拒绝所有安装）。
 // 当前为开发/预发签名密钥：私钥在 .secrets/components/ffmpeg-signing.private.pem（已 gitignore，务必备份保密）。

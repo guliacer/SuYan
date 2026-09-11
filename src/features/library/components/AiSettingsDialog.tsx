@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, Upload } from "lucide-react";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
 import { useAiSettings } from "./useAiSettings";
 import { AiSettingsHeader } from "./AiSettingsHeader";
 import { AiConnectionSection } from "./AiConnectionSection";
@@ -30,6 +31,7 @@ export function AiSettingsDialog({
   onNotify,
   onApplyImportedSettings,
 }: AiSettingsDialogProps) {
+  const { t } = useLocale();
   const api = useAiSettings({
     isBusy,
     settings,
@@ -45,26 +47,54 @@ export function AiSettingsDialog({
 
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
 
-  async function handleExport(type: "plain" | "full", password?: string): Promise<string | null> {
+  async function handleClose() {
+    if (isClosing) {
+      return;
+    }
+
+    setIsClosing(true);
     api.autoSave.pause();
 
     try {
       const flushed = await api.autoSave.flush();
-      if (!flushed) {
-        return "当前设置尚未保存，导出前自动保存失败，请重试。";
+      if (!flushed && api.canSaveSettings) {
+        onNotify?.({ type: "error", text: t("模型配置尚未保存，请稍后重试。") });
+        return;
       }
 
+      onClose();
+    } finally {
+      api.autoSave.resume();
+      setIsClosing(false);
+    }
+  }
+
+  async function handleExport(type: "plain" | "full" | "account", password?: string): Promise<string | null> {
+    api.autoSave.pause();
+    let flushed: boolean;
+    try {
+      flushed = await api.autoSave.flush();
+    } finally {
+      api.autoSave.resume();
+    }
+    if (!flushed) return t("当前设置尚未保存，导出前自动保存失败，请重试。");
+
+    // Only flush pauses autosave. Background export must not pause later edits/imports.
+    setIsExportOpen(false);
+    try {
       const result = await window.suyanApi.exportAiSettings({ type, password });
 
       if (!result.ok) {
+        onNotify?.({ type: "error", text: getUiErrorMessage(result.error.code, result.error.message) });
         return getUiErrorMessage(result.error.code, result.error.message);
       }
 
-      setIsExportOpen(false);
       return null;
-    } finally {
-      api.autoSave.resume();
+    } catch {
+      onNotify?.({ type: "error", text: t("导出设置失败，请重试。") });
+      return t("导出设置失败，请重试。");
     }
   }
 
@@ -74,7 +104,7 @@ export function AiSettingsDialog({
     try {
       const flushed = await api.autoSave.flush();
       if (!flushed) {
-        return { error: "当前设置尚未保存，导入前自动保存失败，请重试。" };
+        return { error: t("当前设置尚未保存，导入前自动保存失败，请重试。") };
       }
 
       const result = await window.suyanApi.importAiSettingsPreview({ password });
@@ -111,23 +141,23 @@ export function AiSettingsDialog({
 
   return (
     <>
-      <AppDialog panelClassName="flex h-[min(720px,calc(100vh-64px))] w-full max-w-[1180px] flex-col" titleId="ai-settings-title" onClose={onClose}>
-        <div className="flex items-start justify-between gap-4 border-b border-border bg-panel px-6 py-5">
-          <AiSettingsHeader title="模型设置" description="管理自定义模型供应商，配置后可在聊天时选择使用。" />
-          <div className="flex shrink-0 items-center gap-2">
-            <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Download size={15} />} variant="secondary" onClick={() => setIsExportOpen(true)}>
-              导出备份
+      <AppDialog panelClassName="flex max-h-full w-full max-w-[1180px] flex-col" titleId="ai-settings-title" onClose={() => void handleClose()}>
+        <div className="flex flex-col gap-3 border-b border-border bg-panel px-3 py-3 min-[640px]:flex-row min-[640px]:items-start min-[640px]:justify-between min-[640px]:gap-4 min-[640px]:px-6 min-[640px]:py-5">
+          <AiSettingsHeader title={t("模型设置")} />
+          <div data-feature-guide="ai-settings-exchange" className="flex w-full shrink-0 items-center justify-end gap-2 min-[640px]:w-auto">
+            <Button className="min-h-7 px-2 py-1 text-xs" icon={<Download size={14} />} variant="secondary" onClick={() => setIsExportOpen(true)}>
+              {t("导出")}
             </Button>
-            <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Upload size={15} />} variant="secondary" onClick={() => setIsImportOpen(true)}>
-              导入备份
+            <Button className="min-h-7 px-2 py-1 text-xs" icon={<Upload size={14} />} variant="secondary" onClick={() => setIsImportOpen(true)}>
+              {t("导入")}
             </Button>
-            <DialogCloseButton onClick={onClose} />
+            <DialogCloseButton onClick={() => void handleClose()} />
           </div>
         </div>
 
         <div
           ref={api.profileDetailScrollRef}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background px-6 py-5 scroll-pb-6"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-background px-3 py-3 scroll-pb-4 min-[640px]:px-4 min-[640px]:py-4 min-[960px]:px-6 min-[960px]:py-5"
         >
           <section className="grid gap-4 pb-4">
             <AiConnectionSection api={api} />

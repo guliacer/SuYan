@@ -14,7 +14,7 @@ describe("uiMessages", () => {
 
   it("maps missing FFmpeg runtime to a stable install hint", () => {
     expect(getUiErrorMessage("FFMPEG_BINARY_NOT_FOUND", "raw")).toBe(
-      "需要视频运行时（FFmpeg），请先安装后再使用视频功能。",
+      "需要视频依赖（FFmpeg），请先安装后再使用视频功能。",
     );
   });
 });

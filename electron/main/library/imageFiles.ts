@@ -1,4 +1,8 @@
-import { clipboard, dialog, nativeImage, net } from "electron";
+import { clipboard, net } from "electron";
+import { copyImageFileToClipboard } from "../clipboard/copyImageFile";
+import { dialog } from "../app/fileDialogs";
+import { formatExportFileName } from "../app/exportFileName";
+import { reportExportProgress } from "../app/exportTask";
 import type { BrowserWindow } from "electron";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -46,7 +50,13 @@ import {
   type ImportPromptGroupSummary,
 } from "./imageImportGrouping";
 import { mapWithConcurrency } from "./asyncMap";
-import { decodeGeneratedImageDataUrl } from "./generatedImageData";
+import { decodeGeneratedImageDataUrl, decodeGeneratedMediaDataUrl } from "./generatedImageData";
+import { getAuthorInfo } from "../account/accountService";
+import { attributeGeneratedWork, attributeLocalImports } from "./workAttribution";
+import { attributeWork, hasWorkAuthor } from "../../../src/features/library/utils/workAttribution";
+import { snapshotWorkAuthor } from "./workAttribution";
+import { embedWorkInPng, readWorkFromImage, readWorkFromImageFile } from "./workImageExchange";
+import { getSharp } from "../runtime/imageRuntime";
 
 export type ImportProgress = {
   current: number;
@@ -74,6 +84,7 @@ export async function importImageFiles(
   ownerWindow?: BrowserWindow | null,
 ): Promise<{ library: Awaited<ReturnType<typeof readLibraryFile>>; importedCount: number; canceled: boolean }> {
   resetImportCancellation();
+  const importAuthor = getAuthorInfo();
   const operationStartedAt = Date.now();
   const dialogPathReused = lastMediaImportDirectory !== null;
 
@@ -112,7 +123,7 @@ export async function importImageFiles(
   }
 
   const mediaReadyAt = Date.now();
-  const library = await appendLibraryItems(items);
+  const library = await appendLibraryItems(await attributeLocalImports(items, importAuthor));
   warmImageThumbnails(items.map((item) => item.imageFileName));
 
   logger.info("media-import", "files:timing", {
@@ -510,7 +521,8 @@ async function copyMediaFileToBlankLibraryItem(
 
   const draft = await readImportImageMetadataDraft(sourcePath);
 
-  return buildImportedMediaItem(draft, id, imageFileName, now);
+  const work = await readWorkFromImageFile(sourcePath);
+  return { ...buildImportedMediaItem(draft, id, imageFileName, now), ...work };
 }
 
 function buildImportedMediaItem(
@@ -583,7 +595,7 @@ export type ImportImageBuffersResult = {
 };
 
 export type GeneratedImageImportPayload = {
-  images: Array<{ dataUrl: string; revisedPrompt?: string | null }>;
+  images: Array<{ dataUrl: string; attributionId?: string; revisedPrompt?: string | null; mediaType?: "image" | "video" }>;
   metadata: {
     title: string;
     prompt: string;
@@ -598,7 +610,7 @@ export type GeneratedImageImportPayload = {
     categoryId?: string | null;
     genreIds?: string[];
     categoryConfidence?: number | null;
-    categorySource?: "system" | "user" | "ai" | null;
+    categorySource?: "system" | "user" | "ai" | "local" | null;
   };
 };
 
@@ -615,6 +627,7 @@ export async function importImageBuffers(
   images: ImportImageBufferInput[],
   options?: { fallbackDraft?: PromptImportDraft },
 ): Promise<ImportImageBuffersResult> {
+  const importAuthor = getAuthorInfo();
   const validImages = images.filter((image) => image.data && image.data.byteLength > 0);
 
   if (validImages.length === 0) {
@@ -634,6 +647,45 @@ export async function importImageBuffers(
     data: image.data,
     draft: readImportImageBufferMetadataDraft(image.name, image.data, fallbackDraft),
   }));
+  for (const image of prepared) {
+    const promptFingerprint = createHash("sha256")
+      .update(`${image.draft.prompt}\u0000${image.draft.negativePrompt}`)
+      .digest("hex")
+      .slice(0, 12);
+    const imageFingerprint = createHash("sha256").update(image.data).digest("hex").slice(0, 12);
+
+    // 逐图记录脱敏诊断，定位“源文件不同但解析结果相同”时不会泄露完整提示词。
+    logger.info("library", "image-metadata:item-parsed", {
+      file: path.basename(image.name),
+      imageFingerprint,
+      promptFingerprint: image.draft.prompt.trim() ? promptFingerprint : null,
+      promptLength: image.draft.prompt.trim().length,
+      negativePromptLength: image.draft.negativePrompt.trim().length,
+      source: image.draft.tags.includes("ComfyUI") ? "comfyui" : image.draft.prompt.trim() ? "metadata" : "none",
+    });
+  }
+  const parsedPromptSignatures = prepared
+    .filter(({ draft }) => Boolean(draft.prompt.trim()))
+    .map(({ draft }) =>
+      createHash("sha256")
+        .update(`${draft.prompt}\u0000${draft.negativePrompt}`)
+        .digest("hex")
+        .slice(0, 12),
+    );
+  const distinctPromptSignatureCount = new Set(parsedPromptSignatures).size;
+  const distinctImageFingerprintCount = new Set(
+    validImages.map((image) => createHash("sha256").update(image.data).digest("hex").slice(0, 12)),
+  ).size;
+
+  // 只记录脱敏的数量和哈希统计，用于区分「源 PNG 元数据本来一致」与解析异常；
+  // 不写入用户的完整正向/反向提示词。
+  logger.info("library", "image-metadata:batch-parsed", {
+    imageCount: validImages.length,
+    parsedPromptImageCount: parsedPromptSignatures.length,
+    distinctPromptFingerprintCount: distinctPromptSignatureCount,
+    repeatedPromptImageCount: parsedPromptSignatures.length - distinctPromptSignatureCount,
+    distinctImageFingerprintCount,
+  });
   const plans = planImportImageGroups(prepared);
   const baseTime = Date.now();
   const items: LibraryItem[] = [];
@@ -649,7 +701,8 @@ export async function importImageBuffers(
 
       try {
         const imageFileName = await writeImportMediaBuffer(id, Buffer.from(image.data), extension);
-        items.push(buildImportedMediaItem(plan.draft, id, imageFileName, groupCreatedAt));
+        const work = await readWorkFromImage(image.data);
+        items.push({ ...buildImportedMediaItem(plan.draft, id, imageFileName, groupCreatedAt), ...work });
       } catch (error) {
         logger.warn("media-import", "buffer-import:write-failed", {
           file: image.name,
@@ -670,7 +723,7 @@ export async function importImageBuffers(
     };
   }
 
-  const library = await appendLibraryItems(items);
+  const library = await appendLibraryItems(await attributeLocalImports(items, importAuthor));
   warmImageThumbnails(items.map((item) => item.imageFileName));
   const importGroups = summarizeImportPromptGroups(plans).filter((group) => group.imageCount > 0);
 
@@ -722,7 +775,8 @@ export async function importGeneratedImages(
     categorySource:
       payload.metadata.categorySource === "system" ||
       payload.metadata.categorySource === "user" ||
-      payload.metadata.categorySource === "ai"
+      payload.metadata.categorySource === "ai" ||
+      payload.metadata.categorySource === "local"
         ? payload.metadata.categorySource
         : null,
   };
@@ -759,10 +813,12 @@ export async function importGeneratedImages(
   try {
     for (const image of images) {
       const id = randomUUID();
-      const decoded = decodeGeneratedImageDataUrl(image.dataUrl);
-      const imageFileName = await writeImportImageBuffer(id, decoded.buffer, decoded.extension);
+      const decoded = image.mediaType === "video"
+        ? decodeGeneratedMediaDataUrl(image.dataUrl)
+        : decodeGeneratedImageDataUrl(image.dataUrl);
+      const imageFileName = await writeImportMediaBuffer(id, decoded.buffer, decoded.extension);
       writtenImageFileNames.push(imageFileName);
-      items.push({
+      const importedItem: LibraryItem = {
         ...buildImportedMediaItem(draft, id, imageFileName, createdAt),
         promptType: "image",
         // 命中血缘时补上分类身份（buildImportedMediaItem 固定 category: null），
@@ -776,7 +832,11 @@ export async function importGeneratedImages(
               categorySource: inherited.categorySource,
             }
           : {}),
-      });
+      };
+      if (image.mediaType === "video") {
+        importedItem.promptType = "video";
+      }
+      items.push(attributeGeneratedWork(importedItem, image.dataUrl, image.attributionId));
     }
 
     const library = await appendLibraryItems(items);
@@ -939,65 +999,27 @@ export async function importClipboardImageForItem(
 
 export async function copyImageToClipboard(imageFileName: string): Promise<void> {
   const mediaPath = await resolveMediaPathByImageFileName(imageFileName);
-  let imageBuffer: Buffer | null = null;
-  let image = nativeImage.createFromPath(mediaPath);
-  let decodeMode = "path";
-
-  // 外部素材可能存在“扩展名是 jpg、实际内容是 webp”等情况。按文件内容
-  // 解码可以绕开扩展名误导，路径解码仍作为 Electron 特殊格式的兜底。
-  if (image.isEmpty()) {
-    try {
-      imageBuffer = await fs.readFile(mediaPath);
-      image = nativeImage.createFromBuffer(imageBuffer);
-      decodeMode = "buffer";
-    } catch (error) {
-      logger.warn("media-clipboard", "copy:read-failed", {
-        imageFileName,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  if (image.isEmpty()) {
-    logger.warn("media-clipboard", "copy:decode-failed", {
-      imageFileName,
-      byteLength: imageBuffer?.byteLength ?? null,
-    });
-    throw new AppError("IMAGE_COPY_FAILED", "复制图片失败，请重试。");
-  }
-
-  try {
-    // 统一写入 PNG，避免系统剪贴板对原始 WebP/异常扩展名的兼容问题。
-    const pngImage = nativeImage.createFromBuffer(image.toPNG());
-    clipboard.writeImage(pngImage.isEmpty() ? image : pngImage);
-  } catch (error) {
-    logger.warn("media-clipboard", "copy:write-failed", {
-      imageFileName,
-      decodeMode,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    throw new AppError("IMAGE_COPY_FAILED", "复制图片失败，请重试。");
-  }
-
-  logger.info("media-clipboard", "copy:success", {
-    imageFileName,
-    decodeMode,
-    byteLength: imageBuffer?.byteLength ?? null,
-    width: image.getSize().width,
-    height: image.getSize().height,
-  });
+  await copyImageFileToClipboard(mediaPath, imageFileName);
 }
 
 export async function exportImageToLocal(imageFileName: string): Promise<{ canceled: boolean; filePath: string | null }> {
+  let item = await findLibraryItemByImageFileName(imageFileName);
+  const isImage = !isVideoMediaFile(imageFileName) && !isAudioMediaFile(imageFileName);
+  const author = await snapshotWorkAuthor();
+  if (isImage && item && author && !hasWorkAuthor(item)) {
+    const answer = await dialog.showMessageBox({ type: "question", title: "导出作品归属", message: `是否将此导出副本署名为「${author.username}」？`, detail: "已有本地素材不会自动关联。PNG 作品文件将携带提示词、作者和头像，接收者导入后可以看到。", buttons: ["取消导出", "保留原信息", "关联当前账户"], defaultId: 1, cancelId: 0, noLink: true });
+    if (answer.response === 0) return { canceled: true, filePath: null };
+    if (answer.response === 2) item = attributeWork(item, author);
+  }
   const sourcePath = await resolveMediaPathByImageFileName(imageFileName);
   const extension = getExportImageExtension(imageFileName);
   const result = await dialog.showSaveDialog({
-    title: "导出媒体文件",
-    defaultPath: path.basename(imageFileName),
+    title: isImage ? "导出 PNG 作品（含提示词与作者）" : "导出媒体文件（完整资料请使用分享包）",
+    defaultPath: formatExportFileName(isImage ? "图像作品" : isVideoMediaFile(imageFileName) ? "视频作品" : "音频作品", isImage ? "png" : extension),
     filters: [
       {
-        name: "媒体文件",
-        extensions: [extension],
+        name: isImage ? "PNG 作品文件" : "媒体文件",
+        extensions: [isImage ? "png" : extension],
       },
     ],
   });
@@ -1007,7 +1029,15 @@ export async function exportImageToLocal(imageFileName: string): Promise<{ cance
   }
 
   if (path.resolve(sourcePath) !== path.resolve(result.filePath)) {
-    await fs.copyFile(sourcePath, result.filePath);
+    reportExportProgress(isImage ? "正在处理图像与作品资料…" : "正在复制媒体文件…");
+    if (isImage && item) {
+      const png = await getSharp()(await fs.readFile(sourcePath)).png({ compressionLevel: 6, palette: false, quality: 100 }).toBuffer();
+      const bytes = await embedWorkInPng(png, item);
+      reportExportProgress("正在保存作品文件…");
+      await fs.writeFile(result.filePath, bytes);
+    } else {
+      await fs.copyFile(sourcePath, result.filePath);
+    }
   }
 
   return { canceled: false, filePath: result.filePath };

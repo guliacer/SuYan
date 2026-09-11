@@ -89,6 +89,7 @@ export function isSameLibraryItem(a: LibraryItem, b: LibraryItem): boolean {
     a.authorName !== b.authorName ||
     a.authorUrl !== b.authorUrl ||
     a.authorAvatarUrl !== b.authorAvatarUrl ||
+    a.accountOwnerUid !== b.accountOwnerUid ||
     a.nsfwRating !== b.nsfwRating ||
     a.nsfwCheckedAt !== b.nsfwCheckedAt ||
     a.videoDurationSec !== b.videoDurationSec ||

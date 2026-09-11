@@ -4,6 +4,7 @@ import type {
   CanvasBaseResolution,
   CanvasDraftSettings,
   CanvasPromptOrigin,
+  CanvasReferenceImage,
   CanvasSizeMode,
 } from "../types/canvas";
 
@@ -11,10 +12,9 @@ export const defaultPositivePromptHeight = 340;
 
 export const defaultCanvasDraftSettings: CanvasDraftSettings = {
   generationProvider: "api",
+  creationPanelCollapsed: false,
   prompt: "一间临水而建的新中式茶室，午后阳光穿过竹影，室内摆放陶瓷茶具，安静、温暖、高级感，电影感构图",  positivePromptHeight: defaultPositivePromptHeight,
-  referenceImageFileName: "",
-  referenceImageTitle: "",
-  referenceImageDataUrl: "",
+  referenceImages: [],
   negativePrompt: "低清晰度、模糊、文字水印、畸形手指、过度饱和",
   negativePromptHidden: false,
   positivePromptHidden: false,
@@ -30,6 +30,8 @@ export const defaultCanvasDraftSettings: CanvasDraftSettings = {
   quality: "auto",
   outputFormat: "png",
   count: 1,
+  videoSeconds: 5,
+  videoSize: "720P",
   transparentBackground: false,
   notificationEnabled: false,
   autoArchiveEnabled: false,
@@ -83,6 +85,59 @@ export const canvasAspectRatioOptions: ReadonlyArray<{
   { value: "21:9", label: "21:9", orientation: "landscape" },
 ];
 
+/** Agnes Image 2.x 的原生输出尺寸表。尺寸档位必须与比例一起使用，
+ * 否则服务会把非原生宽高标准化，甚至在高分辨率请求中长时间不返回。 */
+const agnesOutputDimensions: Readonly<Record<CanvasAspectRatio, Readonly<Record<CanvasBaseResolution, readonly [number, number]>>>> = {
+  "1:1": {
+    "1k": [1024, 1024],
+    "2k": [2048, 2048],
+    "3k": [3072, 3072],
+    "4k": [4096, 4096],
+  },
+  "3:4": {
+    "1k": [864, 1152],
+    "2k": [1728, 2304],
+    "3k": [2592, 3456],
+    "4k": [3456, 4608],
+  },
+  "4:3": {
+    "1k": [1152, 864],
+    "2k": [2304, 1728],
+    "3k": [3456, 2592],
+    "4k": [4608, 3456],
+  },
+  "16:9": {
+    "1k": [1312, 736],
+    "2k": [2624, 1472],
+    "3k": [3936, 2208],
+    "4k": [5248, 2944],
+  },
+  "9:16": {
+    "1k": [736, 1312],
+    "2k": [1472, 2624],
+    "3k": [2208, 3936],
+    "4k": [2944, 5248],
+  },
+  "2:3": {
+    "1k": [832, 1248],
+    "2k": [1664, 2496],
+    "3k": [2496, 3744],
+    "4k": [3328, 4992],
+  },
+  "3:2": {
+    "1k": [1248, 832],
+    "2k": [2496, 1664],
+    "3k": [3744, 2496],
+    "4k": [4992, 3328],
+  },
+  "21:9": {
+    "1k": [1568, 672],
+    "2k": [3136, 1344],
+    "3k": [4704, 2016],
+    "4k": [6272, 2688],
+  },
+};
+
 export function normalizeCanvasDraftSettings(input: unknown): CanvasDraftSettings {
   if (!isRecord(input)) {
     return { ...defaultCanvasDraftSettings };
@@ -95,11 +150,10 @@ export function normalizeCanvasDraftSettings(input: unknown): CanvasDraftSetting
     // 豆包网页画布已下线（回归默认 API 生图）。强制 provider 为 api，
     // 防止旧草稿里残留的 "doubao-web" 仍触发豆包后台逻辑。
     generationProvider: "api",
+    creationPanelCollapsed: input.creationPanelCollapsed === true,
     prompt: typeof input.prompt === "string" ? input.prompt : defaultCanvasDraftSettings.prompt,
     positivePromptHeight: normalizePositivePromptHeight(input.positivePromptHeight),
-    referenceImageFileName: typeof input.referenceImageFileName === "string" ? input.referenceImageFileName : "",
-    referenceImageTitle: typeof input.referenceImageTitle === "string" ? input.referenceImageTitle : "",
-    referenceImageDataUrl: typeof input.referenceImageDataUrl === "string" ? input.referenceImageDataUrl : "",
+    referenceImages: normalizeReferenceImages(input.referenceImages),
     negativePrompt: typeof input.negativePrompt === "string" ? input.negativePrompt : defaultCanvasDraftSettings.negativePrompt,
     negativePromptHidden: input.negativePromptHidden === true,
     positivePromptHidden: input.positivePromptHidden === true,
@@ -117,12 +171,13 @@ export function normalizeCanvasDraftSettings(input: unknown): CanvasDraftSetting
     quality: isQuality(input.quality) ? input.quality : defaultCanvasDraftSettings.quality,
     outputFormat: transparentBackground && outputFormat === "jpeg" ? "png" : outputFormat,
     count: normalizeCount(input.count),
+    videoSeconds: normalizeVideoSeconds(input.videoSeconds),
+    videoSize: isVideoSize(input.videoSize) ? input.videoSize : defaultCanvasDraftSettings.videoSize,
     transparentBackground,
     notificationEnabled: input.notificationEnabled === true,
     autoArchiveEnabled: input.autoArchiveEnabled === true,
     doubaoModel: normalizeDoubaoOption(input.doubaoModel, doubaoModelOptions),
     doubaoStyle: normalizeDoubaoOption(input.doubaoStyle, doubaoStyleOptions),
-    // 与 referenceImageDataUrl 同理：归一化保留（updateCanvasDraft 每次 patch 都会过这里），
     // 只在持久化时剥离，见 buildLibraryViewSettings。
     promptOrigin: normalizeCanvasPromptOrigin(input.promptOrigin),
   };
@@ -159,7 +214,7 @@ export function normalizeCanvasPromptOrigin(input: unknown): CanvasPromptOrigin 
         ? input.categoryConfidence
         : null,
     categorySource:
-      input.categorySource === "system" || input.categorySource === "user" || input.categorySource === "ai"
+      input.categorySource === "system" || input.categorySource === "user" || input.categorySource === "ai" || input.categorySource === "local"
         ? input.categorySource
         : null,
   };
@@ -189,6 +244,27 @@ function normalizePromptIdentityText(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+function normalizeReferenceImages(input: unknown): CanvasReferenceImage[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const entries: CanvasReferenceImage[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const fileName = typeof entry.fileName === "string" ? entry.fileName.trim() : "";
+    const title = typeof entry.title === "string" ? entry.title : "";
+    const dataUrl = typeof entry.dataUrl === "string" ? entry.dataUrl : "";
+    if (!fileName && !dataUrl) {
+      continue;
+    }
+    entries.push({ dataUrl, fileName, title });
+  }
+  return entries;
+}
+
 function normalizeOriginStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) {
     return [];
@@ -212,12 +288,8 @@ export function resolveCanvasGenerationSize(settings: Pick<
     return `${normalizeDimension(settings.customWidth, 1024)}x${normalizeDimension(settings.customHeight, 1024)}`;
   }
 
-  const [ratioWidth, ratioHeight] = parseAspectRatio(settings.aspectRatio);
-  const maxDimension = settings.baseResolution === "4k" ? 4096 : settings.baseResolution === "2k" ? 2048 : 1024;
-  const longestRatioSide = Math.max(ratioWidth, ratioHeight);
-  const scale = Math.max(64, Math.floor(maxDimension / longestRatioSide / 64) * 64);
-
-  return `${ratioWidth * scale}x${ratioHeight * scale}`;
+  const [width, height] = agnesOutputDimensions[settings.aspectRatio][settings.baseResolution];
+  return `${width}x${height}`;
 }
 
 export function buildCanvasImageGenerationPayload(
@@ -227,6 +299,7 @@ export function buildCanvasImageGenerationPayload(
     apiProfileId?: string;
     negativePrompt?: string;
     prompt?: string;
+    mediaType?: "image" | "video";
   } = {},
 ): AiImageGenerationPayload {
   const outputFormat =
@@ -242,15 +315,20 @@ export function buildCanvasImageGenerationPayload(
     doubaoModel: isDoubaoWeb ? settings.doubaoModel : undefined,
     doubaoStyle: isDoubaoWeb ? settings.doubaoStyle : undefined,
     generationProvider: settings.generationProvider,
+    ...(runtime.mediaType === "video" ? { mediaType: "video" as const } : {}),
     n: settings.count,
     negativePrompt: (runtime.negativePrompt ?? settings.negativePrompt).trim(),
     notificationEnabled: settings.notificationEnabled,
     outputFormat,
     prompt: (runtime.prompt ?? settings.prompt).trim(),
     quality: settings.quality,
-    referenceImageDataUrl: settings.referenceImageDataUrl || undefined,
-    referenceImageFileName: settings.referenceImageFileName || undefined,
+    referenceImageDataUrls: settings.referenceImages.map((r) => r.dataUrl).filter(Boolean) || undefined,
+    referenceImageFileNames: settings.referenceImages.map((r) => r.fileName).filter(Boolean) || undefined,
+    ...(settings.sizeMode === "ratio" ? { ratio: settings.aspectRatio } : {}),
     size: resolveCanvasGenerationSize(settings),
+    ...(runtime.mediaType === "video"
+      ? { videoSeconds: settings.videoSeconds, videoSize: settings.videoSize }
+      : {}),
   };
 }
 
@@ -290,23 +368,6 @@ export function extractPromptKeywords(prompt: string, limit = 5): string[] {
   return keywords;
 }
 
-function parseAspectRatio(value: CanvasAspectRatio): [width: number, height: number] {
-  const [width, height] = value.split(":").map(Number);
-  const divisor = greatestCommonDivisor(width, height);
-  return [width / divisor, height / divisor];
-}
-
-function greatestCommonDivisor(left: number, right: number): number {
-  let a = Math.abs(left);
-  let b = Math.abs(right);
-
-  while (b !== 0) {
-    [a, b] = [b, a % b];
-  }
-
-  return a || 1;
-}
-
 function normalizePositivePromptHeight(input: unknown): number {
   if (typeof input !== "number" || !Number.isFinite(input)) {
     return defaultCanvasDraftSettings.positivePromptHeight;
@@ -328,6 +389,13 @@ function normalizeCount(input: unknown): number {
   return Math.max(1, Math.min(4, Math.round(input)));
 }
 
+function normalizeVideoSeconds(input: unknown): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return defaultCanvasDraftSettings.videoSeconds;
+  }
+  return Math.max(4, Math.min(12, Math.round(input)));
+}
+
 function normalizeDoubaoOption(
   input: unknown,
   options: ReadonlyArray<{ value: string }>,
@@ -344,7 +412,7 @@ function isSizeMode(input: unknown): input is CanvasSizeMode {
 }
 
 function isBaseResolution(input: unknown): input is CanvasBaseResolution {
-  return input === "1k" || input === "2k" || input === "4k";
+  return input === "1k" || input === "2k" || input === "3k" || input === "4k";
 }
 
 function isAspectRatio(input: unknown): input is CanvasAspectRatio {
@@ -357,4 +425,8 @@ function isQuality(input: unknown): input is CanvasDraftSettings["quality"] {
 
 function isOutputFormat(input: unknown): input is CanvasDraftSettings["outputFormat"] {
   return input === "png" || input === "jpeg" || input === "webp";
+}
+
+function isVideoSize(input: unknown): input is CanvasDraftSettings["videoSize"] {
+  return input === "720P" || input === "960P" || input === "2K";
 }

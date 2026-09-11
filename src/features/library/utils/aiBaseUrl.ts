@@ -46,26 +46,13 @@ const knownAiProviderBaseUrls: Readonly<Record<string, string>> = {
   "integrate.api.nvidia.com": "https://integrate.api.nvidia.com/v1",
   "api.cohere.ai": "https://api.cohere.ai/compatibility/v1",
   "ark.cn-beijing.volces.com": "https://ark.cn-beijing.volces.com/api/v3",
+  // Agnes AI's website and platform host are not API endpoints. The image
+  // API is served by the dedicated API Hub host.
+  "agnes-ai.com": "https://apihub.agnes-ai.com/v1",
+  "www.agnes-ai.com": "https://apihub.agnes-ai.com/v1",
+  "platform.agnes-ai.com": "https://apihub.agnes-ai.com/v1",
+  "apihub.agnes-ai.com": "https://apihub.agnes-ai.com/v1",
 };
-
-const websiteRouteSegments = new Set([
-  "account",
-  "admin",
-  "billing",
-  "console",
-  "dashboard",
-  "docs",
-  "documentation",
-  "keys",
-  "login",
-  "personal",
-  "playground",
-  "pricing",
-  "profile",
-  "register",
-  "settings",
-  "signup",
-]);
 
 export function normalizeAiBaseUrl(input: string): string {
   const value = input.trim();
@@ -79,7 +66,19 @@ export function normalizeAiBaseUrl(input: string): string {
     return value.replace(/\/+$/, "");
   }
 
-  const knownBaseUrl = knownAiProviderBaseUrls[parsed.hostname.toLowerCase()];
+  const hostname = parsed.hostname.toLowerCase();
+  if (
+    (hostname === "agnes-ai.com" ||
+      hostname === "www.agnes-ai.com" ||
+      hostname === "platform.agnes-ai.com" ||
+      hostname === "apihub.agnes-ai.com" ||
+      hostname.endsWith(".agnes-ai.com")) &&
+    /\/v1\/images\/(?:generations|edits)\/?$/i.test(parsed.pathname)
+  ) {
+    return "https://apihub.agnes-ai.com/v1/images/generations";
+  }
+
+  const knownBaseUrl = knownAiProviderBaseUrls[hostname];
   if (knownBaseUrl) {
     return knownBaseUrl;
   }
@@ -88,32 +87,15 @@ export function normalizeAiBaseUrl(input: string): string {
     return `${parsed.protocol}//${parsed.host}/openai/v1`;
   }
 
-  let pathname = parsed.pathname.replace(/\/+$/, "");
-  pathname = pathname.replace(
-    /\/(?:chat\/completions|responses|models|embeddings|images\/(?:generations|edits)|audio\/(?:speech|transcriptions))$/i,
-    "",
-  );
-
-  const pathSegments = pathname.split("/").filter(Boolean).map((segment) => segment.toLowerCase());
-  const isWebsiteRoute = pathSegments.some((segment) => websiteRouteSegments.has(segment));
-  const hasApiVersion = pathSegments.some((segment) => /^v\d+(?:beta\d*)?$/.test(segment));
-  const hasApiRoute = pathSegments.some((segment) =>
-    segment === "api" ||
-    segment === "openai" ||
-    segment === "compatible-mode" ||
-    segment === "inference" ||
-    segment === "deployments",
-  );
-
-  if (!pathname || pathname === "/" || isWebsiteRoute || (!hasApiVersion && !hasApiRoute)) {
-    pathname = "/v1";
-  } else if (!hasApiVersion) {
-    pathname = `${pathname}/v1`;
+  // For unknown domains, auto-extract the base URL:
+  // - If the path is already a custom API path (contains "/v1"), keep it as-is
+  // - Otherwise, deduce to https://host/v1
+  if (parsed.pathname === "/" || parsed.pathname === "" || !parsed.pathname.includes("/v1")) {
+    return `${parsed.protocol}//${parsed.host}/v1`;
   }
 
   parsed.username = "";
   parsed.password = "";
-  parsed.pathname = pathname.replace(/\/{2,}/g, "/");
   parsed.search = "";
   parsed.hash = "";
 

@@ -42,7 +42,7 @@ export async function compressVideos(
 
   // 解绑后 ffmpeg 按需安装：批量入口先 fail-fast，避免逐条静默失败。
   if (!getFfmpegPath()) {
-    throw new AppError("FFMPEG_BINARY_NOT_FOUND", "ffmpeg 可执行文件不可用，请先安装视频运行时。");
+    throw new AppError("FFMPEG_BINARY_NOT_FOUND", "ffmpeg 可执行文件不可用，请先安装视频依赖。");
   }
 
   const library = await readLibraryFile();
@@ -249,7 +249,7 @@ async function runFfmpegWithFallback(
   const ffmpegPath = getFfmpegPath();
   if (!ffmpegPath) {
     // 入口已 fail-fast；此处兜底防止单测/内部直调时静默失败。
-    throw new AppError("FFMPEG_BINARY_NOT_FOUND", "ffmpeg 可执行文件不可用，请先安装视频运行时。");
+    throw new AppError("FFMPEG_BINARY_NOT_FOUND", "ffmpeg 可执行文件不可用，请先安装视频依赖。");
   }
 
   let lastFraction = 0;

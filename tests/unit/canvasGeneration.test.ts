@@ -16,6 +16,15 @@ describe("canvasGeneration", () => {
     expect(defaultCanvasDraftSettings.generationProvider).toBe("api");
   });
 
+  it("restores the sidebar preference without changing the saved creation settings", () => {
+    const draft = normalizeCanvasDraftSettings({ prompt: "保留我的提示词", positivePromptHeight: 600, sizePanelHidden: true, advancedSettingsOpen: true });
+    expect(draft.creationPanelCollapsed).toBe(false);
+    const collapsed = normalizeCanvasDraftSettings(JSON.parse(JSON.stringify({ ...draft, creationPanelCollapsed: true })));
+    expect(collapsed).toEqual({ ...draft, creationPanelCollapsed: true });
+    expect(normalizeCanvasDraftSettings({ ...collapsed, creationPanelCollapsed: false })).toEqual(draft);
+    expect(normalizeCanvasDraftSettings({ creationPanelCollapsed: "true" }).creationPanelCollapsed).toBe(false);
+  });
+
   it("migrates retired providers back to the default API provider", () => {
     expect(normalizeCanvasDraftSettings({ generationProvider: "doubao-web" }).generationProvider).toBe("api");
     expect(normalizeCanvasDraftSettings({ generationProvider: "other" }).generationProvider).toBe("api");
@@ -67,33 +76,34 @@ describe("canvasGeneration", () => {
   it.each([
     [{ ...defaultCanvasDraftSettings, sizeMode: "auto" as const }, "auto"],
     [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "1:1" as const }, "1024x1024"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "3:2" as const }, "960x640"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "2:3" as const }, "640x960"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "16:9" as const }, "1024x576"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "9:16" as const }, "576x1024"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "4:3" as const }, "1024x768"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "3:4" as const }, "768x1024"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "21:9" as const }, "896x384"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "3:2" as const }, "1248x832"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "2:3" as const }, "832x1248"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "16:9" as const }, "1312x736"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "9:16" as const }, "736x1312"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "4:3" as const }, "1152x864"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "3:4" as const }, "864x1152"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, aspectRatio: "21:9" as const }, "1568x672"],
     [{ ...defaultCanvasDraftSettings, sizeMode: "custom" as const, customWidth: 1600, customHeight: 900 }, "1600x900"],
     [{ ...defaultCanvasDraftSettings, sizeMode: "custom" as const, customWidth: 900, customHeight: 1600 }, "900x1600"],
     [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "2k" as const, aspectRatio: "1:1" as const }, "2048x2048"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "2k" as const, aspectRatio: "3:2" as const }, "1920x1280"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "4k" as const, aspectRatio: "3:2" as const }, "4032x2688"],
-    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "4k" as const, aspectRatio: "16:9" as const }, "4096x2304"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "2k" as const, aspectRatio: "3:2" as const }, "2496x1664"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "3k" as const, aspectRatio: "2:3" as const }, "2496x3744"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "4k" as const, aspectRatio: "3:2" as const }, "4992x3328"],
+    [{ ...defaultCanvasDraftSettings, sizeMode: "ratio" as const, baseResolution: "4k" as const, aspectRatio: "16:9" as const }, "5248x2944"],
   ])("maps canvas settings to a supported generation size", (settings, expected) => {
     expect(resolveCanvasGenerationSize(settings)).toBe(expected);
   });
 
   it.each([
     ["1:1", "1024x1024"],
-    ["3:2", "960x640"],
-    ["2:3", "640x960"],
-    ["16:9", "1024x576"],
-    ["9:16", "576x1024"],
-    ["4:3", "1024x768"],
-    ["3:4", "768x1024"],
-    ["21:9", "896x384"],
-  ] as const)("preserves the exact %s ratio at 1K", (aspectRatio, expected) => {
+    ["3:2", "1248x832"],
+    ["2:3", "832x1248"],
+    ["16:9", "1312x736"],
+    ["9:16", "736x1312"],
+    ["4:3", "1152x864"],
+    ["3:4", "864x1152"],
+    ["21:9", "1568x672"],
+  ] as const)("uses the Agnes native %s 1K dimensions", (aspectRatio, expected) => {
     const size = resolveCanvasGenerationSize({
       ...defaultCanvasDraftSettings,
       sizeMode: "ratio",
@@ -102,15 +112,10 @@ describe("canvasGeneration", () => {
     });
     expect(size).toBe(expected);
 
-    const [ratioWidth, ratioHeight] = aspectRatio.split(":").map(Number);
-    const [width, height] = size.split("x").map(Number);
-    expect(width * ratioHeight).toBe(height * ratioWidth);
-    expect(width % 64).toBe(0);
-    expect(height % 64).toBe(0);
   });
 
   it("provides a user-facing label for the resolved size", () => {
-    expect(getCanvasGenerationSizeLabel("1024x576")).toBe("横向 1024 × 576");
+    expect(getCanvasGenerationSizeLabel("1312x736")).toBe("横向 1312 × 736");
   });
 
   it("maps every generation setting into one auditable request payload", () => {
@@ -124,8 +129,7 @@ describe("canvasGeneration", () => {
       outputFormat: "webp",
       prompt: " product photo ",
       quality: "high",
-      referenceImageDataUrl: "data:image/png;base64,AAAA",
-      referenceImageFileName: "canvas-reference-test.png",
+      referenceImages: [{ dataUrl: "data:image/png;base64,AAAA", fileName: "canvas-reference-test.png", title: "" }],
       transparentBackground: true,
     }, {
       apiModelId: "image-model",
@@ -145,14 +149,16 @@ describe("canvasGeneration", () => {
       outputFormat: "webp",
       prompt: "product photo",
       quality: "high",
-      referenceImageDataUrl: "data:image/png;base64,AAAA",
-      referenceImageFileName: "canvas-reference-test.png",
-      size: "768x1024",
+      referenceImageDataUrls: ["data:image/png;base64,AAAA"],
+      referenceImageFileNames: ["canvas-reference-test.png"],
+      ratio: "3:4",
+      size: "864x1152",
     });
   });
 
   it("persists valid base resolutions and falls back for invalid saved values", () => {
     expect(normalizeCanvasDraftSettings({ baseResolution: "4k" }).baseResolution).toBe("4k");
+    expect(normalizeCanvasDraftSettings({ baseResolution: "3k" }).baseResolution).toBe("3k");
     expect(normalizeCanvasDraftSettings({ baseResolution: "8k" }).baseResolution).toBe("1k");
   });
 

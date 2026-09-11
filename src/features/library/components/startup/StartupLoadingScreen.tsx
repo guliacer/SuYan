@@ -6,6 +6,7 @@ import startupArt4 from "../../assets/startup-art-4.png?url";
 import startupArt5 from "../../assets/startup-art-5.png?url";
 import startupArt6 from "../../assets/startup-art-6.png?url";
 import { getStartupGalleryImageSrc } from "../../utils/getImageSrc";
+import { useLocale } from "@/components/LocaleProvider";
 import {
   selectRandomStartupGalleryImages,
   startupGalleryDisplayCount,
@@ -13,7 +14,23 @@ import {
 
 const startupLoadingSteps = ["正在唤醒素材库", "翻阅素材星图", "点亮提示词库", "整理你的画廊"];
 const startupArtImages = [startupArt1, startupArt2, startupArt3, startupArt4, startupArt5, startupArt6];
-const STARTUP_CAROUSEL_INTERVAL_MS = 2200;
+/** 首图先停留这么久，之后才开始翻页。 */
+const STARTUP_CAROUSEL_LEAD_IN_MS = 2000;
+const STARTUP_CAROUSEL_INTERVAL_MS = 1500;
+
+/** 开播 elapsedMs 时应该停在第几格：首图占 LEAD_IN，之后每 INTERVAL 一格。 */
+function getStartupCarouselSlot(elapsedMs: number): number {
+  if (elapsedMs < STARTUP_CAROUSEL_LEAD_IN_MS) {
+    return 0;
+  }
+
+  return 1 + Math.floor((elapsedMs - STARTUP_CAROUSEL_LEAD_IN_MS) / STARTUP_CAROUSEL_INTERVAL_MS);
+}
+
+/** 第 slot 格相对开播时刻的起始毫秒。 */
+function getStartupCarouselSlotStartMs(slot: number): number {
+  return slot === 0 ? 0 : STARTUP_CAROUSEL_LEAD_IN_MS + (slot - 1) * STARTUP_CAROUSEL_INTERVAL_MS;
+}
 
 function logRendererStartupEvent(event: string, details: Record<string, unknown> = {}): void {
   try {
@@ -52,6 +69,7 @@ let startupCarouselActiveIndex = 0;
 let startupCarouselStartedAtMs = 0;
 
 export function StartupLoadingScreen({ onSkip }: { onSkip?: () => void }) {
+  const { t } = useLocale();
   const replay = startupIntroPlayed;
   const [galleryImages, setGalleryImages] = useState<StartupGalleryDisplayImage[]>(
     () => startupGallerySelectionCache?.images ?? [],
@@ -94,23 +112,36 @@ export function StartupLoadingScreen({ onSkip }: { onSkip?: () => void }) {
       return;
     }
 
-    // Continuous forward rotation for the whole intro. Index is module-scoped so
-    // remounting the startup screen (loading shell → overlay) never rewinds to 0.
-    const timerId = window.setInterval(() => {
-      setActiveIndex((index) => {
-        const nextIndex = (index + 1) % galleryImages.length;
-        startupCarouselActiveIndex = nextIndex;
-        return nextIndex;
-      });
-    }, STARTUP_CAROUSEL_INTERVAL_MS);
+    // 按「开播时刻」的墙钟排期，而不是每次挂载重起 interval：首图停留
+    // STARTUP_CAROUSEL_LEAD_IN_MS，之后每 STARTUP_CAROUSEL_INTERVAL_MS 翻一张。
+    // 全屏阶段 → 淡出浮层的重挂载既不会让首图的停留重来一遍，也不会把 index 退回 0。
+    let timerId = 0;
 
-    return () => window.clearInterval(timerId);
+    const scheduleNextFlip = () => {
+      const elapsed = performance.now() - startupCarouselStartedAtMs;
+      const nextFlipAt = getStartupCarouselSlotStartMs(getStartupCarouselSlot(elapsed) + 1);
+      timerId = window.setTimeout(
+        () => {
+          setActiveIndex((index) => {
+            const nextIndex = (index + 1) % galleryImages.length;
+            startupCarouselActiveIndex = nextIndex;
+            return nextIndex;
+          });
+          scheduleNextFlip();
+        },
+        Math.max(0, nextFlipAt - elapsed),
+      );
+    };
+
+    scheduleNextFlip();
+
+    return () => window.clearTimeout(timerId);
   }, [galleryImages.length]);
 
   return (
     <main
       className={`startup-scene${replay ? " startup-scene--replay" : ""}`}
-      aria-label="正在加载素言"
+      aria-label={t("正在加载素言")}
     >
       <div className="startup-scene__backdrop" aria-hidden="true" />
 
@@ -120,7 +151,7 @@ export function StartupLoadingScreen({ onSkip }: { onSkip?: () => void }) {
           type="button"
           onClick={onSkip}
         >
-          跳过
+          {t("跳过")}
         </button>
       ) : null}
 
@@ -164,8 +195,8 @@ export function StartupLoadingScreen({ onSkip }: { onSkip?: () => void }) {
 
       <div className="startup-scene__overlay">
         <div className="startup-scene__panel">
-          <h1 className="startup-scene__title">正在加载素材库</h1>
-          <p className="startup-scene__subtitle">正在为你准备提示词与作品</p>
+          <h1 className="startup-scene__title">{t("正在加载素材库")}</h1>
+          <p className="startup-scene__subtitle">{t("正在为你准备提示词与作品")}</p>
 
           <ol className="startup-scene__steps">
             {startupLoadingSteps.map((step, index) => (
@@ -175,7 +206,7 @@ export function StartupLoadingScreen({ onSkip }: { onSkip?: () => void }) {
                 style={{ animationDelay: `${0.45 + index * 1.05}s` }}
               >
                 <span className="startup-scene__step-dot" aria-hidden="true" />
-                {step}
+                {t(step)}
               </li>
             ))}
           </ol>

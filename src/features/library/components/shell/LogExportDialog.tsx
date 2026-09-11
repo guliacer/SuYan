@@ -3,6 +3,7 @@ import { ExternalLink, ScrollText } from "lucide-react";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import type { LogExportFormat, LogExportLevel, LogExportRange } from "@/types/suyanApi";
+import { useLocale } from "@/components/LocaleProvider";
 
 export type LogExportSelection = {
   minLevel: LogExportLevel;
@@ -23,6 +24,7 @@ export function LogExportDialog({
   onExport,
   onFeedback,
 }: LogExportDialogProps) {
+  const { t } = useLocale();
   const [minLevel, setMinLevel] = useState<LogExportLevel>("ERROR");
   const [range, setRange] = useState<LogExportRange>("all");
   const [format, setFormat] = useState<LogExportFormat>("txt");
@@ -44,9 +46,8 @@ export function LogExportDialog({
         <div className="min-w-0">
           <h2 className="flex items-center gap-2 text-lg font-semibold" id="log-export-dialog-title">
             <ScrollText className="text-primary" size={18} />
-            导出应用日志
+            {t("导出应用日志")}
           </h2>
-          <p className="mt-1 text-sm text-muted">选择日志范围后，可保存到本地或直接用于 GitHub 反馈。</p>
         </div>
         <DialogCloseButton
           onClick={() => {
@@ -59,11 +60,11 @@ export function LogExportDialog({
 
       <div className="grid gap-4 overflow-y-auto px-5 py-4">
         <div className="rounded-xl border border-border bg-background p-3 text-sm leading-6 text-muted">
-          默认筛选错误日志。TXT 便于阅读，ZIP 便于反馈；点击反馈会自动生成 ZIP、打开 Issue，并选中文件供拖入附件。
+          {t("默认筛选错误日志。TXT 便于阅读，ZIP 便于反馈；点击反馈会自动生成 ZIP、打开 Issue，并选中文件供拖入附件。")}
         </div>
 
-        <fieldset className="grid gap-2">
-          <legend className="text-sm font-semibold text-foreground">日志级别</legend>
+        <fieldset data-feature-guide="log-level-filter" className="grid gap-2">
+          <legend className="text-sm font-semibold text-foreground">{t("日志级别")}</legend>
           <div className="grid grid-cols-2 gap-2 min-[520px]:grid-cols-4">
             {(
               [
@@ -84,14 +85,14 @@ export function LogExportDialog({
                 type="button"
                 onClick={() => setMinLevel(value)}
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
         </fieldset>
 
-        <fieldset className="grid gap-2">
-          <legend className="text-sm font-semibold text-foreground">时间范围</legend>
+        <fieldset data-feature-guide="log-time-range" className="grid gap-2">
+          <legend className="text-sm font-semibold text-foreground">{t("时间范围")}</legend>
           <div className="grid grid-cols-3 gap-2">
             {(
               [
@@ -111,14 +112,14 @@ export function LogExportDialog({
                 type="button"
                 onClick={() => setRange(value)}
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
         </fieldset>
 
-        <fieldset className="grid gap-2">
-          <legend className="text-sm font-semibold text-foreground">导出格式</legend>
+        <fieldset data-feature-guide="log-export-format" className="grid gap-2">
+          <legend className="text-sm font-semibold text-foreground">{t("导出格式")}</legend>
           <div className="grid grid-cols-2 gap-2">
             {(
               [
@@ -137,15 +138,16 @@ export function LogExportDialog({
                 type="button"
                 onClick={() => setFormat(value)}
               >
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
         </fieldset>
       </div>
 
-      <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-4">
+      <footer data-feature-guide="log-export-actions" className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-4">
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isExporting}
           type="button"
           variant="ghost"
@@ -155,25 +157,27 @@ export function LogExportDialog({
             }
           }}
         >
-          取消
+          {t("取消")}
         </Button>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isExporting}
-          icon={<ScrollText size={16} />}
+          icon={<ScrollText size={14} />}
           type="button"
           variant="secondary"
           onClick={() => onExport(selection)}
         >
-          {activeAction === "save" ? "导出中..." : "导出日志"}
+          {activeAction === "save" ? t("导出中...") : t("导出日志")}
         </Button>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isExporting}
-          icon={<ExternalLink size={16} />}
+          icon={<ExternalLink size={14} />}
           type="button"
           variant="primary"
           onClick={() => onFeedback(selection)}
         >
-          {activeAction === "feedback" ? "准备反馈中..." : "去 GitHub 反馈"}
+          {activeAction === "feedback" ? t("准备反馈中...") : t("去 GitHub 反馈")}
         </Button>
       </footer>
     </AppDialog>

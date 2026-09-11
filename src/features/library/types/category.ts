@@ -1,7 +1,7 @@
 /** Category taxonomy domain types for SuYan classification system. */
 
 export type CategoryType = "system" | "custom" | "ai";
-export type CategoryAssignmentSource = "system" | "user" | "ai";
+export type CategoryAssignmentSource = "system" | "user" | "ai" | "local";
 
 export type CategoryNode = {
   id: string;

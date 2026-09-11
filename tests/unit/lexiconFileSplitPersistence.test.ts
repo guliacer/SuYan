@@ -38,10 +38,34 @@ function readFileIfExists(filePath: string): Promise<unknown> {
 }
 
 function makeSettings(promptLexicons: LibraryViewSettings["promptLexicons"]): LibraryViewSettings {
-  return normalizeLibraryViewSettings({ themeMode: "dark", promptLexicons });
+  return normalizeLibraryViewSettings({ themeMode: "dark", themePreset: "solarized", promptLexicons });
 }
 
 describe("lexicon file split persistence", () => {
+  it("retains the previous lexicon contents before later settings writes", async () => {
+    const directory = await makeTempUserData();
+    const settings = makeSettings({ categories: [], tags: [{ id: "old", label: "原始标签", group: "原始组", description: "需要保留" }] });
+    await writeLibraryViewSettings(settings);
+    await writeLibraryViewSettings({ ...settings, promptLexicons: { categories: [], tags: [] } });
+    const backup = await readFileIfExists(path.join(directory, "library", "tag-lexicon.json.bak"));
+    expect(backup).toMatchObject([{ id: "old", label: "原始标签", group: "原始组" }]);
+  });
+  it("persists independent canvas backgrounds across disk reload and theme changes", async () => {
+    const directory = await makeTempUserData();
+    let settings = normalizeLibraryViewSettings({});
+    expect(settings.canvasBackground).toEqual({ mode: "mist", color: null, imageFileName: null });
+    for (const mode of ["mist", "white", "color", "image"] as const) {
+      const background = { mode, color: "#173754", imageFileName: "theme-background-canvas.png" };
+      await writeLibraryViewSettings({ ...settings, canvasBackground: background });
+      settings = await readLibraryViewSettings();
+      expect(settings.canvasBackground).toEqual(background);
+      const disk = await readFileIfExists(path.join(directory, "library", "view-settings.json"));
+      expect(disk).toMatchObject({ canvasBackground: background });
+      await writeLibraryViewSettings({ ...settings, themeMode: "dark", themePreset: "xcode" });
+      expect((await readLibraryViewSettings()).canvasBackground).toEqual(background);
+    }
+  });
+
   it("writes categories and tags into separate files and strips the shared field from view-settings", async () => {
     const userData = await makeTempUserData();
     const settings = makeSettings({
@@ -70,6 +94,7 @@ describe("lexicon file split persistence", () => {
     await writeLibraryViewSettings(settings);
     const reloaded = await readLibraryViewSettings();
 
+    expect(reloaded.themePreset).toBe("solarized");
     expect(reloaded.promptLexicons?.categories).toEqual([
       { id: "cat-9", group: "产品摄影", label: "产品", description: "", parentId: null, imageFileName: null },
     ]);

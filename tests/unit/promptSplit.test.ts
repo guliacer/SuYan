@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  parsePromptTemplateSegments,
   resolvePromptTemplateText,
   splitPromptToTemplate,
 } from "@/features/library/utils/promptSplit";
@@ -835,45 +834,5 @@ describe("promptSplit", () => {
         { explicitParameters: true },
       ),
     ).toBe("主体水梨，比例3:4，氛围清爽夏日氛围，风格冰爽水雾水果广告海报，字体优雅衬线字体");
-  });
-
-  it("parses inline variables into parameter segments", () => {
-    expect(parsePromptTemplateSegments("画面使用{{lightShadow: 柔和自然光影}}，比例是{{aspectRatio: 16:9}}")).toEqual([
-      { type: "text", text: "画面使用" },
-      { type: "parameter", source: "{{lightShadow: 柔和自然光影}}", variable: "lightShadow", value: "柔和自然光影" },
-      { type: "text", text: "，比例是" },
-      { type: "parameter", source: "{{aspectRatio: 16:9}}", variable: "aspectRatio", value: "16:9" },
-    ]);
-  });
-
-  it("treats bracketed prompt fragments as explicit replaceable parameters", () => {
-    expect(parsePromptTemplateSegments("主体【水梨】，比例[3:4]，氛围（清爽夏日氛围），风格「冰爽水雾水果广告海报」")).toEqual([
-      { type: "text", text: "主体" },
-      { type: "parameter", source: "【水梨】", variable: "foodMainIngredient", value: "水梨" },
-      { type: "text", text: "，比例" },
-      { type: "parameter", source: "[3:4]", variable: "aspectRatio", value: "3:4" },
-      { type: "text", text: "，氛围" },
-      { type: "parameter", source: "（清爽夏日氛围）", variable: "atmosphere", value: "清爽夏日氛围" },
-      { type: "text", text: "，风格" },
-      {
-        type: "parameter",
-        source: "「冰爽水雾水果广告海报」",
-        variable: "commercialVisualStyle",
-        value: "冰爽水雾水果广告海报",
-      },
-    ]);
-  });
-
-  it("recognizes generalized paired symbols as explicit parameter markers", () => {
-    expect(parsePromptTemplateSegments("主角『成熟男性』，字体《优雅衬线字体》，色彩〔低饱和莫兰迪配色〕，镜头〈35mm〉")).toEqual([
-      { type: "text", text: "主角" },
-      { type: "parameter", source: "『成熟男性』", variable: "identityAttribute", value: "成熟男性" },
-      { type: "text", text: "，字体" },
-      { type: "parameter", source: "《优雅衬线字体》", variable: "typography", value: "优雅衬线字体" },
-      { type: "text", text: "，色彩" },
-      { type: "parameter", source: "〔低饱和莫兰迪配色〕", variable: "colorDetail", value: "低饱和莫兰迪配色" },
-      { type: "text", text: "，镜头" },
-      { type: "parameter", source: "〈35mm〉", variable: "lensEquipment", value: "35mm" },
-    ]);
   });
 });

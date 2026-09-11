@@ -38,6 +38,8 @@ function normalizeHttpsImageUrl(input: string | null | undefined): string {
   try {
     const url = new URL(input.trim());
 
+    if (/^app-account-avatar:\/\/avatar\/[a-f0-9]{64}(?:\?v=[a-f0-9]+)?$/.test(input.trim())) return input.trim();
+
     return url.protocol === "https:" ? url.href : "";
   } catch {
     return "";

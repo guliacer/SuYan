@@ -1,8 +1,10 @@
-import { app, dialog, shell } from "electron";
+import { app, shell } from "electron";
+import { dialog } from "./app/fileDialogs";
+import { formatExportFileName } from "./app/exportFileName";
+import { reportExportProgress } from "./app/exportTask";
+import { writeZipInBackground } from "./app/exportZipWorker";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
-import type JSZip from "jszip";
 import type { LogExportOptions, LogExportResult } from "./logExport";
 import {
   buildGithubFeedbackUrl,
@@ -38,9 +40,6 @@ const maxRotatedFiles = 2;
 
 const logFileName = "app.log";
 
-type JSZipConstructor = new () => JSZip;
-
-let jsZipRuntime: JSZipConstructor | null = null;
 
 const sensitiveKeyPatterns = [
   "apikey",
@@ -51,6 +50,10 @@ const sensitiveKeyPatterns = [
   "token",
   "authorization",
   "credential",
+  "devicecode",
+  "device_code",
+  "usercode",
+  "user_code",
 ];
 
 export type LogEntry = {
@@ -197,6 +200,7 @@ async function migrateLogFiles(sourcePaths: string[]): Promise<void> {
 }
 
 export async function exportLogs(options: LogExportOptions = {}): Promise<LogExportResult> {
+  reportExportProgress("正在收集并筛选日志…");
   await writeQueue;
 
   const minLevel = normalizeExportLogLevel(options.minLevel);
@@ -272,10 +276,8 @@ export async function exportLogs(options: LogExportOptions = {}): Promise<LogExp
     };
   }
 
-  const dateLabel = new Date().toISOString().slice(0, 10);
-  const extension = outputFormat;
-  const levelLabel = minLevel.toLowerCase();
-  const fileName = `素言-日志-${dateLabel}-${levelLabel}.${extension}`;
+  const exportedAt = new Date();
+  const fileName = formatExportFileName(`日志-${minLevel}`, outputFormat, { date: exportedAt });
   const result =
     purpose === "feedback"
       ? { canceled: false, filePath: path.join(app.getPath("temp"), fileName) }
@@ -302,16 +304,12 @@ export async function exportLogs(options: LogExportOptions = {}): Promise<LogExp
   const exportBody = buildTextLogExport(filteredEntries, { minLevel, range, format: outputFormat });
 
   if (outputFormat === "zip") {
-    const JSZipRuntime = getJSZipConstructor();
-    const zip = new JSZipRuntime();
-    zip.file(`素言-日志-${dateLabel}-${levelLabel}.txt`, exportBody);
-    zip.file(
-      "请先阅读.txt",
-      "此压缩包由素言自动生成，仅包含按所选时间和级别筛选后的应用日志。\n请将本 ZIP 拖入 GitHub Issue 的附件区域。\n",
-    );
-    const buffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    await fs.writeFile(result.filePath, buffer);
+    await writeZipInBackground(result.filePath, [
+      { zipPath: formatExportFileName(`日志-${minLevel}`, "txt", { date: exportedAt }), text: exportBody },
+      { zipPath: "请先阅读.txt", text: "此压缩包由素言自动生成，仅包含按所选时间和级别筛选后的应用日志。\n请将本 ZIP 拖入 GitHub Issue 的附件区域。\n" },
+    ]);
   } else {
+    reportExportProgress(`正在保存 ${filteredEntries.length} 条日志…`);
     await fs.writeFile(result.filePath, exportBody, "utf8");
   }
 
@@ -336,28 +334,6 @@ export async function exportLogs(options: LogExportOptions = {}): Promise<LogExp
     minLevel,
     range,
   };
-}
-
-function getJSZipConstructor(): JSZipConstructor {
-  if (jsZipRuntime) {
-    return jsZipRuntime;
-  }
-
-  const runtimeRequire = createRequire(__filename);
-
-  try {
-    jsZipRuntime = normalizeJSZipModule(runtimeRequire("jszip"));
-  } catch {
-    const vendorRequire = createRequire(path.join(process.resourcesPath, "vendor", "package.cjs"));
-    jsZipRuntime = normalizeJSZipModule(vendorRequire("jszip"));
-  }
-
-  return jsZipRuntime;
-}
-
-function normalizeJSZipModule(input: unknown): JSZipConstructor {
-  const candidate = (input as { default?: JSZipConstructor }).default ?? input;
-  return candidate as JSZipConstructor;
 }
 
 export async function readRecentLogs(maxLines: number = 200): Promise<string[]> {

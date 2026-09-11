@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Clipboard, ImagePlus, Images, LoaderCircle, Maximize2, RotateCcw, Trash2, X } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -32,6 +33,7 @@ export function StartupGallerySettingsDialog({
   onClose,
   onNotify,
 }: StartupGallerySettingsDialogProps) {
+  const { t } = useLocale();
   const [images, setImages] = useState<StartupGalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
@@ -86,11 +88,11 @@ export function StartupGallerySettingsDialog({
     setImages(sortImages(result.data.images));
 
     if (result.data.canceled) {
-      setFeedbackText("未选择图片。");
+      setFeedbackText(t("未选择图片。"));
       return;
     }
 
-    const text = result.data.importedCount > 1 ? `已添加 ${result.data.importedCount} 张启动页图片。` : "已添加启动页图片。";
+    const text = result.data.importedCount > 1 ? `${t("已添加启动页图片。")} (${result.data.importedCount})` : t("已添加启动页图片。");
     setFeedbackText(text);
     onNotify?.({ text, type: resolveStatusFeedbackTone(text) });
   }
@@ -112,7 +114,7 @@ export function StartupGallerySettingsDialog({
 
     setImages(sortImages(result.data.images));
 
-    const text = result.data.importedCount > 1 ? `已粘贴 ${result.data.importedCount} 张启动页图片。` : "已粘贴启动页图片。";
+    const text = result.data.importedCount > 1 ? `${t("已粘贴启动页图片。")} (${result.data.importedCount})` : t("已粘贴启动页图片。");
     setFeedbackText(text);
     onNotify?.({ text, type: resolveStatusFeedbackTone(text) });
   }
@@ -134,7 +136,7 @@ export function StartupGallerySettingsDialog({
 
     setImages(sortImages(result.data));
     setPendingConfirm(null);
-    const text = "已移除启动页图片。";
+    const text = t("已移除启动页图片。");
     setFeedbackText(text);
     onNotify?.({ text, type: resolveStatusFeedbackTone(text) });
   }
@@ -156,7 +158,7 @@ export function StartupGallerySettingsDialog({
 
     setImages(sortImages(result.data));
     setPendingConfirm(null);
-    const text = "已恢复默认启动页图片。";
+    const text = t("已恢复默认启动页图片。");
     setFeedbackText(text);
     onNotify?.({ text, type: resolveStatusFeedbackTone(text) });
   }
@@ -167,7 +169,7 @@ export function StartupGallerySettingsDialog({
         {isLoading ? (
           <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted">
             <LoaderCircle size={16} className="animate-spin" />
-            正在读取启动页图片...
+            {t("正在读取启动页图片...")}
           </div>
         ) : images.length > 0 ? (
           <div className="grid grid-cols-2 gap-3 min-[640px]:grid-cols-3 min-[960px]:grid-cols-4">
@@ -177,7 +179,7 @@ export function StartupGallerySettingsDialog({
               return (
                 <article className="relative overflow-hidden rounded-md border border-border bg-background" key={image.fileName}>
                   <button
-                    aria-label={`查看第 ${index + 1} 张启动页图片`}
+                    aria-label={t("查看第 {index} 张启动页图片", { index: index + 1 })}
                     className="group relative block w-full cursor-zoom-in overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
                     type="button"
                     onClick={() => setPreviewImage(image)}
@@ -198,10 +200,10 @@ export function StartupGallerySettingsDialog({
                   </button>
                   <div className="flex items-center justify-between gap-2 border-t border-border/80 px-2.5 py-2">
                     <span className="truncate text-xs text-muted">
-                      {image.isDefault ? "默认图片" : `自定义图片 ${index + 1}`}
+                      {image.isDefault ? t("默认图片") : t("自定义图片 {index}", { index: index + 1 })}
                     </span>
                     <button
-                      aria-label={`移除第 ${index + 1} 张启动页图片`}
+                      aria-label={t("移除第 {index} 张启动页图片", { index: index + 1 })}
                       className="icon-tooltip-button flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
                       data-tooltip-align="end"
                       data-tooltip-placement="above"
@@ -211,7 +213,7 @@ export function StartupGallerySettingsDialog({
                     >
                       {isRemoving ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
                       <span className="icon-tooltip-button__bubble" role="tooltip">
-                        移除图片
+                        {t("移除图片")}
                       </span>
                     </button>
                   </div>
@@ -221,7 +223,7 @@ export function StartupGallerySettingsDialog({
           </div>
         ) : (
           <div className="flex min-h-48 items-center justify-center rounded-md border border-dashed border-border bg-background px-5 text-sm text-muted">
-            还没有启动页图片。
+            {t("还没有启动页图片。")}
           </div>
         )}
 
@@ -232,32 +234,35 @@ export function StartupGallerySettingsDialog({
 
       <footer className={`flex flex-wrap justify-end gap-2 ${embedded ? "border-t border-border/80 px-1 pt-3" : "border-t border-border px-5 py-4"}`}>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isActionBusy}
-          icon={pendingAction === "reset" ? <LoaderCircle size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+          icon={pendingAction === "reset" ? <LoaderCircle size={14} className="animate-spin" /> : <RotateCcw size={14} />}
           variant="ghost"
           onClick={() => setPendingConfirm({ kind: "reset" })}
         >
-          恢复默认
+          {t("恢复默认")}
         </Button>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isActionBusy}
-          icon={pendingAction === "import" ? <LoaderCircle size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+          icon={pendingAction === "import" ? <LoaderCircle size={14} className="animate-spin" /> : <ImagePlus size={14} />}
           variant="secondary"
           onClick={() => void handleImport()}
         >
-          添加图片
+          {t("添加图片")}
         </Button>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isActionBusy}
-          icon={pendingAction === "paste" ? <LoaderCircle size={16} className="animate-spin" /> : <Clipboard size={16} />}
+          icon={pendingAction === "paste" ? <LoaderCircle size={14} className="animate-spin" /> : <Clipboard size={14} />}
           variant="secondary"
           onClick={() => void handlePasteFromClipboard()}
         >
-          粘贴图片
+          {t("粘贴图片")}
         </Button>
         {!embedded ? (
-          <Button icon={<X size={16} />} variant="primary" onClick={onClose}>
-            完成
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<X size={14} />} variant="primary" onClick={onClose}>
+            {t("完成")}
           </Button>
         ) : null}
       </footer>
@@ -267,10 +272,10 @@ export function StartupGallerySettingsDialog({
   return (
     <>
       {embedded ? (
-        <div className="flex min-h-0 flex-1 flex-col">{galleryBody}</div>
+        <div data-feature-guide="system-preferences-panel-startupGallery" className="flex min-h-0 flex-1 flex-col">{galleryBody}</div>
       ) : (
         <AppDialog
-          panelClassName="flex max-h-[92vh] w-full max-w-4xl flex-col"
+          panelClassName="flex max-h-full w-full max-w-4xl flex-col"
           titleId="startup-gallery-settings-title"
           onClose={onClose ?? (() => undefined)}
         >
@@ -281,10 +286,10 @@ export function StartupGallerySettingsDialog({
               </span>
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold" id="startup-gallery-settings-title">
-                  启动图库
+                  {t("启动图库")}
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  {images.length} 张轮播图 · 自动生成缩略图
+                  {images.length} {t("张轮播图")}
                 </p>
               </div>
             </div>
@@ -297,19 +302,19 @@ export function StartupGallerySettingsDialog({
         <StartupGalleryPreviewOverlay image={previewImage} onClose={() => setPreviewImage(null)} />
       ) : null}
       <ConfirmDialog
-        busyLabel={pendingConfirm?.kind === "reset" ? "恢复中…" : "移除中…"}
-        confirmLabel={pendingConfirm?.kind === "reset" ? "恢复默认" : "移除图片"}
+        busyLabel={pendingConfirm?.kind === "reset" ? t("恢复中…") : t("移除中…")}
+        confirmLabel={pendingConfirm?.kind === "reset" ? t("恢复默认") : t("移除图片")}
         description={
           pendingConfirm?.kind === "reset"
-            ? "将清空当前启动页图片并恢复为内置默认图，自定义图片会从启动图库中移除。"
+            ? t("将清空当前启动页图片并恢复为内置默认图，自定义图片会从启动图库中移除。")
             : pendingConfirm?.kind === "remove"
-              ? `确定从启动图库移除「${pendingConfirm.image.isDefault ? "默认图片" : "这张自定义图片"}」？`
+              ? t("确定从启动图库移除「这张自定义图片」？")
               : ""
         }
         icon={<Trash2 size={18} />}
         isBusy={isActionBusy && pendingConfirm !== null}
         open={pendingConfirm !== null}
-        title={pendingConfirm?.kind === "reset" ? "恢复默认启动图？" : "移除启动页图片？"}
+        title={pendingConfirm?.kind === "reset" ? t("恢复默认启动图？") : t("移除启动页图片？")}
         onCancel={() => {
           if (!isActionBusy) {
             setPendingConfirm(null);
@@ -336,6 +341,7 @@ type StartupGalleryPreviewOverlayProps = {
 };
 
 function StartupGalleryPreviewOverlay({ image, onClose }: StartupGalleryPreviewOverlayProps) {
+  const { t } = useLocale();
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -349,14 +355,14 @@ function StartupGalleryPreviewOverlay({ image, onClose }: StartupGalleryPreviewO
 
   return createPortal(
     <div
-      aria-label="启动页图片预览"
+      aria-label={t("启动页图片预览")}
       aria-modal="true"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-overlay/90 p-6 backdrop-blur-sm"
+      className="app-window-overlay z-[60] flex items-center justify-center bg-overlay/90 p-6 backdrop-blur-sm"
       role="dialog"
       onClick={onClose}
     >
       <button
-        aria-label="关闭图片预览"
+        aria-label={t("关闭图片预览")}
         className="absolute right-4 top-4 flex size-9 items-center justify-center rounded-full bg-panel/90 text-foreground shadow-elevated outline-none transition-colors hover:bg-panel focus-visible:ring-2 focus-visible:ring-primary/40"
         type="button"
         onClick={onClose}
@@ -364,7 +370,7 @@ function StartupGalleryPreviewOverlay({ image, onClose }: StartupGalleryPreviewO
         <X size={18} />
       </button>
       <img
-        alt={image.isDefault ? "默认启动页图片预览" : "自定义启动页图片预览"}
+        alt={image.isDefault ? t("默认启动页图片预览") : t("自定义启动页图片预览")}
         className="max-h-[88vh] max-w-[92vw] rounded-lg object-contain shadow-image"
         decoding="async"
         src={getStartupGalleryImageSrc(image.fileName)}

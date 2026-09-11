@@ -68,10 +68,10 @@ export function AiErrorDialog({ presentation, onClose, onOpenSettings }: AiError
       </div>
 
       <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
-        <Button type="button" variant="secondary" onClick={onClose}>
+        <Button className="min-h-8 px-2.5 py-1.5 text-xs" type="button" variant="secondary" onClick={onClose}>
           {"\u77e5\u9053\u4e86"}
         </Button>
-        <Button type="button" variant="primary" onClick={onOpenSettings}>
+        <Button className="min-h-8 px-2.5 py-1.5 text-xs" type="button" variant="primary" onClick={onOpenSettings}>
           {"\u6253\u5f00 AI \u8bbe\u7f6e"}
         </Button>
       </footer>

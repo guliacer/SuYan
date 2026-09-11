@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { BatchProgressBar, formatBytes } from "./BatchProgressBar";
 import type { CompressProgress, CompressResult } from "@/types/suyanApi";
 import { useLibraryStore } from "../../store/useLibraryStore";
+import { useLocale } from "@/components/LocaleProvider";
 
 type ImageCompressPanelProps = {
   selectedItemIds: string[];
@@ -33,6 +34,7 @@ export function ImageCompressPanel({
   onInvert,
   onClearSelection,
 }: ImageCompressPanelProps) {
+  const { t } = useLocale();
   const compressImages = useLibraryStore((s) => s.compressImages);
   const cancelCompress = useLibraryStore((s) => s.cancelCompress);
   const [status, setStatus] = useState<CompressStatus>("idle");
@@ -70,7 +72,7 @@ export function ImageCompressPanel({
       await onCompleted?.();
       setStatus("done");
     } else {
-      setErrorMessage("图像压缩失败，请重试。");
+      setErrorMessage(t("图像压缩失败，请重试。"));
       setStatus("error");
     }
   }
@@ -78,7 +80,8 @@ export function ImageCompressPanel({
   async function handleCancel() {
     try {
       await cancelCompress();
-    } catch {
+    } catch (error) {
+      console.error("取消压缩失败:", error);
     }
   }
 
@@ -94,11 +97,11 @@ export function ImageCompressPanel({
       return (
         <div className="flex items-center gap-3 text-sm text-muted">
           <LoaderCircle className="size-4 animate-spin" />
-          正在准备压缩…
+          {t("正在准备压缩…")}
         </div>
       );
     }
-    const label = progress.currentItem ? `正在压缩：${progress.currentItem}` : "正在压缩图像…";
+    const label = progress.currentItem ? `${t("正在压缩：")} ${progress.currentItem}` : t("正在压缩图像…");
     return (
       <div className="flex flex-col gap-3">
         <BatchProgressBar
@@ -108,8 +111,8 @@ export function ImageCompressPanel({
           total={progress.total}
         />
         <div>
-          <Button variant="danger" onClick={() => void handleCancel()}>
-            取消压缩
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="danger" onClick={() => void handleCancel()}>
+            {t("取消压缩")}
           </Button>
         </div>
       </div>
@@ -123,19 +126,18 @@ export function ImageCompressPanel({
         <div className="flex items-center gap-3 rounded-md border border-border/70 bg-panel px-4 py-3 text-sm">
           <Zap className="size-4 text-primary" />
           <span className="text-foreground">
-            已压缩 <span className="font-semibold">{result.processedCount}</span> 张图片，节省{" "}
-            <span className="font-semibold">{formatBytes(savedBytes)}</span>
+            {t("已压缩 {count} 张图片，节省 {bytes}", { count: result.processedCount, bytes: formatBytes(savedBytes) })}
           </span>
         </div>
         {result.failedItems.length > 0 ? (
-          <p className="text-xs text-muted">{result.failedItems.length} 项压缩失败，已跳过。</p>
+          <p className="text-xs text-muted">{t("{count} 项压缩失败，已跳过。", { count: result.failedItems.length })}</p>
         ) : null}
         {result.skippedExternalCount > 0 ? (
-          <p className="text-xs text-muted">{result.skippedExternalCount} 项外链素材保持只读，未执行压缩。</p>
+          <p className="text-xs text-muted">{t("{count} 项外链素材保持只读，未执行压缩。", { count: result.skippedExternalCount })}</p>
         ) : null}
         <div>
-          <Button variant="primary" onClick={handleReset}>
-            再次压缩
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="primary" onClick={handleReset}>
+            {t("再次压缩")}
           </Button>
         </div>
       </div>
@@ -145,10 +147,10 @@ export function ImageCompressPanel({
   if (status === "error") {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-danger">{errorMessage || "图像压缩失败，请重试。"}</p>
+        <p className="text-sm text-danger">{errorMessage || t("图像压缩失败，请重试。")}</p>
         <div>
-          <Button variant="primary" onClick={handleReset}>
-            重试
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="primary" onClick={handleReset}>
+            {t("重试")}
           </Button>
         </div>
       </div>
@@ -158,7 +160,7 @@ export function ImageCompressPanel({
   return (
     <div className="grid grid-cols-[1.4fr_0.9fr_1.2fr_0.9fr] divide-x divide-border/50">
       <div className="px-6 first:pl-0">
-        <div className="mb-4 text-sm font-semibold text-foreground">质量参数</div>
+        <div className="mb-4 text-sm font-semibold text-foreground">{t("质量参数")}</div>
         <div className="text-3xl font-bold tabular-nums text-foreground">{quality}</div>
         <div className="relative mt-5 mb-2 h-2 rounded-full bg-border/50">
           <div
@@ -167,7 +169,7 @@ export function ImageCompressPanel({
           />
           <input
             type="range"
-            aria-label="质量参数"
+            aria-label={t("质量参数")}
             min={qualityMin}
             max={qualityMax}
             value={quality}
@@ -176,23 +178,23 @@ export function ImageCompressPanel({
           />
         </div>
         <div className="flex justify-between text-xs text-muted">
-          <span>{qualityMin} 低体积</span>
-          <span>{qualityMax} 高质量</span>
+          <span>{qualityMin} {t("低体积")}</span>
+          <span>{qualityMax} {t("高质量")}</span>
         </div>
         <div className="mt-4 inline-flex items-center rounded-full bg-primary-soft px-3 py-1 text-xs font-medium text-primary-strong">
-          推荐 75-85
+          {t("推荐 75-85")}
         </div>
       </div>
 
       <div className="px-6">
-        <div className="mb-4 text-sm font-semibold text-foreground">输出格式</div>
+        <div className="mb-4 text-sm font-semibold text-foreground">{t("输出格式")}</div>
         <div className="flex flex-col gap-2">
           <button
             className={format === "keep" ? activeBtnClass : inactiveBtnClass}
             type="button"
             onClick={() => setFormat("keep")}
           >
-            原格式 {format === "keep" ? "✓" : ""}
+            {t("原格式")} {format === "keep" ? "✓" : ""}
           </button>
           <button
             className={format === "webp" ? activeBtnClass : inactiveBtnClass}
@@ -203,37 +205,37 @@ export function ImageCompressPanel({
           </button>
         </div>
         <p className="mt-3 text-xs text-muted">
-          {format === "keep" ? "保持原格式" : "转 WebP 更小"}
+          {format === "keep" ? t("保持原格式") : t("转 WebP 更小")}
         </p>
       </div>
 
       <div className="px-6">
-        <div className="mb-4 text-sm font-semibold text-foreground">压缩范围</div>
+        <div className="mb-4 text-sm font-semibold text-foreground">{t("压缩范围")}</div>
         <div className="flex flex-col gap-2">
           <button
             className={scope === "all" ? activeBtnClass : inactiveBtnClass}
             type="button"
             onClick={() => setScope("all")}
           >
-            全部图片 {scope === "all" ? "✓" : ""}
+            {t("全部图片")} {scope === "all" ? "✓" : ""}
           </button>
           <button
             className={scope === "selected" ? activeBtnClass : inactiveBtnClass}
             type="button"
             onClick={() => setScope("selected")}
           >
-            选中({selectedItemIds.length}) {scope === "selected" ? "✓" : ""}
+            {t("选中({count})", { count: selectedItemIds.length })} {scope === "selected" ? "✓" : ""}
           </button>
         </div>
         <div className="mt-3 rounded-lg bg-background/70 p-2.5">
           <div className="flex flex-wrap gap-1.5">
             <button className={selectionBtnClass} type="button" onClick={onSelectAll}>
               <CheckSquare size={12} />
-              全选
+              {t("全选")}
             </button>
             <button className={selectionBtnClass} type="button" onClick={onInvert}>
               <Square size={12} />
-              反选
+              {t("反选")}
             </button>
             <button
               className={selectionBtnClass}
@@ -242,20 +244,20 @@ export function ImageCompressPanel({
               onClick={onClearSelection}
             >
               <X size={12} />
-              取消选择
+              {t("取消选择")}
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs text-muted">已选 {selectedCount} / {totalCount} 组</p>
+        <p className="mt-2 text-xs text-muted">{t("已选 {selected} / {total} 组", { selected: selectedCount, total: totalCount })}</p>
       </div>
 
       <div className="px-6 last:pr-0">
-        <div className="mb-4 text-sm font-semibold text-foreground">预计节省</div>
+        <div className="mb-4 text-sm font-semibold text-foreground">{t("预计节省")}</div>
         <div className="flex items-baseline gap-1">
           <TrendingDown className="size-4 text-progress" />
           <span className="text-3xl font-bold tabular-nums text-progress">{estimatedSavingsPercent}%</span>
         </div>
-        <p className="mt-1 text-xs text-muted">画质 {quality} 预计压缩率</p>
+        <p className="mt-1 text-xs text-muted">{t("画质 {quality} 预计压缩率", { quality })}</p>
         <Button
           disabled={scopeDisabled}
           icon={<Zap size={16} />}
@@ -263,7 +265,7 @@ export function ImageCompressPanel({
           onClick={() => void handleStart()}
           className="mt-5 w-full"
         >
-          开始压缩
+          {t("开始压缩")}
         </Button>
       </div>
     </div>

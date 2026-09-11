@@ -1,6 +1,6 @@
 {
   "name": "suyan",
-  "version": "0.3.0",
+  "version": "0.3.6",
   "private": false,
   "author": {
     "name": "guliacer",
@@ -20,18 +20,25 @@
     "typecheck:renderer": "tsc -p tsconfig.json --noEmit",
     "typecheck:electron": "tsc -p tsconfig.electron.json --noEmit",
     "test": "vitest run",
-    "package:win": "pnpm build && pnpm build:rust-core && node package-win.cjs",
+    "package:win": "node scripts/clean-dist.cjs && node node_modules/vite/bin/vite.js build && node scripts/clean-dist.cjs dist-electron && node node_modules/typescript/bin/tsc -p tsconfig.electron.json && node scripts/build-rust-core.cjs && node package-win.cjs",
+    "package:win:release": "node scripts/package-win-release.cjs",
+    "package:win:editions": "node scripts/package-win-editions.cjs",
+    "components:sign-nsfw": "node scripts/components/sign-nsfw-release.cjs sign",
     "protect:electron": "node scripts/obfuscate-electron.cjs dist-electron",
     "check:secrets": "node scripts/check-no-secrets.cjs",
     "check:empty-shell": "node scripts/check-empty-shell.cjs"
   },
   "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
+    "@dnd-kit/utilities": "3.2.2",
     "chokidar": "4.0.3",
     "jszip": "3.10.1",
     "lucide-react": "1.23.0",
+    "openid-client": "5.7.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "sharp": "0.33.5",
+    "sharp": "0.35.4",
     "zustand": "5.0.14"
   },
   "devDependencies": {
@@ -43,11 +50,11 @@
     "electron": "43.0.0",
     "electron-builder": "26.15.3",
     "ffmpeg-static": "5.2.0",
+    "javascript-obfuscator": "5.4.7",
     "tailwindcss": "4.3.2",
     "typescript": "6.0.3",
     "vite": "8.1.3",
-    "vitest": "4.1.9",
-    "javascript-obfuscator": "5.4.7"
+    "vitest": "4.1.9"
   },
   "build": {
     "appId": "local.suyan",
@@ -67,6 +74,7 @@
       "!**/proxy-settings.json",
       "!**/view-settings.json",
       "!**/window-state.json",
+      "!**/file-dialog-settings.json",
       "!**/library.json",
       "!**/secrets/**",
       "!**/private/**",

@@ -46,8 +46,10 @@ export type InstallComponentDeps = {
   publicKeyPem: string;
   limits: ComponentExtractLimits;
   loadZip: ZipArchiveLoader;
-  expected: { componentId: string; version: string; platform: string; exeName: string };
+  expected: { componentId: string; version: string; platform: string; exeName?: string };
   selfCheckRunner?: CommandRunner;
+  /** 非可执行组件（例如 NSFW 模型）可提供自己的暂存目录自检。 */
+  selfCheck?: (stagingDir: string) => Promise<boolean>;
   onProgress?: InstallProgress;
 };
 
@@ -81,8 +83,12 @@ export async function installComponent(deps: InstallComponentDeps): Promise<Inst
     await verifyExtractedFiles(stagingDir, manifest.files);
 
     onProgress?.("self-check", "运行自检...");
-    const exePath = path.join(stagingDir, expected.exeName);
-    if (!(await selfCheckFfmpeg(exePath, deps.selfCheckRunner))) {
+    const selfCheckPassed = deps.selfCheck
+      ? await deps.selfCheck(stagingDir)
+      : expected.exeName
+        ? await selfCheckFfmpeg(path.join(stagingDir, expected.exeName), deps.selfCheckRunner)
+        : false;
+    if (!selfCheckPassed) {
       throw new Error("组件自检失败");
     }
     const finalDir = getComponentPlatformDir(
@@ -195,6 +201,61 @@ const FFMPEG_EXPECTED = {
   platform: CURRENT_COMPONENT_PLATFORM,
   exeName: FFMPEG_EXECUTABLE_NAME,
 };
+
+/**
+ * 仅定位应用受管的 FFmpeg 组件根目录。组件 ID 是内置常量，且必须是 components 的直接子目录，
+ * 防止删除逻辑因路径拼接或未来调用方变化而越出 userData/components。
+ */
+function getManagedFfmpegComponentRoot(baseComponentsDir: string): string {
+  const baseDir = path.resolve(baseComponentsDir);
+  const componentRoot = path.resolve(baseDir, FFMPEG_COMPONENT_ID);
+  if (path.dirname(componentRoot) !== baseDir) {
+    throw new Error("FFmpeg 组件目录不在受管 components 目录内");
+  }
+  return componentRoot;
+}
+
+async function removeWithRetry(target: string): Promise<void> {
+  const transientCodes = new Set(["EPERM", "EACCES", "EBUSY"]);
+  const backoffMs = [50, 100, 200, 400, 800];
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fs.rm(target, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+      return;
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (attempt >= backoffMs.length || !code || !transientCodes.has(code)) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, backoffMs[attempt]));
+    }
+  }
+}
+
+/**
+ * 删除指定 userData/components 根目录下受管的 FFmpeg。不会解析或触碰系统 PATH 中的 FFmpeg。
+ * 导出纯路径入口便于单测；生产调用应使用 removeInstalledFfmpegComponent。
+ */
+export async function removeFfmpegComponentFromBaseDir(baseComponentsDir: string): Promise<boolean> {
+  const componentRoot = getManagedFfmpegComponentRoot(baseComponentsDir);
+  try {
+    await fs.lstat(componentRoot);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+
+  await removeWithRetry(componentRoot);
+  return true;
+}
+
+/** 生产删除入口：只删除 app userData 下由素言安装的 FFmpeg 组件。 */
+export async function removeInstalledFfmpegComponent(): Promise<{ removed: boolean }> {
+  return { removed: await removeFfmpegComponentFromBaseDir(getElectronComponentsBaseDir()) };
+}
 
 /** 生产入口（下载）：固定 URL/公钥来自 componentConfig；未配置时 fail-closed 拒绝。 */
 export async function installFfmpegFromDownload(

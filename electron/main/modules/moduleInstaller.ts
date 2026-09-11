@@ -2,9 +2,15 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import https from "node:https";
-import { dialog } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { logger } from "../appLogger";
 import type { BuiltinModuleId } from "../../../src/features/library/utils/moduleRegistry";
 import { getModuleRuntimeDependencies, getBuiltinModuleDefinition } from "../../../src/features/library/utils/moduleRegistry";
+import {
+  checkNsfwModuleInstalled,
+  installNsfwModuleFromDownload,
+  installNsfwModuleFromLocal,
+} from "./nsfwModuleInstaller";
 
 export type ModuleInstallProgress = {
   moduleId: string;
@@ -14,39 +20,105 @@ export type ModuleInstallProgress = {
   message: string;
 };
 
+export type ModuleInstallationResult = {
+  installed: boolean;
+  canceled?: boolean;
+};
+
+/** Renderer / IPC 使用的统一模块探测返回值，避免裸布尔值在跨进程边界被误读。 */
+export type ModuleInstallationStatus = {
+  installed: boolean;
+};
+
 type InstallProgressCallback = (progress: ModuleInstallProgress) => void;
 
 const GITHUB_MODULE_VERSION = "v1.0.0";
 const GITHUB_REPO_NAME = "prompt-library-modules";
 
-export async function checkModuleInstalled(moduleId: BuiltinModuleId): Promise<boolean> {
+export function toModuleInstallationStatus(installed: boolean): ModuleInstallationStatus {
+  return { installed };
+}
+
+export async function checkModuleInstalled(
+  moduleId: BuiltinModuleId,
+): Promise<ModuleInstallationStatus> {
   const definition = getBuiltinModuleDefinition(moduleId);
 
   // Runtime modules (e.g. video-runtime) are backed by an external binary, so
   // their "installed" state is the availability of that binary itself.
   if (definition.category === "runtime") {
-    return checkRuntimeDependencyAvailable(moduleId);
+    return toModuleInstallationStatus(await checkRuntimeDependencyAvailable(moduleId));
   }
 
   const runtimeDeps = getModuleRuntimeDependencies(moduleId);
   if (runtimeDeps.length === 0) {
-    return true;
+    return toModuleInstallationStatus(true);
   }
 
   for (const depId of runtimeDeps) {
     const isAvailable = await checkRuntimeDependencyAvailable(depId);
     if (!isAvailable) {
-      return false;
+      return toModuleInstallationStatus(false);
     }
   }
 
-  return true;
+  return toModuleInstallationStatus(true);
 }
 
 export async function installModuleFromLocal(
   moduleId: BuiltinModuleId,
   onProgress?: InstallProgressCallback,
-): Promise<boolean> {
+): Promise<ModuleInstallationResult> {
+  if (moduleId === "nsfw-runtime") {
+    onProgress?.({
+      moduleId,
+      phase: "verifying",
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      message: "请选择本地 NSFW 模块安装包...",
+    });
+    try {
+      const result = await installNsfwModuleFromLocal();
+      if (result.canceled) {
+        onProgress?.({
+          moduleId,
+          phase: "failed",
+          bytesDownloaded: 0,
+          totalBytes: 0,
+          message: "已取消选择安装包",
+        });
+        return { installed: false, canceled: true };
+      }
+      if (!result.installed) {
+        onProgress?.({
+          moduleId,
+          phase: "failed",
+          bytesDownloaded: 0,
+          totalBytes: 0,
+          message: "NSFW 模块校验失败",
+        });
+        return { installed: false };
+      }
+      onProgress?.({
+        moduleId,
+        phase: "done",
+        bytesDownloaded: 0,
+        totalBytes: 0,
+        message: "NSFW 模块安装成功",
+      });
+      return { installed: true };
+    } catch (error) {
+      onProgress?.({
+        moduleId,
+        phase: "failed",
+        bytesDownloaded: 0,
+        totalBytes: 0,
+        message: `安装失败：${error instanceof Error ? error.message : String(error)}`,
+      });
+      return { installed: false };
+    }
+  }
+
   onProgress?.({
     moduleId,
     phase: "verifying",
@@ -69,7 +141,7 @@ export async function installModuleFromLocal(
       totalBytes: 0,
       message: "已取消选择安装包",
     });
-    return false;
+    return { installed: false, canceled: true };
   }
 
   const zipPath = result.filePaths[0];
@@ -107,7 +179,7 @@ export async function installModuleFromLocal(
       message: "正在校验依赖...",
     });
 
-    const installed = await checkModuleInstalled(moduleId);
+    const { installed } = await checkModuleInstalled(moduleId);
 
     if (!installed) {
       onProgress?.({
@@ -117,7 +189,7 @@ export async function installModuleFromLocal(
         totalBytes: zipBuffer.length,
         message: "依赖校验失败，模块包可能不完整",
       });
-      return false;
+      return { installed: false };
     }
 
     onProgress?.({
@@ -128,7 +200,7 @@ export async function installModuleFromLocal(
       message: "模块安装成功",
     });
 
-    return true;
+    return { installed: true };
   } catch (error) {
     onProgress?.({
       moduleId,
@@ -137,7 +209,62 @@ export async function installModuleFromLocal(
       totalBytes: 0,
       message: `安装失败：${error instanceof Error ? error.message : String(error)}`,
     });
-    return false;
+    return { installed: false };
+  }
+}
+
+/** 仅允许固定内置 Release 的在线模块安装；Renderer 不能传入 URL、owner 或版本。 */
+export async function installModuleFromDownload(
+  moduleId: BuiltinModuleId,
+  onProgress?: InstallProgressCallback,
+): Promise<ModuleInstallationResult> {
+  if (moduleId !== "nsfw-runtime") {
+    onProgress?.({
+      moduleId,
+      phase: "failed",
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      message: "该模块没有可用的固定在线安装源",
+    });
+    return { installed: false };
+  }
+
+  try {
+    const reportComponentProgress = (phase: "verifying" | "downloading" | "extracting" | "self-check" | "done", message: string) => {
+      onProgress?.({
+        moduleId,
+        phase: phase === "self-check" ? "verifying" : phase,
+        bytesDownloaded: 0,
+        totalBytes: 0,
+        message,
+      });
+    };
+    const result = await installNsfwModuleFromDownload(reportComponentProgress);
+    onProgress?.({
+      moduleId,
+      phase: result.installed ? "done" : "failed",
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      message: result.installed ? "NSFW 模块安装成功" : "模块校验失败",
+    });
+    return { installed: result.installed };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn("main", "module:download-install-failed", {
+      moduleId,
+      code: "COMPONENT_INSTALL_FAILED",
+      message,
+    });
+    onProgress?.({
+      moduleId,
+      phase: "failed",
+      bytesDownloaded: 0,
+      totalBytes: 0,
+      message: message.includes("HTTP 404")
+        ? "组件发布附件不存在或不可访问，请使用已签名离线三件套导入。"
+        : `安装失败：${message}`,
+    });
+    return { installed: false };
   }
 }
 
@@ -145,7 +272,7 @@ export async function installModuleFromGithub(
   moduleId: BuiltinModuleId,
   githubOwner: string,
   onProgress?: InstallProgressCallback,
-): Promise<boolean> {
+): Promise<ModuleInstallationResult> {
   if (!githubOwner) {
     onProgress?.({
       moduleId,
@@ -154,7 +281,7 @@ export async function installModuleFromGithub(
       totalBytes: 0,
       message: "未配置 GitHub 仓库 owner",
     });
-    return false;
+    return { installed: false };
   }
 
   const zipUrl = `https://github.com/${githubOwner}/${GITHUB_REPO_NAME}/releases/download/${GITHUB_MODULE_VERSION}/${moduleId}-windows-x64.zip`;
@@ -180,7 +307,7 @@ export async function installModuleFromGithub(
       message: "正在校验依赖...",
     });
 
-    const installed = await checkModuleInstalled(moduleId);
+    const { installed } = await checkModuleInstalled(moduleId);
 
     if (!installed) {
       onProgress?.({
@@ -190,7 +317,7 @@ export async function installModuleFromGithub(
         totalBytes: zipBuffer.length,
         message: "依赖校验失败",
       });
-      return false;
+      return { installed: false };
     }
 
     onProgress?.({
@@ -201,7 +328,7 @@ export async function installModuleFromGithub(
       message: "模块安装成功",
     });
 
-    return true;
+    return { installed: true };
   } catch (error) {
     onProgress?.({
       moduleId,
@@ -210,7 +337,7 @@ export async function installModuleFromGithub(
       totalBytes: 0,
       message: `安装失败：${error instanceof Error ? error.message : String(error)}`,
     });
-    return false;
+    return { installed: false };
   }
 }
 
@@ -223,6 +350,10 @@ async function checkRuntimeDependencyAvailable(runtimeModuleId: BuiltinModuleId)
   if (runtimeModuleId === "image-runtime") {
     const { isSharpAvailable } = await import("../runtime/imageRuntime");
     return isSharpAvailable();
+  }
+
+  if (runtimeModuleId === "nsfw-runtime") {
+    return checkNsfwModuleInstalled();
   }
 
   return true;

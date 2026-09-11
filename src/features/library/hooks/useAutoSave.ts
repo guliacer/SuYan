@@ -15,8 +15,7 @@ type UseAutoSaveOptions<T> = {
 
 type UseAutoSaveResult = {
   isSaving: boolean;
-  /** Manually persist the latest value now. Resolves true when the value is
-   * saved (or nothing needs saving), false when saving was skipped or failed. */
+  /** Manually persist the latest value now. Resolves true when saved (or nothing needed saving). */
   flush: () => Promise<boolean>;
   /** Pause auto-save scheduling (in-flight flush still completes). */
   pause: () => void;
@@ -43,6 +42,7 @@ export function useAutoSave<T>({
   const revisionRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
+  const inFlightPromiseRef = useRef<Promise<boolean> | null>(null);
   const mountedRef = useRef(true);
   const enabledRef = useRef(enabled);
   const isBusyRef = useRef(isBusy);
@@ -78,11 +78,25 @@ export function useAutoSave<T>({
   }
 
   async function flush(): Promise<boolean> {
-    if (inFlightRef.current) {
-      return false;
+    // A close handler can call flush while the debounce timer is already saving.
+    // Wait for that request, then retry once if a newer draft arrived meanwhile.
+    const inFlightPromise = inFlightPromiseRef.current;
+    if (inFlightPromise) {
+      const result = await inFlightPromise;
+
+      if (signatureRef.current !== lastSavedSignatureRef.current && enabledRef.current) {
+        return flush();
+      }
+
+      return result;
     }
 
-    if (!enabledRef.current || isBusyRef.current || pausedRef.current) {
+    // Pause blocks scheduling, but an explicit flush must still be allowed. This
+    // is used by export/import and dialog close paths to drain the latest draft.
+    // Explicit flushes pause scheduling first (dialog close/export/import).
+    // They must be allowed to drain while the previous save is still reflected
+    // as busy; the queued save operation itself is already serialized.
+    if (!enabledRef.current || (isBusyRef.current && !pausedRef.current)) {
       return false;
     }
 
@@ -94,51 +108,57 @@ export function useAutoSave<T>({
     const requestRevision = revisionRef.current;
     inFlightRef.current = true;
 
-    if (mountedRef.current) {
-      setIsSaving(true);
-    }
+    const savePromise = (async () => {
+      if (mountedRef.current) {
+        setIsSaving(true);
+      }
 
-    try {
-      const result = await onSaveRef.current(valueRef.current);
-      const succeeded = result === true || typeof result === "undefined";
+      try {
+        const result = await onSaveRef.current(valueRef.current);
+        const succeeded = result === true || typeof result === "undefined";
 
-      if (requestRevision === revisionRef.current) {
-        if (succeeded) {
-          lastSavedSignatureRef.current = requestSignature;
-          onSavedRef.current?.();
-          return true;
+        if (requestRevision === revisionRef.current) {
+          if (succeeded) {
+            lastSavedSignatureRef.current = requestSignature;
+            onSavedRef.current?.();
+            return true;
+          }
+
+          onErrorRef.current?.(
+            typeof result === "string" && result.trim() ? result : "自动保存失败，请稍后重试。",
+          );
+          return false;
         }
 
-        onErrorRef.current?.(
-          typeof result === "string" && result.trim() ? result : "自动保存失败，请稍后重试。",
-        );
         return false;
-      }
+      } catch (error) {
+        if (requestRevision === revisionRef.current) {
+          onErrorRef.current?.(error instanceof Error ? error.message : "自动保存失败，请稍后重试。");
+        }
 
-      return false;
-    } catch (error) {
-      if (requestRevision === revisionRef.current) {
-        onErrorRef.current?.(error instanceof Error ? error.message : "自动保存失败，请稍后重试。");
-      }
+        return false;
+      } finally {
+        inFlightRef.current = false;
+        inFlightPromiseRef.current = null;
 
-      return false;
-    } finally {
-      inFlightRef.current = false;
+        if (mountedRef.current) {
+          setIsSaving(false);
+        }
 
-      if (mountedRef.current) {
-        setIsSaving(false);
+        if (
+          mountedRef.current &&
+          signatureRef.current !== lastSavedSignatureRef.current &&
+          enabledRef.current &&
+          !isBusyRef.current &&
+          !pausedRef.current
+        ) {
+          scheduleFlush();
+        }
       }
+    })();
 
-      if (
-        mountedRef.current &&
-        signatureRef.current !== lastSavedSignatureRef.current &&
-        enabledRef.current &&
-        !isBusyRef.current &&
-        !pausedRef.current
-      ) {
-        scheduleFlush();
-      }
-    }
+    inFlightPromiseRef.current = savePromise;
+    return savePromise;
   }
 
   function pause() {
@@ -183,6 +203,8 @@ export function useAutoSave<T>({
     return () => {
       mountedRef.current = false;
       clearTimer();
+      // Do not cancel an in-flight request. Its promise continues through the
+      // renderer teardown and the main-process write queue completes it safely.
     };
   }, []);
 

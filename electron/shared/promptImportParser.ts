@@ -2417,52 +2417,80 @@ type ComfyPromptNode = {
   class_type?: unknown;
   inputs?: Record<string, unknown>;
   _meta?: { title?: unknown };
+  /** 工作流快照中 ShowText 等显示节点保存的实际输出文本。 */
+  _widgetText?: string;
+  /** 节点是否声明了 STRING/TEXT 输出，用于识别未命名的自定义文本节点。 */
+  _hasStringOutput?: boolean;
 };
 
-const comfySamplerClassTypes = [
-  "ksampler",
-  "ksampleradvanced",
-  "samplercustom",
-  "samplercustomadvanced",
-  "ksampler (efficient)",
-  "ksampler_a1111",
-];
-
-const comfyTextEncodeClassTypes = ["cliptextencode", "cliptextencodesdxl", "cliptextencodeflux", "bnk_cliptextencodeadvanced"];
-
 const comfyModelInputKeys = ["ckpt_name", "unet_name", "model_name", "model"];
+const comfyPromptTextInputKeys = ["text", "prompt", "value", "string", "content"];
 
-function parseComfyUiPromptChunks(chunks: PngTextChunk[]): PromptImportDraft {
-  const promptChunk = chunks.find((chunk) => chunk.keyword.toLowerCase() === "prompt");
-  const workflowChunk = chunks.find((chunk) => chunk.keyword.toLowerCase() === "workflow");
+type ComfyPromptParseResult = {
+  draft: PromptImportDraft;
+  hasGraph: boolean;
+};
 
-  const graph = parseComfyPromptGraph(promptChunk?.text) ?? parseComfyPromptGraphFromWorkflow(workflowChunk?.text);
+function parseComfyUiPromptChunks(chunks: PngTextChunk[]): ComfyPromptParseResult {
+  // 同一张 PNG 可能包含多个同名 prompt/workflow 块（例如由自定义节点或
+  // 二次保存工具追加元数据）。不能只取第一个，否则每张图都会被旧图的
+  // 第一份 API 图覆盖。
+  const promptChunks = chunks.filter((chunk) => chunk.keyword.toLowerCase() === "prompt");
+  const workflowChunks = chunks.filter((chunk) => chunk.keyword.toLowerCase() === "workflow");
+  const graphs = [
+    ...promptChunks.map((chunk) => ({ source: "prompt" as const, graph: parseComfyPromptGraph(chunk.text) })),
+    ...workflowChunks.map((chunk) => ({ source: "workflow" as const, graph: parseComfyPromptGraphFromWorkflow(chunk.text) })),
+  ].filter((item): item is { source: "prompt" | "workflow"; graph: Record<string, ComfyPromptNode> } => Boolean(item.graph));
 
-  if (!graph) {
-    return createEmptyPromptImportDraft();
+  if (graphs.length === 0) {
+    return { draft: createEmptyPromptImportDraft(), hasGraph: false };
   }
 
-  const { positive, negative } = extractComfyPromptTexts(graph);
-  const prompt = normalizeImportText(positive);
+  const candidates = graphs.flatMap(({ source, graph }) =>
+    extractComfyPromptTexts(graph).map(({ positive, negative }) => ({ graph, source, positive, negative })),
+  );
+  const candidate = candidates
+    .map((item) => ({
+      ...item,
+      prompt: normalizeImportText(item.positive),
+      normalizedNegative: normalizeImportText(item.negative),
+    }))
+    .filter((item) => item.prompt && isPromptCandidate(item.prompt))
+    // 工作流可能同时保留多个采样器（例如基础模型、refiner 和最终输出）。
+    // 每个候选都必须来自采样器的实际 positive 连线；在此基础上优先选择
+    // 信息完整的正文，避免对象节点顺序把第一条旧提示词固定到所有图片。
+    .sort((left, right) => {
+      // ComfyUI 会把可执行 API 图和 UI 工作流同时写入 PNG。批量/连续生图
+      // 时 API 图可能沿用上一轮内容，而 workflow 的 ShowText widgets_values
+      // 保存的是当前图片实际使用的文本，因此工作流候选必须优先。
+      const sourceRank = (source: "prompt" | "workflow") => (source === "workflow" ? 1 : 0);
+      return sourceRank(right.source) - sourceRank(left.source) ||
+        scoreComfyPromptCandidate(right) - scoreComfyPromptCandidate(left);
+    })[0];
 
-  if (!prompt || !isPromptCandidate(prompt)) {
-    return createEmptyPromptImportDraft();
+  if (candidate) {
+    const generationMethod = extractComfyModelName(candidate.graph);
+
+    return {
+      hasGraph: true,
+      draft: mergePromptImportDrafts({
+        title: createTitleFromPrompt(candidate.prompt),
+        prompt: candidate.prompt,
+        negativePrompt: candidate.normalizedNegative,
+        tags: uniqueTags(["ComfyUI", ...(generationMethod ? [generationMethod] : [])]),
+        generationMethod: generationMethod ?? "ComfyUI",
+        sourceUrl: null,
+        sourceImageUrl: null,
+        authorName: null,
+        authorUrl: null,
+        authorAvatarUrl: null,
+      }),
+    };
   }
 
-  const generationMethod = extractComfyModelName(graph);
-
-  return mergePromptImportDrafts({
-    title: createTitleFromPrompt(prompt),
-    prompt,
-    negativePrompt: normalizeImportText(negative),
-    tags: uniqueTags(["ComfyUI", ...(generationMethod ? [generationMethod] : [])]),
-    generationMethod: generationMethod ?? "ComfyUI",
-    sourceUrl: null,
-    sourceImageUrl: null,
-    authorName: null,
-    authorUrl: null,
-    authorAvatarUrl: null,
-  });
+  // ComfyUI 的执行图存在但未能从采样器正向输入回溯到可用文本时，
+  // 必须放弃该图。按节点顺序猜测会把负向词误写入正向提示词。
+  return { draft: createEmptyPromptImportDraft(), hasGraph: true };
 }
 
 function parseComfyPromptGraph(text: string | undefined): Record<string, ComfyPromptNode> | null {
@@ -2478,18 +2506,43 @@ function parseComfyPromptGraph(text: string | undefined): Record<string, ComfyPr
     return null;
   }
 
-  if (!isRecord(parsed)) {
+  return findComfyApiGraph(parsed);
+}
+
+/**
+ * ComfyUI 写入 PNG 的 prompt metadata 有两种常见形态：
+ * 1. 根对象就是 API prompt（节点 id → { inputs, class_type }）；
+ * 2. 完整 metadata API JSON 外面再包一层 prompt/workflow/data。
+ * 必须先解包到真正的节点图，再从采样器的 conditioning 反向追踪，
+ * 否则会把包装对象或未连线节点误当成提示词。
+ */
+function findComfyApiGraph(input: unknown, depth = 0): Record<string, ComfyPromptNode> | null {
+  if (depth > 5 || !isRecord(input)) {
     return null;
   }
 
-  const nodes = Object.values(parsed).filter(isRecord);
-  const hasClassType = nodes.some((node) => typeof (node as ComfyPromptNode).class_type === "string");
-
-  if (!hasClassType) {
-    return null;
+  const directNodes = Object.values(input).filter(isRecord);
+  if (directNodes.some((node) => typeof (node as ComfyPromptNode).class_type === "string")) {
+    return input as Record<string, ComfyPromptNode>;
   }
 
-  return parsed as Record<string, ComfyPromptNode>;
+  const preferredKeys = ["prompt", "workflow", "graph", "nodes", "api", "data", "extra_pnginfo"];
+  for (const key of preferredKeys) {
+    const nested = input[key];
+    const graph = findComfyApiGraph(nested, depth + 1);
+    if (graph) {
+      return graph;
+    }
+  }
+
+  for (const nested of Object.values(input)) {
+    const graph = findComfyApiGraph(nested, depth + 1);
+    if (graph) {
+      return graph;
+    }
+  }
+
+  return null;
 }
 
 function parseComfyPromptGraphFromWorkflow(text: string | undefined): Record<string, ComfyPromptNode> | null {
@@ -2505,13 +2558,54 @@ function parseComfyPromptGraphFromWorkflow(text: string | undefined): Record<str
     return null;
   }
 
-  if (!isRecord(parsed) || !Array.isArray(parsed.nodes)) {
-    return null;
+  const workflowPayload = findComfyWorkflowPayload(parsed);
+
+  // 某些导出器会把 API prompt 直接写入 workflow 块，或只写入其它
+  // metadata 块。没有 UI 节点数组时交给 API 图解包逻辑处理。
+  if (!workflowPayload) {
+    return parseComfyPromptGraph(text);
+  }
+
+  const linkSources = new Map<string, {
+    sourceNodeId: string | number;
+    sourceSlot: number | undefined;
+    targetNodeId: string | number;
+    targetSlot: number | undefined;
+  }>();
+  const stringOutputNodeIds = new Set<string>();
+  const links = Array.isArray(workflowPayload.links) ? workflowPayload.links : [];
+
+  for (const link of links) {
+    if (!Array.isArray(link) || link.length < 3) {
+      continue;
+    }
+
+    const [linkId, sourceNodeId, sourceSlot, targetNodeId, targetSlot] = link;
+
+    if (
+      (typeof linkId !== "string" && typeof linkId !== "number") ||
+      (typeof sourceNodeId !== "string" && typeof sourceNodeId !== "number") ||
+      (typeof sourceSlot !== "number" && typeof sourceSlot !== "undefined") ||
+      (typeof targetNodeId !== "string" && typeof targetNodeId !== "number") ||
+      (typeof targetSlot !== "number" && typeof targetSlot !== "undefined")
+    ) {
+      continue;
+    }
+
+    linkSources.set(String(linkId), { sourceNodeId, sourceSlot, targetNodeId, targetSlot });
+
+    // 工作流快照有时不会保存 node.outputs，但 link 本身仍会声明
+    // STRING/TEXT 类型。用这个事实识别自定义文本输出节点，避免依赖
+    // 节点类名必须包含 Text/Prompt。
+    const linkType = link[5];
+    if (typeof linkType === "string" && /(?:string|text)/i.test(linkType)) {
+      stringOutputNodeIds.add(String(sourceNodeId));
+    }
   }
 
   const graph: Record<string, ComfyPromptNode> = {};
 
-  for (const node of parsed.nodes) {
+  for (const node of workflowPayload.nodes) {
     if (!isRecord(node)) {
       continue;
     }
@@ -2524,44 +2618,224 @@ function parseComfyPromptGraphFromWorkflow(text: string | undefined): Record<str
     }
 
     const widgetValues = Array.isArray(node.widgets_values) ? node.widgets_values : [];
-    const textValue = widgetValues.find((value): value is string => typeof value === "string");
+    const inputValues: Record<string, unknown> = {};
+    let widgetIndex = 0;
+    const classTypeLower = classType.toLowerCase();
+    const hasStringOutput = Array.isArray(node.outputs) && node.outputs.some((output) =>
+      isRecord(output) && typeof output.type === "string" && /^(?:string|text)$/i.test(output.type),
+    );
+    const widgetText = classTypeLower.includes("showtext") || hasStringOutput || stringOutputNodeIds.has(String(id)) || /(?:text|prompt|display|output)/i.test(classType)
+      ? pickLongestString(widgetValues)
+      : "";
+
+    if (Array.isArray(node.inputs)) {
+      for (const input of node.inputs) {
+        if (!isRecord(input) || typeof input.name !== "string") {
+          continue;
+        }
+
+        const inputName = input.name;
+        const linkId = input.link;
+
+        const linkedSource = (typeof linkId === "string" || typeof linkId === "number")
+          ? linkSources.get(String(linkId))
+          : undefined;
+        const hasVerifiedLink = Boolean(
+          linkedSource
+          && String(linkedSource.targetNodeId) === String(id),
+        );
+
+        if (hasVerifiedLink && linkedSource) {
+          inputValues[inputName] = [linkedSource.sourceNodeId, linkedSource.sourceSlot];
+        }
+
+        if (isRecord(input.widget)) {
+          const widgetValue = widgetValues[widgetIndex];
+          widgetIndex += 1;
+
+          // ComfyUI 会在已经接线的文本控件上保留上一次的 widgets_values（通常为空）。
+          // 连线才是实际执行图的数据来源，绝不能被旧控件值覆盖。
+          if (typeof widgetValue === "string" && !hasVerifiedLink) {
+            inputValues[inputName] = widgetValue;
+          }
+        }
+      }
+    }
+
     const title = isRecord(node.title) ? undefined : typeof node.title === "string" ? node.title : undefined;
 
     graph[String(id)] = {
       class_type: classType,
-      inputs: textValue !== undefined ? { text: textValue } : {},
+      inputs: inputValues,
       _meta: title ? { title } : undefined,
+      _widgetText: widgetText || undefined,
+      _hasStringOutput: hasStringOutput,
     };
   }
 
   return Object.keys(graph).length > 0 ? graph : null;
 }
 
-function extractComfyPromptTexts(graph: Record<string, ComfyPromptNode>): { positive: string; negative: string } {
-  const sampler = findComfySamplerNode(graph);
+function findComfyWorkflowPayload(input: unknown, depth = 0): { nodes: unknown[]; links?: unknown[] } | null {
+  if (depth > 6 || !isRecord(input)) {
+    return null;
+  }
 
-  if (sampler) {
-    const positive = resolveComfyTextFromLink(graph, sampler.inputs?.positive);
-    const negative = resolveComfyTextFromLink(graph, sampler.inputs?.negative);
+  if (Array.isArray(input.nodes)) {
+    return {
+      nodes: input.nodes,
+      links: Array.isArray(input.links) ? input.links : undefined,
+    };
+  }
 
-    if (positive) {
-      return { positive, negative };
+  for (const key of ["workflow", "graph", "data", "extra_pnginfo", "api"]) {
+    const nested = findComfyWorkflowPayload(input[key], depth + 1);
+    if (nested) {
+      return nested;
     }
   }
 
-  return guessComfyPromptTextsByHeuristic(graph);
-}
-
-function findComfySamplerNode(graph: Record<string, ComfyPromptNode>): ComfyPromptNode | null {
-  for (const node of Object.values(graph)) {
-    const classType = getComfyClassType(node);
-
-    if (comfySamplerClassTypes.includes(classType) && isRecord(node.inputs) && "positive" in node.inputs) {
-      return node;
+  for (const nestedValue of Object.values(input)) {
+    const nested = findComfyWorkflowPayload(nestedValue, depth + 1);
+    if (nested) {
+      return nested;
     }
   }
 
   return null;
+}
+
+function extractComfyPromptTexts(graph: Record<string, ComfyPromptNode>): Array<{ positive: string; negative: string }> {
+  const candidates: Array<{ positive: string; negative: string }> = [];
+
+  for (const sampler of findComfySamplerNodes(graph)) {
+    const positive = resolveComfySamplerInput(graph, sampler, ["positive", "positive_conditioning", "conditioning", "guider", "guide"]);
+
+    if (positive) {
+      candidates.push({
+        positive,
+        negative: resolveComfySamplerInput(graph, sampler, ["negative", "negative_conditioning"]),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function resolveComfySamplerInput(
+  graph: Record<string, ComfyPromptNode>,
+  sampler: ComfyPromptNode,
+  preferredKeys: readonly string[],
+  depth = 0,
+): string {
+  if (depth > 8 || !isRecord(sampler.inputs)) {
+    return "";
+  }
+
+  const values = preferredKeys
+    .map((key) => ({ key, value: sampler.inputs?.[key] }))
+    .filter(({ value }) => typeof value === "string" || Array.isArray(value)) as Array<{
+      key: string;
+      value: string | unknown[];
+    }>;
+  const resolved = values
+    .map(({ key, value }) => {
+      if (Array.isArray(value) && /^(?:guider|guide)$/i.test(key)) {
+        const target = value[0];
+        const guideNode = (typeof target === "string" || typeof target === "number") ? graph[String(target)] : undefined;
+        if (guideNode) {
+          return resolveComfySamplerInput(
+            graph,
+            guideNode,
+            preferredKeys.some((candidate) => /negative/i.test(candidate))
+              ? ["negative", "negative_conditioning"]
+              : ["positive", "positive_conditioning", "conditioning"],
+            depth + 1,
+          );
+        }
+      }
+      return typeof value === "string" ? value : resolveComfyTextFromLink(graph, value);
+    })
+    .filter((value) => value.trim())
+    .sort((left, right) => right.trim().length - left.trim().length)[0];
+
+  if (resolved) {
+    return resolved;
+  }
+
+  // SamplerCustom(Advanced) 把正/负条件封装在 guider（常见是 CFGGuider）
+  // 节点中。负向词不能从整个 guider 混合结果中猜测，必须沿 guider 的
+  // `negative` 输入继续倒查。
+  if (preferredKeys.some((key) => /negative/i.test(key))) {
+    for (const key of ["guider", "guide"]) {
+      const guideLink = sampler.inputs[key];
+      if (!Array.isArray(guideLink)) {
+        continue;
+      }
+      const target = guideLink[0];
+      const guideNode = (typeof target === "string" || typeof target === "number") ? graph[String(target)] : undefined;
+      const negative = guideNode
+        ? resolveComfySamplerInput(graph, guideNode, ["negative", "negative_conditioning"], depth + 1)
+        : "";
+      if (negative) {
+        return negative;
+      }
+    }
+  }
+
+  // 自定义采样器可能把 conditioning 放在 `positive_conditioning`、`guide`
+  // 或其它名称中。仍然只遍历该采样器的实际输入 link，跳过模型/噪声等
+  // 运行参数，不会扫描工作流中的孤立文本节点。
+  const resolvingNegative = preferredKeys.some((key) => /negative/i.test(key));
+  return Object.entries(sampler.inputs)
+    .filter(([key, value]) => {
+      if (isComfyRuntimeOnlyInput(key) || !(Array.isArray(value) || typeof value === "string")) {
+        return false;
+      }
+
+      // 对正向回溯排除 negative/neg 输入；对负向回溯则反过来排除
+      // positive/pos 输入。这样 `positive_prompt`、`negative_prompt`、
+      // `cond_pos` 等自定义命名仍然能沿真实 link 解析。
+      return resolvingNegative ? !/(?:positive|(?:^|[_-])pos(?:$|[_-]))/i.test(key) : !/(?:negative|(?:^|[_-])neg(?:$|[_-]))/i.test(key);
+    })
+    .map(([, value]) => (typeof value === "string" ? value : resolveComfyTextFromLink(graph, value)))
+    .filter((value) => value.trim())
+    .sort((left, right) => right.trim().length - left.trim().length)[0] ?? "";
+}
+
+function scoreComfyPromptCandidate(candidate: {
+  prompt: string;
+  normalizedNegative: string;
+}): number {
+  return candidate.prompt.trim().length * 4 + candidate.normalizedNegative.trim().length;
+}
+
+function findComfySamplerNodes(graph: Record<string, ComfyPromptNode>): ComfyPromptNode[] {
+  return Object.values(graph).filter((node) => {
+    const inputs = node.inputs;
+
+    if (!isRecord(inputs)) {
+      return false;
+    }
+
+    // 不依赖 class_type 名称：第三方节点经常使用自己的命名，但最终
+    // 采样节点仍必须同时拥有扩散运行参数和 conditioning/guider 输入。
+    // BasicGuider、KSamplerSelect、PromptSamplerHelper 等辅助节点缺少
+    // latent/noise/sigmas 运行契约，因此不会被误识别。
+    const inputKeys = Object.keys(inputs);
+    const hasLatentState = inputKeys.some((inputName) =>
+      /^(?:latent_image|latent|samples|latent_samples)$/i.test(inputName),
+    );
+    const hasNoiseSchedule = inputKeys.some((inputName) => /^(?:noise|sigmas)$/i.test(inputName));
+    const hasConditioningInput = inputKeys.some((inputName) =>
+      /(?:positive|negative|conditioning|guider|guide)/i.test(inputName),
+    );
+    const hasExecutionInput = inputKeys.some((inputName) =>
+      /^(?:model|unet|noise|sigmas|sampler|sampler_name|steps|cfg|denoise|add_noise|noise_seed|seed)$/i.test(inputName),
+    );
+
+    return (hasLatentState || hasNoiseSchedule) && hasConditioningInput && hasExecutionInput;
+  });
 }
 
 function resolveComfyTextFromLink(graph: Record<string, ComfyPromptNode>, link: unknown, depth = 0): string {
@@ -2589,53 +2863,93 @@ function resolveComfyTextFromLink(graph: Record<string, ComfyPromptNode>, link: 
     return "";
   }
 
-  const text = node.inputs.text;
-
-  if (typeof text === "string") {
-    return text;
+  // ShowText 等节点的 widgets_values 是该节点实际显示/输出的运行时文本。
+  // 其上游常带有 preset_prompt（例如“Prompt Style”），那只是生成器配置，
+  // 不能盖过当前图片已经生成的完整文本。
+  if (node._widgetText && /(?:showtext|displaytext|promptoutput)/i.test(getComfyClassType(node))) {
+    return node._widgetText;
   }
 
-  if (Array.isArray(text)) {
-    return resolveComfyTextFromLink(graph, text, depth + 1);
-  }
+  let best = "";
+  const linkedCandidates: string[] = [];
 
-  return "";
-}
-
-function guessComfyPromptTextsByHeuristic(graph: Record<string, ComfyPromptNode>): { positive: string; negative: string } {
-  const textNodes = Object.values(graph).filter(
-    (node) => comfyTextEncodeClassTypes.includes(getComfyClassType(node)) && typeof node.inputs?.text === "string",
-  );
-
-  let positive = "";
-  let negative = "";
-
-  for (const node of textNodes) {
-    const text = typeof node.inputs?.text === "string" ? node.inputs.text : "";
-    const title = getComfyNodeTitle(node);
-    const isNegative = /negative|负向|反向|neg\b/i.test(title);
-
-    if (isNegative) {
-      if (!negative) {
-        negative = text;
-      }
+  // 先处理所有实际 link。只要链上已有文本，就不能被同一个节点残留的
+  // widgets/input 字符串覆盖，这是不同 ComfyUI 自定义节点最常见的差异。
+  for (const [inputKey, value] of Object.entries(node.inputs)) {
+    if (!Array.isArray(value) || isComfyRuntimeOnlyInput(inputKey)) {
       continue;
     }
 
-    if (!positive) {
-      positive = text;
+    const resolved = resolveComfyTextFromLink(graph, value, depth + 1);
+    if (resolved.trim()) {
+      linkedCandidates.push(resolved);
     }
   }
 
-  if (!positive && textNodes.length > 0) {
-    positive = typeof textNodes[0].inputs?.text === "string" ? textNodes[0].inputs.text : "";
+  best = linkedCandidates.sort((left, right) => right.trim().length - left.trim().length)[0] ?? "";
 
-    if (!negative && textNodes.length > 1) {
-      negative = typeof textNodes[1].inputs?.text === "string" ? textNodes[1].inputs.text : "";
+  if (best) {
+    return best;
+  }
+
+  for (const inputKey of comfyPromptTextInputKeys) {
+    const value = node.inputs[inputKey];
+    if (typeof value === "string" && value.trim() && value.trim().length > best.trim().length) {
+      best = value;
     }
   }
 
-  return { positive, negative };
+  // 某些自定义节点不会把上游字符串输入命名为 text/prompt，而是使用
+  // `source`、`value_in` 等名称。此时仍然只沿当前 CLIP 文本路径上的
+  // 实际 link 继续倒查，绝不扫描工作流中未连线的其它文本节点。
+  for (const [inputKey, value] of Object.entries(node.inputs)) {
+    if (comfyPromptTextInputKeys.includes(inputKey.toLowerCase()) || isComfyRuntimeOnlyInput(inputKey)) {
+      continue;
+    }
+
+    if (typeof value === "string" && value.trim() && /(?:text|prompt|string|value|content|message|description)/i.test(inputKey)) {
+      if (value.trim().length > best.trim().length) {
+        best = value;
+      }
+    }
+
+    if (Array.isArray(value)) {
+      const resolved = resolveComfyTextFromLink(graph, value, depth + 1);
+      if (resolved.trim().length > best.trim().length) {
+        best = resolved;
+      }
+    }
+  }
+
+  // ShowText/文本显示类节点经常把生成后的结果保存在 widgets_values 的
+  // 嵌套数组中，而它的输入 link 只指向上游生成器，无法从 API 节点重建
+  // 这段运行时文本。仅在当前连线路径无法得到文本时使用该节点快照，
+  // 不会覆盖已解析出的上游真实值，也不会扫描工作流中的其它节点。
+  if (!best && node._widgetText) {
+    best = node._widgetText;
+  }
+
+  return best;
+}
+
+function pickLongestString(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .map((item) => pickLongestString(item))
+    .sort((left, right) => right.length - left.length)[0] ?? "";
+}
+
+function isComfyRuntimeOnlyInput(inputKey: string): boolean {
+  return /^(?:clip|model|latent|latent_image|noise|seed|steps|cfg|sampler|scheduler|denoise|sigmas|add_noise)$/i.test(
+    inputKey,
+  );
 }
 
 function extractComfyModelName(graph: Record<string, ComfyPromptNode>): string | null {
@@ -2666,19 +2980,13 @@ function getComfyClassType(node: ComfyPromptNode): string {
   return typeof node.class_type === "string" ? node.class_type.toLowerCase() : "";
 }
 
-function getComfyNodeTitle(node: ComfyPromptNode): string {
-  const title = node._meta?.title;
-
-  return typeof title === "string" ? title : "";
-}
-
 export function parsePromptDraftFromImageMetadata(input: Uint8Array): PromptImportDraft {
   const chunks = extractPngTextChunks(input);
 
-  const comfyDraft = parseComfyUiPromptChunks(chunks);
+  const comfyResult = parseComfyUiPromptChunks(chunks);
 
-  if (hasPromptContent(comfyDraft)) {
-    return comfyDraft;
+  if (hasPromptContent(comfyResult.draft)) {
+    return comfyResult.draft;
   }
 
   const priority = ["parameters", "prompt", "positive", "description", "comment", "workflow"];
@@ -2689,6 +2997,14 @@ export function parsePromptDraftFromImageMetadata(input: Uint8Array): PromptImpo
   });
 
   for (const chunk of sortedChunks) {
+    const keyword = chunk.keyword.toLowerCase();
+
+    // 对已识别为 ComfyUI 图的 prompt/workflow 块，只允许采样器连线解析；
+    // 不得再落到通用 JSON 解析器把任意 text 字段误当作正向提示词。
+    if (comfyResult.hasGraph && (keyword === "prompt" || keyword === "workflow")) {
+      continue;
+    }
+
     const draft = parsePromptText(chunk.text);
 
     if (hasPromptContent(draft)) {

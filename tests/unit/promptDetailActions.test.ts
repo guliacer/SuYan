@@ -34,9 +34,17 @@ describe("PromptDetailDialog prompt actions", () => {
   it("does not keep a prompt transfer button in the top prompt toolbar", () => {
     const source = fs.readFileSync(promptDetailDialogPath, "utf8");
 
-    expect(source).not.toContain('ariaLabel="传送到画布"');
-    expect(source).toContain('ariaLabel={isCurrentMediaVideo ? "视频不支持传送到画布" : "传送到画布"}');
-    expect(source).toContain("onClick={() => onPushToCanvas(promptDraft, negativePromptDraft)}");
+    expect(source).not.toContain('ariaLabel={isCurrentMediaVideo ? "视频不支持传送到画布" : "传送到画布"}');
+    expect(source).toContain('ariaLabel={t("传送到画布")}');
+    expect(source).toContain("onClick={() => void onPushToCanvas(promptDraft, negativePromptDraft)}");
+  });
+
+  it("keeps the material detail page independent from the todo store", () => {
+    const source = fs.readFileSync(promptDetailDialogPath, "utf8");
+
+    expect(source).not.toContain("useTodoStore");
+    expect(source).not.toContain("onAddToTodo");
+    expect(source).not.toContain("加入待办");
   });
 
   it("transfers the image and both prompt fields in one canvas draft update", () => {
@@ -44,7 +52,7 @@ describe("PromptDetailDialog prompt actions", () => {
 
     expect(source).toContain("prompt,");
     expect(source).toContain("negativePrompt,");
-    expect(source).toContain("referenceImageDataUrl: dataUrl");
+    expect(source).toContain("referenceImages: [...canvasDraft.referenceImages, newEntry],");
     expect(source).toContain("onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(detailItem, prompt, negativePrompt)}");
   });
 

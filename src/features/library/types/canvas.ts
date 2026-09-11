@@ -10,7 +10,7 @@ export type CanvasSizeMode = "auto" | "ratio" | "custom";
  *  后让生成态在切走画布再切回时保留（生成请求本身在主进程后台继续）。 */
 export type CanvasPhase = "empty" | "thinking" | "generating" | "reveal" | "created";
 
-export type CanvasBaseResolution = "1k" | "2k" | "4k";
+export type CanvasBaseResolution = "1k" | "2k" | "3k" | "4k";
 export type CanvasAspectRatio = "1:1" | "3:2" | "2:3" | "16:9" | "9:16" | "4:3" | "3:4" | "21:9";
 export type CanvasGenerationProvider = "api" | "doubao-web";
 
@@ -52,21 +52,27 @@ export type CanvasPromptOrigin = {
   genreIds: string[];
   /** 分类元数据也原样继承（可能是 AI 打的分类），不伪造成用户手动指定。 */
   categoryConfidence: number | null;
-  categorySource: "system" | "user" | "ai" | null;
+  categorySource: "system" | "user" | "ai" | "local" | null;
+};
+
+export type CanvasReferenceImage = {
+  fileName: string;
+  title: string;
+  /**
+   * Reference image data URL. Session-only: stripped before the draft
+   * is persisted (see buildLibraryViewSettings).
+   */
+  dataUrl: string;
 };
 
 export type CanvasDraftSettings = {
   generationProvider: CanvasGenerationProvider;
+  /** Hide the complete creation panel without changing its individual controls. */
+  creationPanelCollapsed: boolean;
   prompt: string;
   positivePromptHeight: number;
-  referenceImageFileName: string;
-  referenceImageTitle: string;
-  /**
-   * Reference image pushed from the prompt detail dialog, kept as a data URL so
-   * image-to-image works without extra IPC round trips. Session-only: stripped
-   * before the draft is persisted (see buildLibraryViewSettings).
-   */
-  referenceImageDataUrl: string;
+  /** Multiple reference images for image-to-image generation. */
+  referenceImages: CanvasReferenceImage[];
   negativePrompt: string;
   negativePromptHidden: boolean;
   positivePromptHidden: boolean;
@@ -82,6 +88,9 @@ export type CanvasDraftSettings = {
   quality: AiImageGenerationQuality;
   outputFormat: AiImageGenerationFormat;
   count: number;
+  /** Video generation controls used when the selected model is an Agnes video model. */
+  videoSeconds: number;
+  videoSize: "720P" | "960P" | "2K";
   transparentBackground: boolean;
   notificationEnabled: boolean;
   /**
@@ -108,4 +117,12 @@ export type CanvasGenerationResult = AiGeneratedImage & {
   saved: boolean;
   /** 入库完成后用于导出和复制的正式素材文件名。 */
   imageFileName?: string;
+  /**
+   * 本次真正提交给模型的正向提示词（`AiGeneratedImage.revisedPrompt` 是模型自己改写的
+   * 版本，很多模型根本不返回）。生成时快照到结果上，预览卡片与手动收录都读它：
+   * 生成后再改草稿也不会让「生成结果」显示成另一段提示词。
+   */
+  requestPrompt?: string;
+  /** 同上，本次提交的反向提示词快照。 */
+  requestNegativePrompt?: string;
 };

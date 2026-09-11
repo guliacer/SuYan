@@ -1,3 +1,4 @@
+import { tagRecognitionPolicy } from "../../../src/features/library/utils/tagKnowledge";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -5,6 +6,8 @@ import type {
   AiAnalyzePromptPayload,
   AiImageGenerationData,
   AiImageGenerationPayload,
+  AiImageGenerationRatio,
+  AiImageGenerationResolution,
   AiOptimizePromptPayload,
   AiProviderModelSettings,
   AiProviderSettings,
@@ -26,6 +29,24 @@ import { AppError } from "../ipc/errors";
 import { resolveLibraryMediaPath } from "../library/mediaLookup";
 import { getSharp } from "../runtime/imageRuntime";
 
+/** 应用统一的 HTTP 客户端：运行时走 Electron net.fetch（跟随系统/应用代理与 TLS 处理），测试环境回退到全局 fetch。 */
+async function platformFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (process.env.NODE_ENV === "test") {
+    return globalThis.fetch(input, init);
+  }
+  try {
+    // 动态 require，使本模块在 vitest（不加载 Electron）下也能被直接引用。
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const electron = require("electron") as { net?: { fetch?: typeof fetch } } | undefined;
+    if (typeof electron?.net?.fetch === "function") {
+      return electron.net.fetch(input, init);
+    }
+  } catch {
+    // 非 Electron 环境（如纯 Node 测试）使用全局 fetch。
+  }
+  return globalThis.fetch(input, init);
+}
+
 const requestTimeoutMs = 20_000;
 const analysisRequestTimeoutMs = 24_000;
 const generationRequestTimeoutMs = 45_000;
@@ -42,9 +63,6 @@ const reasoningTagsTimeoutMs = 75_000;
 const reasoningRetryTimeoutMs = 120_000;
 const maxReferenceImageBytes = 50 * 1024 * 1024;
 const maxRetries = 1;
-// 图像生成链路更易遇到 “other side closed” 等瞬时网络错误，
-// 单次重试在长耗时请求下成功率高，且仍受 imageGenerationRequestTimeoutMs 总截止时间约束。
-const imageGenerationMaxRetries = 2;
 const retryBaseDelayMs = 400;
 const maxVisionImageBytes = 8 * 1024 * 1024;
 const maxVisionInlineOriginalBytes = 768 * 1024;
@@ -115,7 +133,7 @@ export async function analyzePromptRemotely(
     let parsedAnalysis: RemotePromptAnalysisV2;
     try {
       const content = readAssistantContent(response);
-      parsedAnalysis = parseRemotePromptAnalysisV2Content(content);
+      parsedAnalysis = parseRemotePromptAnalysisV2Content(content, payload.target);
     } catch (contentError) {
       // 以下两种情况都会触发重试：
       // 1. 某些模型对 response_format: json_object 支持不佳，返回 200 但 content 为 null。
@@ -149,7 +167,7 @@ export async function analyzePromptRemotely(
           retryTimeoutMs,
         );
         const retryContent = readAssistantContent(response);
-        parsedAnalysis = parseRemotePromptAnalysisV2Content(retryContent);
+        parsedAnalysis = parseRemotePromptAnalysisV2Content(retryContent, payload.target);
       } else {
         throw contentError;
       }
@@ -436,7 +454,7 @@ export async function reverseImagePromptRemotely(
 }
 
 
-export async function testOpenAiCompatibleConnection(settings: AiProviderSettings): Promise<{ connected: true }> {
+export async function testRemoteConnection(settings: AiProviderSettings): Promise<{ connected: true }> {
   assertRemoteSettings(settings);
 
   await requestChatCompletions(
@@ -456,15 +474,15 @@ export async function testOpenAiCompatibleConnection(settings: AiProviderSetting
   return { connected: true };
 }
 
-export async function listOpenAiCompatibleModels(settings: AiProviderSettings): Promise<AiProviderModelSettings[]> {
+export async function listRemoteModels(settings: AiProviderSettings): Promise<AiProviderModelSettings[]> {
   assertModelListSettings(settings);
 
-  const endpoint = normalizeOpenAiCompatibleModelsEndpoint(settings.baseUrl);
+  const endpoint = normalizeModelsEndpoint(settings.baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
 
   try {
-    const response = await fetch(endpoint, {
+    const response = await platformFetch(endpoint, {
       headers: {
         Authorization: `Bearer ${settings.apiKey}`,
       },
@@ -478,7 +496,17 @@ export async function listOpenAiCompatibleModels(settings: AiProviderSettings): 
     }
 
     try {
-      return parseOpenAiCompatibleModels(JSON.parse(responseText) as unknown);
+      const models = parseRemoteModels(JSON.parse(responseText) as unknown);
+      if (!isAgnesBaseUrl(settings.baseUrl)) {
+        return models;
+      }
+      const knownVideoModels: AiProviderModelSettings[] = [
+        { id: "agnes-video-v2.0", label: "Agnes Video v2.0", capabilities: ["video-generation"] },
+        { id: "agnes-video-2.5", label: "Agnes Video 2.5", capabilities: ["video-generation"] },
+        { id: "agnes-video-2.5-flash", label: "Agnes Video 2.5 Flash", capabilities: ["video-generation"] },
+      ];
+      const existingIds = new Set(models.map((model) => model.id.toLowerCase()));
+      return [...models, ...knownVideoModels.filter((model) => !existingIds.has(model.id.toLowerCase()))].slice(0, 80);
     } catch (error) {
       if (error instanceof AppError) {
         throw error;
@@ -501,7 +529,7 @@ export async function listOpenAiCompatibleModels(settings: AiProviderSettings): 
   }
 }
 
-export function normalizeOpenAiCompatibleEndpoint(baseUrl: string): string {
+export function normalizeChatEndpoint(baseUrl: string): string {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
 
   if (!normalizedBaseUrl) {
@@ -520,14 +548,30 @@ export function normalizeOpenAiCompatibleEndpoint(baseUrl: string): string {
     throw new AppError("AI_BASE_URL_INVALID", "AI 接口地址必须以 http 或 https 开头。");
   }
 
+  if (isAgnesBaseUrl(parsedUrl.toString())) {
+    parsedUrl.hostname = "apihub.agnes-ai.com";
+    parsedUrl.pathname = "/v1/chat/completions";
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString().replace(/\/+$/, "");
+  }
+
   if (parsedUrl.pathname.endsWith("/chat/completions")) {
-    return parsedUrl.toString();
+    return parsedUrl.toString().replace(/\/+$/, "");
+  }
+
+  if (/\/images\/(?:generations|edits)\/?$/i.test(parsedUrl.pathname)) {
+    parsedUrl.pathname = parsedUrl.pathname.replace(
+      /\/images\/(?:generations|edits)\/?$/i,
+      "/chat/completions",
+    );
+    return parsedUrl.toString().replace(/\/+$/, "");
   }
 
   return `${parsedUrl.toString().replace(/\/+$/, "")}/chat/completions`;
 }
 
-export function normalizeOpenAiCompatibleModelsEndpoint(baseUrl: string): string {
+export function normalizeModelsEndpoint(baseUrl: string): string {
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
 
   if (!normalizedBaseUrl) {
@@ -546,18 +590,34 @@ export function normalizeOpenAiCompatibleModelsEndpoint(baseUrl: string): string
     throw new AppError("AI_BASE_URL_INVALID", "AI 接口地址必须以 http 或 https 开头。");
   }
 
+  if (isAgnesBaseUrl(parsedUrl.toString())) {
+    parsedUrl.hostname = "apihub.agnes-ai.com";
+    parsedUrl.pathname = "/v1/models";
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString().replace(/\/+$/, "");
+  }
+
   if (parsedUrl.pathname.endsWith("/models")) {
-    return parsedUrl.toString();
+    return parsedUrl.toString().replace(/\/+$/, "");
   }
 
   if (parsedUrl.pathname.endsWith("/chat/completions")) {
     return `${parsedUrl.toString().replace(/\/chat\/completions\/?$/i, "")}/models`;
   }
 
+  if (/\/images\/(?:generations|edits)\/?$/i.test(parsedUrl.pathname)) {
+    parsedUrl.pathname = parsedUrl.pathname.replace(
+      /\/images\/(?:generations|edits)\/?$/i,
+      "/models",
+    );
+    return parsedUrl.toString().replace(/\/+$/, "");
+  }
+
   return `${parsedUrl.toString().replace(/\/+$/, "")}/models`;
 }
 
-export function parseOpenAiCompatibleModels(input: unknown): AiProviderModelSettings[] {
+export function parseRemoteModels(input: unknown): AiProviderModelSettings[] {
   if (!isRecord(input) || !Array.isArray(input.data)) {
     throw new AppError("AI_REMOTE_RESPONSE_INVALID", "模型列表返回结构不合法。");
   }
@@ -623,7 +683,7 @@ function legacyAnalysisFromRecord(parsed: Record<string, unknown>): RemotePrompt
  * read then lifted to V2 at reduced confidence so downstream scoring can tell
  * verified structure apart from legacy guesses.
  */
-export function parseRemotePromptAnalysisV2Content(content: string): RemotePromptAnalysisV2 {
+export function parseRemotePromptAnalysisV2Content(content: string, target?: AiAnalyzePromptPayload["target"]): RemotePromptAnalysisV2 {
   const parsed = parseJsonObject(stripJsonFence(content));
 
   if (!isRecord(parsed)) {
@@ -631,7 +691,7 @@ export function parseRemotePromptAnalysisV2Content(content: string): RemotePromp
   }
 
   return (
-    normalizeRemotePromptAnalysisV2(parsed) ??
+    normalizeRemotePromptAnalysisV2(parsed, { allowEmptyTags: target === "image-tags" || target === "prompt-tags" }) ??
     remoteAnalysisV2FromLegacy(legacyAnalysisFromRecord(parsed))
   );
 }
@@ -767,7 +827,7 @@ export async function requestChatCompletions(
   timeoutMs = requestTimeoutMs,
   deadlineMs = Date.now() + timeoutMs,
 ): Promise<unknown> {
-  const endpoint = normalizeOpenAiCompatibleEndpoint(settings.baseUrl);
+  const endpoint = normalizeChatEndpoint(settings.baseUrl);
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const remainingMs = deadlineMs - Date.now();
@@ -779,7 +839,7 @@ export async function requestChatCompletions(
     const timer = setTimeout(() => controller.abort(), remainingMs);
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await platformFetch(endpoint, {
         body: JSON.stringify(body),
         headers: {
           Authorization: `Bearer ${settings.apiKey}`,
@@ -1145,27 +1205,7 @@ export function buildPromptCategoryAnalysisUserText(payload: AiAnalyzePromptPayl
 
 
 export function buildPromptTagsAnalysisUserText(payload: AiAnalyzePromptPayload): string {
-  return [
-    "请只根据当前提示词生成标签，不要参考效果图、缩略图或已有标签。",
-    `提示词：\n${payload.prompt}`,
-    negativePromptExclusionNotice,
-    payload.title ? `素材标题（辅助参考，其中的日期与编号忽略）：${payload.title}` : "",
-    "先逐句通读提示词，把明确写出的画面事实抽出来，再归入下列几类，只保留原文写到的：",
-    "① 景别：特写、近景、中景、全景、远景、半身、七分身",
-    "② 机位角度：平视、俯拍、仰拍、侧面、背影、过肩、低角度、高角度",
-    "③ 构图：三分构图、中心构图、对称构图、引导线、框架构图、留白",
-    "④ 光学产物：自然光斑、丁达尔光、轮廓光、光晕、镜头耀斑、斑驳树影、剪影（光源方向与性质属于分类维度「光线条件」，不要在标签里重复）",
-    "⑤ 具体事物：道具、场景元素、单件衣物与配饰、可见文字与品牌标识",
-    "风格、情绪、色彩体系、技术手法、应用场景、发布媒介、文化语境、时代风格、人物题材、服饰造型由分类识别负责，标签不要重复这些维度。",
-    "标签必须是原子词：不要把上述维度加形容词拼成复合标签（如「柔和暖调自然光」「低饱和暖色调」「极致高级感」「浓厚复古风」），维度交分类，标签只写原文写明的具体事物。",
-    "事物类标签（衣物、场景、道具、器物、家具、陈设、背景、台面、餐具等）用不带修饰的核心名词：不要在名词上叠加颜色、材质、风格、年代、状态等修饰（不写「红色丝绸连衣裙」「现代简约客厅」「水泥质感台面」，写「连衣裙」「客厅」「台面」），被剥离的颜色/材质/风格交对应分类维度，不要再作为该事物的附属标签重复；绿叶、白花、红唇这类颜色即主体特征的词保留原样。",
-    "只提取文本中明确写出的内容，提示词没写的不要补充推断，最多 15 个。",
-    "不要输出维度名/菜单名（如“摄影风格”“景别”“构图逻辑”），应输出该维度下的实际取值（如“近景”“中心构图”“紫色霓虹光”）。",
-    "标签不是参数：不得输出位置关系句、生成要求、参考图说明、变量名或完整提示词片段。",
-    "不得输出模型名、平台名、SEO 词或营销元信息。标签必须是简体中文短词或短语。",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  return [tagRecognitionPolicy, `提示词：\n${payload.prompt}`, negativePromptExclusionNotice].join("\n\n");
 }
 
 export function buildImageAnalysisUserText(payload: AiAnalyzePromptPayload): string {
@@ -1218,24 +1258,8 @@ export function buildImageAnalysisUserText(payload: AiAnalyzePromptPayload): str
   }
 
   return [
-    "请只根据参考图生成图片标签，不要分析分类或提示词。",
-    "必须先观察画面事实，再输出具体结果标签。",
-    "人物题材、服饰造型、场景、季节、光线条件、风格、情绪、色彩体系、技术手法、应用场景、发布媒介、文化语境、时代风格由分类识别负责，标签不要重复这些维度。",
-    "标签必须是原子词：不要把上述维度加形容词拼成复合标签（如「柔和暖调自然光」「低饱和暖色调」「极致高级感」「浓厚复古风」），维度交分类，标签只写画面里能指出的具体事物。",
-    "事物类标签（衣物、场景、道具、器物、家具、陈设、背景、台面、餐具等）用不带修饰的核心名词：不要在名词上叠加颜色、材质、风格、年代、状态等修饰（不写「红色丝绸连衣裙」「现代简约客厅」「水泥质感台面」，写「连衣裙」「客厅」「台面」），被剥离的颜色/材质/风格交对应分类维度，不要再作为该事物的附属标签重复；绿叶、白花、红唇这类颜色即主体特征的词保留原样。",
-    "标签写画面执行层面的具体事实：景别（特写/近景/中景/全景/远景）、机位角度（平视/俯拍/仰拍/侧面/背影）、构图（三分构图/中心构图/对称构图/引导线/留白）、光学产物（自然光斑/丁达尔光/轮廓光/剪影），以及道具、场景元素、单件衣物与配饰、可见文字。",
-    "关键边界（必须遵守）：",
-    "①食品/CG动态质感：芝士拉丝/奶浆流动/融化流体等可摆拍的黏滞延展→输出具体描述标签（如「芝士拉丝」「融化芝士」），不触发技术手法分类「高速凝固」；「高速凝固」由分类识别决定，标签不输出该维度叶子名本身。",
-    "②CG/合成悬浮元素：3D或合成画面中的飘带/悬浮食材/失重组合→输出事实标签（如「悬浮构图」「奶浆飘带」「失重悬浮」），不视为真实拍摄动态。",
-    "③局部手部入画：手持道具/局部手部动作→输出动作事实标签（如「手持餐铲」「手持团扇」），不触发人物题材分类，不重复到分类维度。",
-    "④食品/产品剖面细节：剖面/切面/内馅/流心→输出质感标签（如「剖面展示」「流心馅」「夹心层次」「气孔纹理」）；颜色/材质等修饰不写进食品名词（写「流心馅」而非「琥珀色流心馅」），但剖面/流心/拉丝/融化/悬浮等动态或结构描述是内容本身、无对应分类维度可归，予以保留；不新增内容类型分类。",
-    "⑤画面版式与多品陈列：海报版式→「竖版海报」「横版海报」；多件商品/多杯同框→「多产品组合」「三款同框」「阶梯式陈列」；均为标签，不影响分类。",
-    "⑥商业布景道具：合成/模拟布景元素（模拟水面/假球场线/合成天空）→以真实可见的具体物品为标签（如「模拟水面」「同心水波纹」「荷叶」），不误写成真实户外场景词汇。",
-    "不要输出维度名或菜单名，例如不要输出”摄影风格””景别””构图逻辑””图像风格””镜头器材””光影表现”，而要输出这些维度下的实际取值。",
-    "应该输出实际观察到的取值，例如“近景”“仰拍”“三分构图”“逆光”“长裙”“团扇”“栈道”“湖水”。",
-    "标签不是参数：不得输出位置关系句、生成要求、参考图说明、保留/避免约束、画面目标、变量名或完整提示词片段。",
-    "不得输出模型名、平台名、SEO 词、prompt/gallery/ecommerce 等不可见来源或营销元信息；截图里真实可见的站点标识可作为短标签保留。",
-    "标签必须是简体中文短词或短语，最多 15 个。",
+    "请只根据参考图生成图片标签，不要参考标题、旧标签或提示词。",
+    tagRecognitionPolicy,
   ].join("\n");
 }
 
@@ -1257,7 +1281,7 @@ const v2CategoryOutputSpec = [
 ];
 
 const v2TagOutputSpec = [
-  '每个 tags 元素形如 {"label":"标签","dimension":"composition","confidence":0.7,"evidence":["依据短语"]}。',
+  '每个 tags 元素形如 {"label":"近景","group":"视觉表现/构图与景别","dimension":"composition","confidence":0.9,"evidence":["依据短语"]}。group 不确定时填写“待归纳”。',
   "dimension 从 subject、scene、style、composition、lighting、color、mood、technique、era、other 中选最贴切的一个，拿不准填 other；confidence 取 0-1 小数；evidence 填 1-2 条原文/画面依据短语。",
   '本任务只输出标签：categories 必须为空数组 []，safety 固定为 {"rating":"unknown","confidence":0,"evidence":[]}。',
 ];
@@ -1315,41 +1339,11 @@ export function buildSystemAnalysisContent(target: AiAnalyzePromptPayload["targe
   }
 
   if (target === "image-tags") {
-    return [
-      ...v2JsonContractBase,
-      "你是图片标签识别器。只能根据参考图生成特征标签（tags），不生成分类。",
-      "分工：人物题材、服饰造型、场景类型、场景细分、季节时令、光线条件、风格流派、情绪氛围、色彩体系、技术手法、应用场景、发布媒介、文化语境、时代风格这 14 个维度已由分类识别负责，标签不要再输出这些维度的词（如少女写真、汉服造型、写实主义、宁静平和、暖色主导、浅景深、商业广告、中式国风、复古怀旧）。",
-      "标签负责画面执行层面的具体事实，必须覆盖这几类：",
-      "① 景别：特写、近景、中景、全景、远景、半身、七分身",
-      "② 机位角度：平视、俯拍、仰拍、侧面、背影、过肩、低角度、高角度",
-      "③ 构图：三分构图、中心构图、对称构图、引导线、框架构图、留白",
-      "④ 光学产物：自然光斑、丁达尔光、轮廓光、光晕、镜头耀斑、斑驳树影、剪影（光源方向与性质属于分类维度「光线条件」，不要在标签里重复）",
-      "⑤ 具体事物：道具、场景元素、单件衣物与配饰、可见文字与品牌标识",
-      "⑥ 商业画面专项：画面版式（竖版海报/横版海报）、多品陈列（多产品组合/三款同框/阶梯式陈列）、食品动态质感（芝士拉丝/剖面展示/流心/奶浆飘带）、CG悬浮元素（悬浮构图/失重悬浮）、局部手部动作（手持餐铲/持团扇）、商业布景道具（模拟水面/同心水波纹/荷叶）",
-      "「高速凝固」是技术手法的分类维度叶子，由分类识别负责；标签只写具体动态事实（如「芝士拉丝」「牛奶飞溅」），不输出「高速凝固」本身。",
-      "示例：近景、仰拍、三分构图、轮廓光、长裙、团扇、发簪、栈道、湖水、绿叶、芝士拉丝、竖版海报、模拟水面、手持餐铲。",
-      "禁止返回图像分类名（如产品摄影、数字插画、3D角色），也禁止红色产品摄影、咖啡摄影等伪分类；颜色+物体应拆成「红色」「产品主体」而不是新类型。",
-      "标签必须是不可再拆的原子词：不要把光线/色彩/风格/情绪/技术手法/时代/文化/季节等分类维度加形容词拼成复合标签（如「柔和暖调自然光」「低饱和暖色调」「极致高级感」「浓厚复古风」「宁静温柔氛围」）；这些维度一律交分类识别，标签只写画面里能指出的具体事物、单件衣饰配饰、动作与可见文字。",
-      "事物类标签（衣物、场景、道具、器物、家具、陈设、背景、台面、餐具等）一律用不带修饰的核心名词：不要在名词上叠加颜色、材质、风格、年代、状态等修饰（不写「红色丝绸连衣裙」「现代简约客厅」「水泥质感台面」，写「连衣裙」「客厅」「台面」）；被剥离的颜色、材质、风格等交对应分类维度识别，不要再作为该事物的附属标签重复。绿叶、白花、红唇这类颜色本身即主体特征的词保留原样。",
-      "tags 数组最多 15 个元素，label 用简体中文短标签。",
-      "禁止维度名本身（不要返回「光影」「风格」当标签）；禁止模型名、平台名、SEO 词。",
-      ...v2TagOutputSpec,
-    ].join("\n");
+    return [...v2JsonContractBase, "仅根据图片可见事实识别标签。", tagRecognitionPolicy, ...v2TagOutputSpec].join("\n");
   }
 
   if (target === "prompt-tags") {
-    return [
-      ...v2JsonContractBase,
-      "你是提示词标签识别器。只能根据提示词文本生成特征标签（tags），不生成分类。",
-      "分工：人物题材、服饰造型、场景类型、场景细分、季节时令、光线条件、风格流派、情绪氛围、色彩体系、技术手法、应用场景、发布媒介、文化语境、时代风格这 14 个维度已由分类识别负责，标签不要再输出这些维度的词（如少女写真、汉服造型、写实主义、宁静平和、暖色主导、浅景深、商业广告、中式国风、复古怀旧）。",
-      "标签负责提示词里写明的画面事实，覆盖这几类：景别（特写/近景/中景/全景/远景）、机位角度（平视/俯拍/仰拍/侧面/背影）、构图（三分构图/中心构图/对称构图/引导线/留白）、光学产物（自然光斑/丁达尔光/轮廓光/剪影），以及道具、场景元素、单件衣物与配饰、可见文字。",
-      "只抽取原文明确写出的内容，不要补充推断；颜色+物体拆开写。",
-      "禁止伪分类（红色产品摄影、高级感摄影等）；禁止返回图像分类名；禁止模型名、平台名、变量名、整句提示词。",
-      "标签必须是不可再拆的原子词：不要把光线/色彩/风格/情绪/技术手法/时代/文化/季节等分类维度加形容词拼成复合标签（如「柔和暖调自然光」「低饱和暖色调」「极致高级感」「浓厚复古风」「宁静温柔氛围」）；这些维度一律交分类识别，标签只写原文写明的具体事物、单件衣饰配饰、动作与可见文字。",
-      "事物类标签（衣物、场景、道具、器物、家具、陈设、背景、台面、餐具等）一律用不带修饰的核心名词：不要在名词上叠加颜色、材质、风格、年代、状态等修饰（不写「红色丝绸连衣裙」「现代简约客厅」「水泥质感台面」，写「连衣裙」「客厅」「台面」）；被剥离的颜色、材质、风格等交对应分类维度识别，不要再作为该事物的附属标签重复。绿叶、白花、红唇这类颜色本身即主体特征的词保留原样。",
-      "tags 数组最多 15 个元素。",
-      ...v2TagOutputSpec,
-    ].join("\n");
+    return [...v2JsonContractBase, "仅根据提示词明确写出的事实识别标签。", tagRecognitionPolicy, ...v2TagOutputSpec].join("\n");
   }
 
 
@@ -1747,6 +1741,8 @@ const visionModelPattern =
   /(?:vision|vl|visual|omni|gpt-4o|gpt-4\.1|gpt-5|o3|o4|gemini|pixtral|llava|qwen[^/]*vl|glm-4v|internvl|minicpm-v)/i;
 const imageGenerationModelPattern =
   /(?:dall-?e|gpt-image|flux|sdxl|stable-diffusion|\bsd[-_]|midjourney|ideogram|playground|recraft|kolors|hidream|cogview|wanxiang|tongyiwan|emi)/i;
+const videoGenerationModelPattern =
+  /(?:agnes-video|video|veo|sora|kling|runway|seedance|hailuo|pika|ltx|hunyuanvideo|wan(?:x|\s*)[\d.]*|movie-gen)/i;
 
 /**
  * 解析平台 /models 返回的单条模型，优先读取平台声明的模态字段，
@@ -1774,6 +1770,7 @@ function parseModelCapabilitiesFromFields(item: Record<string, unknown>): AiProv
   const hasImageInput = inputModalities.includes("image") || modalities.includes("image") || visionField || supportsImageField;
   // 图片「输出」只来自 output_modalities，用于判定纯生图模型。
   const hasImageOutput = outputModalities.includes("image");
+  const hasVideoOutput = outputModalities.some((value) => value === "video" || value === "video/mp4");
 
   if (!declared && !hasImageInput && !hasImageOutput) {
     return [];
@@ -1784,11 +1781,19 @@ function parseModelCapabilitiesFromFields(item: Record<string, unknown>): AiProv
     return ["image-generation"];
   }
 
+  if (hasVideoOutput) {
+    return hasImageInput ? ["text", "vision", "video-generation"] : ["video-generation"];
+  }
+
   return hasImageInput ? ["text", "vision"] : ["text"];
 }
 
 function guessModelCapabilities(modelId: string): AiProviderModelSettings["capabilities"] {
   const normalizedModelId = modelId.toLowerCase();
+
+  if (videoGenerationModelPattern.test(normalizedModelId)) {
+    return ["video-generation"];
+  }
 
   if (imageGenerationModelPattern.test(normalizedModelId)) {
     return ["image-generation"];
@@ -1916,19 +1921,28 @@ function isRecord(input: unknown): input is Record<string, unknown> {
 }
 
 
-export async function generateImagesWithOpenAiCompatible(
+export async function generateImagesWithRemoteApi(
   settings: AiProviderSettings,
   payload: AiImageGenerationPayload,
   resolvedCustomInstructions = payload.customInstructions ?? "",
+  onEndpointResolved?: (endpoint: string) => Promise<void> | void,
 ): Promise<AiImageGenerationData> {
   assertRemoteSettings(settings);
   const startedAt = Date.now();
   const batchId = randomUUID();
   const requestedCount = normalizeImageGenerationCount(payload.n);
-  const referenceImage = await resolveImageGenerationReference(payload);
-  const endpoint = referenceImage
-    ? normalizeOpenAiCompatibleImageEditsEndpoint(settings.baseUrl)
-    : normalizeOpenAiCompatibleImagesEndpoint(settings.baseUrl);
+  const referenceImages = await resolveReferenceImageUploads(payload);
+  const agnesProvider = isAgnesBaseUrl(settings.baseUrl);
+  const grokProvider = isGrokImageModel(settings.model);
+  if (referenceImages.length > 0 && grokProvider && isKnownBrokenBaigeImageEditProxy(settings.baseUrl)) {
+    throw new AppError("AI_REFERENCE_IMAGE_PROVIDER_UNSUPPORTED", "当前模型或接口不支持参考图图生图，或未正确接收参考图参数。请更换支持图生图的模型或 API 配置后重试；本次未提交请求，不会重复扣费。");
+  }
+  const normalizedReferenceImages = referenceImages.length > 0 && !agnesProvider && !grokProvider
+    ? await normalizeReferenceImagesForMultipart(referenceImages)
+    : referenceImages;
+  const useMultipartReference = normalizedReferenceImages.length > 0 && !agnesProvider && !grokProvider;
+  const endpointCandidates = getImageEndpointCandidates(settings.baseUrl, referenceImages.length > 0);
+  let endpoint = endpointCandidates[0];
   const endpointUrl = new URL(endpoint);
   const initialBody = buildImageGenerationRequestBody(settings, payload, {
     customInstructions: resolvedCustomInstructions,
@@ -1940,21 +1954,25 @@ export async function generateImagesWithOpenAiCompatible(
     customInstructionsChars: resolvedCustomInstructions.trim().length,
     endpointHost: endpointUrl.host,
     endpointPath: endpointUrl.pathname,
-    hasReference: Boolean(referenceImage),
+    hasReference: referenceImages.length > 0,
     generationProvider: payload.generationProvider ?? "api",
     model: String(initialBody.model),
     negativePromptChars: payload.negativePrompt?.trim().length ?? 0,
     notificationEnabled: payload.notificationEnabled === true,
-    outputFormat: String(initialBody.output_format),
+    outputFormat: String(initialBody.output_format ?? payload.outputFormat ?? "png"),
     promptChars: payload.prompt.trim().length,
-    quality: String(initialBody.quality),
-    referenceImageBytes: referenceImage?.bytes.byteLength,
-    referenceImageMime: referenceImage?.mime,
+    quality: String(initialBody.quality ?? payload.quality ?? "auto"),
+    referenceImageBytes: normalizedReferenceImages.length > 0
+      ? normalizedReferenceImages.reduce((sum, image) => sum + image.bytes.byteLength, 0)
+      : undefined,
+    referenceImageMime: normalizedReferenceImages[0]?.mime,
     requestedCount,
-    size: String(initialBody.size),
+    size: String(initialBody.size ?? payload.size ?? "auto"),
+    requestContentType: useMultipartReference ? "multipart/form-data" : "application/json",
   };
   const resolvedImages: ResolvedGeneratedImage[] = [];
   let requestCount = 0;
+  let endpointResolutionNotified = false;
 
   try {
     while (resolvedImages.length < requestedCount && requestCount < requestedCount) {
@@ -1966,24 +1984,74 @@ export async function generateImagesWithOpenAiCompatible(
       });
       const currentRequestContext = {
         ...requestContext,
+        endpointHost: new URL(endpoint).host,
+        endpointPath: new URL(endpoint).pathname,
         accumulatedCount: resolvedImages.length,
         requestImageCount: remainingCount,
         requestIndex: requestCount,
       };
 
       logAiEvent("info", "image-generation:request", currentRequestContext);
-      const response = await requestImageGenerations(
-        endpoint,
-        settings.apiKey,
-        () => referenceImage
-          ? buildImageEditRequestForm(settings, payload, referenceImage, {
+      const buildRequestBody = () => normalizedReferenceImages.length > 0
+        ? agnesProvider
+          ? JSON.stringify(buildImageGenerationRequestBody(settings, payload, {
+              customInstructions: resolvedCustomInstructions,
+              requestedCount: remainingCount,
+              referenceImages,
+            }))
+          : grokProvider
+            ? JSON.stringify(buildImageGenerationRequestBody(settings, payload, {
+                customInstructions: resolvedCustomInstructions,
+                requestedCount: remainingCount,
+                referenceImages,
+              }))
+            : buildImageEditRequestForm(settings, payload, normalizedReferenceImages, {
               customInstructions: resolvedCustomInstructions,
               requestedCount: remainingCount,
             })
-          : JSON.stringify(body),
-        currentRequestContext,
-      );
-      const responseImages = await resolveGeneratedImages(response);
+        : JSON.stringify(body);
+      let response: unknown;
+      let endpointWasFallback = false;
+      try {
+        response = await requestImageGenerations(
+          endpoint,
+          settings.apiKey,
+          buildRequestBody,
+          currentRequestContext,
+          { multipart: useMultipartReference },
+        );
+      } catch (error) {
+        const fallbackEndpoint = endpointCandidates[1];
+        if (!fallbackEndpoint || !shouldTryAgnesEndpointFallback(error)) {
+          throw error;
+        }
+
+        endpoint = fallbackEndpoint;
+        endpointWasFallback = true;
+        const fallbackContext = {
+          ...currentRequestContext,
+          endpointHost: new URL(endpoint).host,
+          endpointPath: new URL(endpoint).pathname,
+        };
+        logAiEvent("warn", "image-generation:endpoint-fallback", {
+          from: currentRequestContext.endpointPath,
+          to: fallbackContext.endpointPath,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        response = await requestImageGenerations(
+          endpoint,
+          settings.apiKey,
+          buildRequestBody,
+          fallbackContext,
+          { multipart: useMultipartReference },
+        );
+      }
+
+      logAiEvent("info", "image-generation:result-received", {
+        ...currentRequestContext,
+        resultCount: isRecord(response) && Array.isArray(response.data) ? response.data.length : 0,
+      });
+      const responseImages = await resolveGeneratedImages(response, endpoint, batchId);
       if (responseImages.length === 0) {
         logAiEvent("warn", "image-generation:response-empty", {
           ...currentRequestContext,
@@ -1992,12 +2060,27 @@ export async function generateImagesWithOpenAiCompatible(
         continue;
       }
 
+      if (!endpointResolutionNotified &&
+        (endpointWasFallback || (agnesProvider && endpoint !== settings.baseUrl.trim().replace(/\/+$/, ""))) &&
+        onEndpointResolved) {
+        endpointResolutionNotified = true;
+        try {
+          await onEndpointResolved(endpoint);
+        } catch (error) {
+          logAiEvent("warn", "image-generation:endpoint-persist-failed", {
+            endpointHost: new URL(endpoint).host,
+            endpointPath: new URL(endpoint).pathname,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       const acceptedImages = responseImages.slice(0, remainingCount);
       for (const image of acceptedImages) {
         try {
           validateGeneratedImageSettings(image.inspection, payload);
         } catch (error) {
-          logAiEvent("warn", "image-generation:settings-mismatch", {
+          logAiEvent("warn", "image-generation:settings-accepted-with-warning", {
             ...currentRequestContext,
             actualFormat: image.inspection.format,
             actualHasAlpha: image.inspection.hasAlpha,
@@ -2006,7 +2089,6 @@ export async function generateImagesWithOpenAiCompatible(
             code: error instanceof AppError ? error.code : "AI_IMAGE_OUTPUT_MISMATCH",
             message: error instanceof Error ? error.message : String(error),
           });
-          throw error;
         }
       }
       resolvedImages.push(...acceptedImages);
@@ -2067,12 +2149,349 @@ export async function generateImagesWithOpenAiCompatible(
   }
 }
 
+/**
+ * Agnes video generation is asynchronous: create a task, poll by video_id,
+ * then download the completed MP4 so the renderer can preview it without
+ * reaching the network directly.
+ */
+export async function generateVideosWithRemoteApi(
+  settings: AiProviderSettings,
+  payload: AiImageGenerationPayload,
+  resolvedCustomInstructions = payload.customInstructions ?? "",
+): Promise<AiImageGenerationData> {
+  assertRemoteSettings(settings);
+  if (!isAgnesBaseUrl(settings.baseUrl)) {
+    throw new AppError("AI_VIDEO_PROVIDER_UNSUPPORTED", "视频生成目前仅适配 Agnes Video 接口。");
+  }
+
+  const model = settings.model.trim();
+  if (!/^agnes-video-(?:v2\.0|2\.5(?:-flash)?)$/i.test(model)) {
+    throw new AppError("AI_VIDEO_MODEL_UNSUPPORTED", "当前视频模型暂未适配，请使用 Agnes Video v2.0、2.5 或 2.5 Flash。");
+  }
+
+  const startedAt = Date.now();
+  const references = await resolveReferenceImageUploads(payload);
+  const isFlash = /2\.5-flash$/i.test(model);
+  if (isFlash && references.length > 5) {
+    throw new AppError("AI_VIDEO_REFERENCE_LIMIT", "Agnes Video 2.5 Flash 最多支持 5 张参考图。");
+  }
+  const seconds = Math.max(4, Math.min(12, Math.round(payload.videoSeconds ?? 5)));
+  const requestedRatio = payload.ratio ?? "16:9";
+  const ratio = normalizeAgnesVideoRatio(requestedRatio);
+  const size = isFlash ? "720P" : payload.videoSize ?? "720P";
+  const body = buildAgnesVideoRequestBody(model, payload, references, {
+    customInstructions: resolvedCustomInstructions,
+    ratio,
+    seconds,
+    size,
+  });
+  const createEndpoint = normalizeAgnesVideoEndpoint(settings.baseUrl);
+  const context = {
+    endpointHost: new URL(createEndpoint).host,
+    endpointPath: new URL(createEndpoint).pathname,
+    model,
+    promptChars: payload.prompt.trim().length,
+    referenceCount: references.length,
+    ratio,
+    seconds,
+    size,
+  };
+
+  if (ratio !== requestedRatio) {
+    logAiEvent("warn", "video-generation:ratio-normalized", {
+      model,
+      requestedRatio,
+      normalizedRatio: ratio,
+    });
+  }
+
+  logAiEvent("info", "video-generation:request", context);
+  const createResponse = await requestAgnesVideoJson(createEndpoint, settings.apiKey, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const videoId = readVideoId(createResponse);
+  if (!videoId) {
+    throw new AppError("AI_VIDEO_RESPONSE_INVALID", "视频接口未返回 video_id，无法查询任务进度。");
+  }
+
+  const finalTask = await pollAgnesVideoTask(settings.apiKey, videoId, model);
+  const videoUrl = readVideoUrl(finalTask);
+  if (!videoUrl) {
+    throw new AppError("AI_VIDEO_RESPONSE_INVALID", "视频任务已完成，但接口未返回可下载的视频地址。");
+  }
+
+  const downloaded = await fetchGeneratedVideoBytes(videoUrl);
+  const dataUrl = `data:${downloaded.mime};base64,${downloaded.buffer.toString("base64")}`;
+  logAiEvent("info", "video-generation:done", {
+    ...context,
+    videoId,
+    durationMs: Date.now() - startedAt,
+    bytes: downloaded.buffer.byteLength,
+  });
+  return {
+    images: [{ dataUrl, revisedPrompt: null, mediaType: "video" }],
+    mediaType: "video",
+    model,
+  };
+}
+
+export function buildAgnesVideoRequestBody(
+  model: string,
+  payload: AiImageGenerationPayload,
+  references: ReferenceImageUpload[],
+  options: { customInstructions: string; ratio: AiImageGenerationRatio; seconds: number; size: string },
+): Record<string, unknown> {
+  const prompt = buildVideoGenerationPrompt(payload.prompt, payload.negativePrompt, options.customInstructions);
+  const isV20 = /agnes-video-v2\.0/i.test(model);
+  const ratio = normalizeAgnesVideoRatio(options.ratio);
+  const body: Record<string, unknown> = {
+    model,
+    prompt,
+  };
+
+  if (isV20) {
+    const [width, height] = getAgnesVideoDimensions(options.size, ratio);
+    body.width = width;
+    body.height = height;
+    body.num_frames = Math.round((options.seconds * 24 - 1) / 8) * 8 + 1;
+    body.frame_rate = 24;
+    if (payload.negativePrompt?.trim()) {
+      body.negative_prompt = payload.negativePrompt.trim();
+    }
+    if (references.length === 1) {
+      body.image = referenceImageToDataUrl(references[0]);
+    } else if (references.length > 1) {
+      body.extra_body = {
+        image: references.map(referenceImageToDataUrl),
+        mode: "keyframes",
+      };
+    }
+    return body;
+  }
+
+  // Agnes Video 2.5 and Flash currently only accept one output per task.
+  body.n = 1;
+  body.seconds = String(options.seconds);
+  body.size = options.size;
+  body.aspect_ratio = ratio;
+  if (references.length === 0) {
+    body.mode = "text";
+  } else if (references.length <= 2) {
+    body.mode = "keyframe";
+    body.first_frame = referenceImageToDataUrl(references[0]);
+    if (references[1]) {
+      body.last_frame = referenceImageToDataUrl(references[1]);
+    }
+  } else {
+    body.mode = "reference";
+    const referenceLimit = /agnes-video-2\.5-flash$/i.test(model) ? 5 : references.length;
+    body.images = references.slice(0, referenceLimit).map(referenceImageToDataUrl);
+    body.prompt = appendAgnesReferenceImageHints(prompt, referenceLimit);
+  }
+  return body;
+}
+
+/** Agnes Video 2.5 documents a narrower ratio allow-list than the image canvas. */
+export function normalizeAgnesVideoRatio(ratio: AiImageGenerationRatio): Exclude<AiImageGenerationRatio, "2:3" | "3:2"> {
+  if (ratio === "2:3") return "3:4";
+  if (ratio === "3:2") return "4:3";
+  return ratio;
+}
+
+function appendAgnesReferenceImageHints(prompt: string, count: number): string {
+  if (/<Picture\s+\d+>/i.test(prompt)) {
+    return prompt;
+  }
+  const placeholders = Array.from({ length: count }, (_, index) => `<Picture ${index + 1}>`).join("、");
+  return `${prompt}\n\n参考素材：${placeholders}。请将这些图片作为主体、构图和视觉风格参考。`;
+}
+
+function buildVideoGenerationPrompt(prompt: string, negativePrompt?: string, customInstructions?: string): string {
+  const positive = prompt.trim();
+  if (!positive) {
+    throw new AppError("AI_PROMPT_EMPTY", "请输入视频提示词。");
+  }
+  const suffix = [
+    negativePrompt?.trim() ? `避免：${negativePrompt.trim()}` : "",
+    customInstructions?.trim() ?? "",
+  ].filter(Boolean);
+  return suffix.length > 0 ? `${positive}\n\n${suffix.join("\n\n")}` : positive;
+}
+
+export function normalizeAgnesVideoEndpoint(baseUrl: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl.trim());
+  } catch {
+    throw new AppError("AI_BASE_URL_INVALID", "AI 接口地址不合法。");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new AppError("AI_BASE_URL_INVALID", "AI 接口地址必须以 http 或 https 开头。");
+  }
+  parsed.hostname = "apihub.agnes-ai.com";
+  parsed.pathname = "/v1/videos";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+function getAgnesVideoDimensions(size: string, ratio: AiImageGenerationRatio): [number, number] {
+  const base = size === "2K" ? 2048 : size === "960P" ? 1728 : 1280;
+  const [ratioWidth, ratioHeight] = ratio.split(":").map(Number);
+  const height = Math.max(256, Math.round(base * ratioHeight / ratioWidth));
+  return [base, height];
+}
+
+async function requestAgnesVideoJson(
+  endpoint: string,
+  apiKey: string,
+  options: { method: "GET" | "POST"; body?: string },
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const response = await platformFetch(endpoint, {
+      method: options.method,
+      body: options.body,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+      },
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new AppError("AI_VIDEO_REQUEST_FAILED", buildRemoteRequestFailureMessage(response.status, responseText));
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch {
+      throw new AppError("AI_VIDEO_RESPONSE_INVALID", "视频接口返回的响应不是有效 JSON。");
+    }
+    if (!isRecord(parsed)) {
+      throw new AppError("AI_VIDEO_RESPONSE_INVALID", "视频接口返回了无效任务数据。");
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new AppError("AI_VIDEO_TIMEOUT", "视频任务请求超时，请稍后重试。");
+    }
+    throw new AppError("AI_VIDEO_NETWORK_FAILED", `视频接口请求失败：${extractNetworkErrorDetail(error) || "请检查网络或代理设置。"}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function pollAgnesVideoTask(apiKey: string, videoId: string, model: string): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 20 * 60_000;
+  const parsedBase = new URL("https://apihub.agnes-ai.com/agnesapi");
+  parsedBase.searchParams.set("video_id", videoId);
+  parsedBase.searchParams.set("model_name", model);
+  let lastStatus = "";
+  while (Date.now() < deadline) {
+    await sleep(1_500);
+    const task = await requestAgnesVideoJson(parsedBase.toString(), apiKey, { method: "GET" });
+    const status = typeof task.status === "string" ? task.status.trim().toLowerCase() : "";
+    if (status !== lastStatus) {
+      logAiEvent("info", "video-generation:status", { videoId, model, status, progress: task.progress });
+      lastStatus = status;
+    }
+    if (status === "completed" || status === "succeeded" || status === "success") return task;
+    if (status === "failed" || status === "cancelled" || status === "canceled") {
+      const detail = readVideoError(task);
+      throw new AppError("AI_VIDEO_TASK_FAILED", detail ? `视频生成失败：${detail}` : "视频生成失败，请检查提示词和参考素材。");
+    }
+  }
+  throw new AppError("AI_VIDEO_TIMEOUT", "视频生成等待超时，请稍后查看服务商任务状态。");
+}
+
+function readVideoId(task: Record<string, unknown>): string {
+  for (const key of ["video_id", "id", "task_id"]) {
+    if (typeof task[key] === "string" && task[key].trim()) return task[key].trim();
+  }
+  return "";
+}
+
+function readVideoUrl(task: Record<string, unknown>): string {
+  const metadata = isRecord(task.metadata) ? task.metadata : null;
+  return typeof metadata?.url === "string" ? metadata.url.trim() : typeof task.url === "string" ? task.url.trim() : "";
+}
+
+function readVideoError(task: Record<string, unknown>): string {
+  const error = isRecord(task.error) ? task.error : null;
+  return typeof error?.message === "string" ? error.message.trim() : typeof task.message === "string" ? task.message.trim() : "";
+}
+
+async function fetchGeneratedVideoBytes(url: string): Promise<{ buffer: Buffer; mime: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20 * 60_000);
+  try {
+    const response = await platformFetch(url, { signal: controller.signal });
+    if (!response.ok) throw new AppError("AI_VIDEO_DOWNLOAD_FAILED", `生成视频下载失败，状态码 ${response.status}。`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.length === 0) throw new AppError("AI_VIDEO_OUTPUT_INVALID", "生成视频内容为空。");
+    const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim() || "video/mp4";
+    return { buffer, mime: mime.startsWith("video/") ? mime : "video/mp4" };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    if (error instanceof Error && error.name === "AbortError") throw new AppError("AI_VIDEO_TIMEOUT", "生成视频下载超时。");
+    throw new AppError("AI_VIDEO_DOWNLOAD_FAILED", "生成视频下载失败，请检查网络或服务商返回的视频地址。");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 export function buildImageGenerationRequestBody(
   settings: AiProviderSettings,
   payload: AiImageGenerationPayload,
-  options: { customInstructions?: string; requestedCount?: number } = {},
+  options: {
+    customInstructions?: string;
+    requestedCount?: number;
+    referenceImages?: ReferenceImageUpload[];
+  } = {},
 ): Record<string, unknown> {
+  if (isAgnesBaseUrl(settings.baseUrl)) {
+    const referenceImages = options.referenceImages ?? [];
+    const agnesSize = resolveAgnesImageRequestSize(settings.model, payload);
+    return {
+      model: settings.model,
+      prompt: buildImageGenerationPrompt(
+        payload.prompt,
+        payload.negativePrompt,
+        options.customInstructions ?? payload.customInstructions,
+      ),
+      // Agnes requires size. Image 2.1 additionally benefits from the native
+      // tier + ratio contract; custom dimensions remain supported for 2.0 and
+      // for callers that explicitly request a historical exact size.
+      size: agnesSize.size,
+      ...(agnesSize.ratio ? { ratio: agnesSize.ratio } : {}),
+      ...(referenceImages.length > 0
+        ? {
+            // Agnes accepts reference images and the output mode under extra_body.
+            // URL output is intentional: the provider's Base64 response path can
+            // leave valid requests open indefinitely, while URL output completes
+            // normally. resolveGeneratedImages downloads the URL and normalizes
+            // it to the same data URL returned by other providers.
+            extra_body: {
+              image: referenceImages.map(referenceImageToDataUrl),
+              response_format: "url",
+            },
+          }
+        : {
+            // Keep Agnes image generation on the URL response path. The service
+            // accepts return_base64, but valid Base64 requests have been observed
+            // to stay open until the client timeout; URL responses are reliable.
+            extra_body: {
+              response_format: "url",
+            },
+          }),
+    };
+  }
+
   const body: Record<string, unknown> = {
     model: settings.model,
     prompt: buildImageGenerationPrompt(
@@ -2086,11 +2505,124 @@ export function buildImageGenerationRequestBody(
     output_format: payload.outputFormat ?? "png",
   };
 
+  // Grok 默认返回临时 CDN 地址；直接返回图片可避免生成已计费但 CDN 不可达。
+  // 不向不支持 response_format 的其他模型强加该参数。
+  if (isGrokImageModel(settings.model)) {
+    body.response_format = "b64_json";
+    // xAI image editing is a JSON contract. OpenAI-compatible multipart
+    // uploads are rejected with HTTP 415 by the documented /images/edits API.
+    delete body.size;
+    delete body.output_format;
+    // Quality is supported only by 2.0; xAI has no GPT-style "high" tier.
+    delete body.quality;
+    if (settings.model.trim().toLowerCase() === "grok-imagine-image-2.0" && payload.quality) {
+      body.quality = payload.quality === "high" ? "medium" : payload.quality;
+    }
+    if (payload.ratio) {
+      body.aspect_ratio = payload.ratio;
+    }
+    const resolution = resolveGrokResolution(payload.size);
+    if (resolution) body.resolution = resolution;
+    const references = options.referenceImages ?? [];
+    if (references.length === 1) {
+      body.image = { type: "image_url", url: referenceImageToDataUrl(references[0]) };
+    } else if (references.length > 1) {
+      body.images = references.map((reference) => ({
+        type: "image_url",
+        url: referenceImageToDataUrl(reference),
+      }));
+    }
+    return body;
+  }
+
   if (payload.background && payload.background !== "auto") {
     body.background = payload.background;
   }
 
   return body;
+}
+
+function resolveGrokResolution(size: AiImageGenerationPayload["size"]): "1k" | "2k" | undefined {
+  if (!size || size === "auto") return undefined;
+  const [width, height] = size.split("x").map(Number);
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return undefined;
+  // Use pixel area: a wide 1K image can have a long edge above 1500px.
+  return width * height > 2048 * 1024 ? "2k" : "1k";
+}
+
+export function normalizeAgnesImageSize(size: AiImageGenerationPayload["size"]): string {
+  if (!size || size === "auto") {
+    return "1024x1024";
+  }
+
+  const match = /^(\d+)x(\d+)$/i.exec(size.trim());
+  if (!match) {
+    return "1024x1024";
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+    return "1024x1024";
+  }
+
+  // Agnes exposes 1K/2K/3K/4K output tiers. Preserve an explicit user-selected
+  // dimension (including 2K/4K) instead of silently changing the requested tier.
+  return `${width}x${height}`;
+}
+
+const agnesOutputDimensions: Readonly<Record<AiImageGenerationRatio, Readonly<Record<AiImageGenerationResolution, readonly [number, number]>>>> = {
+  "1:1": { "1K": [1024, 1024], "2K": [2048, 2048], "3K": [3072, 3072], "4K": [4096, 4096] },
+  "3:4": { "1K": [864, 1152], "2K": [1728, 2304], "3K": [2592, 3456], "4K": [3456, 4608] },
+  "4:3": { "1K": [1152, 864], "2K": [2304, 1728], "3K": [3456, 2592], "4K": [4608, 3456] },
+  "16:9": { "1K": [1312, 736], "2K": [2624, 1472], "3K": [3936, 2208], "4K": [5248, 2944] },
+  "9:16": { "1K": [736, 1312], "2K": [1472, 2624], "3K": [2208, 3936], "4K": [2944, 5248] },
+  "2:3": { "1K": [832, 1248], "2K": [1664, 2496], "3K": [2496, 3744], "4K": [3328, 4992] },
+  "3:2": { "1K": [1248, 832], "2K": [2496, 1664], "3K": [3744, 2496], "4K": [4992, 3328] },
+  "21:9": { "1K": [1568, 672], "2K": [3136, 1344], "3K": [4704, 2016], "4K": [6272, 2688] },
+};
+
+type AgnesImageRequestSize = {
+  size: string;
+  ratio?: AiImageGenerationRatio;
+};
+
+/** 将画布传来的原生像素尺寸转换为 Agnes 2.1 推荐的档位 + 比例。 */
+export function resolveAgnesImageRequestSize(
+  model: string,
+  payload: Pick<AiImageGenerationPayload, "size" | "ratio">,
+): AgnesImageRequestSize {
+  const normalizedSize = normalizeAgnesImageSize(payload.size);
+  const ratio = payload.ratio;
+  if (!/^agnes-image-2\.1(?:-flash)?$/i.test(model.trim()) || !ratio) {
+    return { size: normalizedSize };
+  }
+
+  const [width, height] = normalizedSize.split("x").map(Number);
+  const tiers = agnesOutputDimensions[ratio];
+  const exactTier = (Object.entries(tiers) as Array<[AiImageGenerationResolution, readonly [number, number]]>)
+    .find(([, dimensions]) => dimensions[0] === width && dimensions[1] === height)?.[0];
+  if (exactTier) {
+    return { size: exactTier, ratio };
+  }
+
+  // Older drafts may contain formula-derived dimensions such as 1280x1920.
+  // Pick the closest native tier so a saved 2K selection does not silently
+  // become a 1K request when upgraded.
+  let nearestTier: AiImageGenerationResolution = "1K";
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const [tier, dimensions] of Object.entries(tiers) as Array<[AiImageGenerationResolution, readonly [number, number]]>) {
+    const distance = Math.abs(dimensions[0] - width) + Math.abs(dimensions[1] - height);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestTier = tier;
+    }
+  }
+  return { size: nearestTier, ratio };
+}
+
+function referenceImageToDataUrl(referenceImage: ReferenceImageUpload): string {
+  return `data:${referenceImage.mime};base64,${referenceImage.bytes.toString("base64")}`;
 }
 
 export type SupportedImageMime = "image/jpeg" | "image/png" | "image/webp";
@@ -2111,22 +2643,29 @@ type ResolvedGeneratedImage = {
   revisedPrompt: string | null;
 };
 
-async function resolveImageGenerationReference(
-  payload: Pick<AiImageGenerationPayload, "referenceImageDataUrl" | "referenceImageFileName">,
-): Promise<ReferenceImageUpload | null> {
-  const dataUrl = payload.referenceImageDataUrl?.trim();
-  if (dataUrl) {
-    return parseReferenceImageDataUrl(dataUrl, payload.referenceImageFileName);
+async function resolveReferenceImageUploads(
+  payload: Pick<AiImageGenerationPayload, "referenceImageDataUrls" | "referenceImageFileNames">,
+): Promise<ReferenceImageUpload[]> {
+  const dataUrls = payload.referenceImageDataUrls ?? [];
+  const fileNames = payload.referenceImageFileNames ?? [];
+
+  if (dataUrls.length > 0) {
+    return dataUrls
+      .map((dataUrl, index) => parseReferenceImageDataUrl(dataUrl, fileNames[index]))
+      .filter((upload): upload is ReferenceImageUpload => upload !== null);
   }
 
-  const fileName = payload.referenceImageFileName?.trim();
-  if (!fileName) {
-    return null;
+  if (fileNames.length > 0) {
+    const { readCanvasReferenceImage } = await import("../library/canvasReferenceImages");
+    const uploads: ReferenceImageUpload[] = [];
+    for (const fileName of fileNames) {
+      const restored = await readCanvasReferenceImage(fileName);
+      uploads.push(parseReferenceImageDataUrl(restored.dataUrl, restored.fileName));
+    }
+    return uploads;
   }
 
-  const { readCanvasReferenceImage } = await import("../library/canvasReferenceImages");
-  const restored = await readCanvasReferenceImage(fileName);
-  return parseReferenceImageDataUrl(restored.dataUrl, restored.fileName);
+  return [];
 }
 
 export type ReferenceImageUpload = {
@@ -2134,6 +2673,24 @@ export type ReferenceImageUpload = {
   fileName: string;
   mime: SupportedReferenceImageMime;
 };
+
+async function normalizeReferenceImagesForMultipart(
+  images: readonly ReferenceImageUpload[],
+): Promise<ReferenceImageUpload[]> {
+  return Promise.all(images.map(async (image) => {
+    if (image.mime === "image/jpeg") return image;
+    try {
+      const bytes = await getSharp()(image.bytes).rotate().jpeg({ quality: 92, mozjpeg: true }).toBuffer();
+      return {
+        bytes,
+        fileName: `${path.parse(image.fileName).name}.jpg`,
+        mime: "image/jpeg",
+      };
+    } catch {
+      return image;
+    }
+  }));
+}
 
 type ImageGenerationRequestContext = {
   background: string;
@@ -2153,9 +2710,10 @@ type ImageGenerationRequestContext = {
   referenceImageMime?: SupportedReferenceImageMime;
   requestedCount: number;
   size: string;
+  requestContentType: string;
 };
 
-async function resolveGeneratedImages(response: unknown): Promise<ResolvedGeneratedImage[]> {
+async function resolveGeneratedImages(response: unknown, endpoint: string, batchId: string): Promise<ResolvedGeneratedImage[]> {
   const data = isRecord(response) && Array.isArray(response.data) ? response.data : [];
   const images = await Promise.all(
     data.slice(0, 4).map(async (entry): Promise<ResolvedGeneratedImage | null> => {
@@ -2174,7 +2732,7 @@ async function resolveGeneratedImages(response: unknown): Promise<ResolvedGenera
         return null;
       }
 
-      return resolveGeneratedImageBytes(await fetchGeneratedImageBytes(url), revisedPrompt);
+      return resolveGeneratedImageBytes(await fetchGeneratedImageBytes(url, endpoint, batchId), revisedPrompt);
     }),
   );
   return images.filter((image): image is ResolvedGeneratedImage => Boolean(image));
@@ -2374,10 +2932,7 @@ export function parseReferenceImageDataUrl(
 export function buildImageEditRequestForm(
   settings: AiProviderSettings,
   payload: AiImageGenerationPayload,
-  referenceImage = parseReferenceImageDataUrl(
-    payload.referenceImageDataUrl ?? "",
-    payload.referenceImageFileName,
-  ),
+  referenceImages: ReferenceImageUpload[],
   options: { customInstructions?: string; requestedCount?: number } = {},
 ): FormData {
   const body = buildImageGenerationRequestBody(settings, payload, options);
@@ -2390,11 +2945,13 @@ export function buildImageEditRequestForm(
     }
   }
 
-  form.append(
-    "image",
-    new Blob([new Uint8Array(referenceImage.bytes)], { type: referenceImage.mime }),
-    referenceImage.fileName,
-  );
+  for (const ref of referenceImages) {
+    form.append(
+      "image",
+      new Blob([new Uint8Array(ref.bytes)], { type: ref.mime }),
+      ref.fileName,
+    );
+  }
   return form;
 }
 
@@ -2444,15 +3001,15 @@ function createReferenceImageError(
 }
 
 
-export function normalizeOpenAiCompatibleImagesEndpoint(baseUrl: string): string {
-  return normalizeOpenAiCompatibleImageEndpoint(baseUrl, "generations");
+export function normalizeImagesEndpoint(baseUrl: string): string {
+  return normalizeImageEndpoint(baseUrl, "generations");
 }
 
-export function normalizeOpenAiCompatibleImageEditsEndpoint(baseUrl: string): string {
-  return normalizeOpenAiCompatibleImageEndpoint(baseUrl, "edits");
+export function normalizeImageEditsEndpoint(baseUrl: string): string {
+  return normalizeImageEndpoint(baseUrl, "edits");
 }
 
-function normalizeOpenAiCompatibleImageEndpoint(
+function normalizeImageEndpoint(
   baseUrl: string,
   action: "edits" | "generations",
 ): string {
@@ -2473,21 +3030,89 @@ function normalizeOpenAiCompatibleImageEndpoint(
     throw new AppError("AI_BASE_URL_INVALID", "AI 接口地址必须以 http 或 https 开头。");
   }
 
+  if (isAgnesBaseUrl(parsedUrl.toString())) {
+    parsedUrl.hostname = "apihub.agnes-ai.com";
+    parsedUrl.pathname = "/v1/images/generations";
+    parsedUrl.search = "";
+    parsedUrl.hash = "";
+    return parsedUrl.toString().replace(/\/+$/, "");
+  }
+
   if (/\/images\/(?:generations|edits)\/?$/i.test(parsedUrl.pathname)) {
     parsedUrl.pathname = parsedUrl.pathname.replace(
       /\/images\/(?:generations|edits)\/?$/i,
       `/images/${action}`,
     );
-    return parsedUrl.toString();
+    return parsedUrl.toString().replace(/\/+$/, "");
   }
 
   if (parsedUrl.pathname.endsWith("/chat/completions")) {
     parsedUrl.pathname = parsedUrl.pathname.replace(/\/chat\/completions\/?$/i, `/images/${action}`);
-    return parsedUrl.toString();
+    return parsedUrl.toString().replace(/\/+$/, "");
   }
 
   parsedUrl.pathname = `${parsedUrl.pathname.replace(/\/+$/, "")}/images/${action}`;
-  return parsedUrl.toString();
+  return parsedUrl.toString().replace(/\/+$/, "");
+}
+
+export function isAgnesBaseUrl(baseUrl: string): boolean {
+  try {
+    const parsedUrl = new URL(baseUrl.trim());
+    const hostname = parsedUrl.hostname.toLowerCase();
+    return hostname === "agnes-ai.com" ||
+      hostname === "www.agnes-ai.com" ||
+      hostname === "platform.agnes-ai.com" ||
+      hostname === "apihub.agnes-ai.com" ||
+      hostname.endsWith(".agnes-ai.com");
+  } catch {
+    return false;
+  }
+}
+
+function isGrokImageModel(model: string): boolean {
+  return /^grok-imagine-image(?:-|$)/i.test(model.trim());
+}
+
+function isKnownBrokenBaigeImageEditProxy(baseUrl: string): boolean {
+  try { return new URL(baseUrl.trim()).hostname.toLowerCase() === "api.sccens.net"; } catch { return false; }
+}
+
+function getImageEndpointCandidates(baseUrl: string, hasReference: boolean): string[] {
+  const action = hasReference ? "edits" : "generations";
+  const normalizedEndpoint = normalizeImageEndpoint(baseUrl, action);
+
+  if (!isAgnesBaseUrl(baseUrl)) {
+    return [normalizedEndpoint];
+  }
+
+  const configuredEndpoint = baseUrl.trim().replace(/\/+$/, "");
+  try {
+    const parsedConfigured = new URL(configuredEndpoint);
+    // The API Hub accepts image requests only on the documented generations
+    // route. Avoid a guaranteed /v1 404 when users entered the host root.
+    if (parsedConfigured.hostname.toLowerCase() === "apihub.agnes-ai.com" && parsedConfigured.pathname === "/v1") {
+      return [normalizedEndpoint];
+    }
+  } catch {
+    // normalizeImageEndpoint has already validated the URL; keep the fallback
+    // path defensive for unusual URL implementations.
+  }
+  if (!configuredEndpoint || configuredEndpoint === normalizedEndpoint) {
+    return [normalizedEndpoint];
+  }
+
+  // Keep the originally saved Agnes route as the first probe. Older profiles
+  // often contain https://platform.agnes-ai.com/v1, which responds with 404;
+  // the second candidate is the documented API Hub image endpoint.
+  return [configuredEndpoint, normalizedEndpoint];
+}
+
+function shouldTryAgnesEndpointFallback(error: unknown): boolean {
+  if (!(error instanceof AppError)) {
+    return false;
+  }
+
+  return /(?:状态码|status\s*code)\s*(?:为\s*)?(?:404|405|501)\b/i.test(error.message);
 }
 
 async function requestImageGenerations(
@@ -2495,85 +3120,62 @@ async function requestImageGenerations(
   apiKey: string,
   buildBody: () => BodyInit,
   context: ImageGenerationRequestContext,
+  options: { multipart?: boolean } = {},
 ): Promise<unknown> {
-  const deadlineMs = Date.now() + imageGenerationRequestTimeoutMs;
-
-  for (let attempt = 0; attempt <= imageGenerationMaxRetries; attempt += 1) {
-    const remainingMs = deadlineMs - Date.now();
-    if (remainingMs <= 0) {
-      throw createImageGenerationTimeoutError(context.hasReference);
+  // 生图 POST 不具备幂等保证；响应丢失时仍可能已经扣费，禁止自动重发。
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), imageGenerationRequestTimeoutMs);
+  try {
+    const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
+    if (!options.multipart) {
+      headers["Content-Type"] = "application/json";
     }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), remainingMs);
+    const response = await platformFetch(endpoint, {
+      body: buildBody(),
+      headers,
+      method: "POST",
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    if (!response.ok) {
+      logAiEvent("warn", "image-generation:http-rejected", {
+        ...context,
+        status: response.status,
+      });
+      throw buildImageGenerationRequestError(response.status, responseText, context.hasReference);
+    }
 
     try {
-      const headers: Record<string, string> = { Authorization: `Bearer ${apiKey}` };
-      if (!context.hasReference) {
-        headers["Content-Type"] = "application/json";
-      }
-      const response = await fetch(endpoint, {
-        body: buildBody(),
-        headers,
-        method: "POST",
-        signal: controller.signal,
-      });
-      const responseText = await response.text();
-
-      if (!response.ok) {
-        throw buildImageGenerationRequestError(response.status, responseText, context.hasReference);
-      }
-
-      try {
-        return JSON.parse(responseText) as unknown;
-      } catch {
-        throw new AppError("AI_REMOTE_RESPONSE_INVALID", "图像接口返回的响应不是有效 JSON。");
-      }
-    } catch (error) {
-      if (error instanceof AppError) {
-        throw error;
-      }
-
-      const isAbort = error instanceof Error && error.name === "AbortError";
-      if (isAbort) {
-        throw createImageGenerationTimeoutError(context.hasReference);
-      }
-
-      // 瞬时网络错误（如 "other side closed"）可重试
-      if (attempt < imageGenerationMaxRetries && isTransientNetworkError(error)) {
-        const retryDelayMs = Math.min(
-          retryBaseDelayMs * (attempt + 1),
-          Math.max(0, deadlineMs - Date.now()),
-        );
-        if (retryDelayMs <= 0) {
-          throw createImageGenerationTimeoutError(context.hasReference);
-        }
-        await sleep(retryDelayMs);
-        continue;
-      }
-
-      const networkMessage = buildRemoteNetworkFailureMessage(error);
-      throw new AppError(
-        context.hasReference ? "AI_REFERENCE_IMAGE_NETWORK_FAILED" : "AI_REMOTE_REQUEST_FAILED",
-        context.hasReference
-          ? `${networkMessage} 请检查网络、代理，并确认接口支持 /images/edits。`
-          : networkMessage,
-      );
-    } finally {
-      clearTimeout(timer);
+      return JSON.parse(responseText) as unknown;
+    } catch {
+      throw new AppError("AI_REMOTE_RESPONSE_INVALID", "图像接口返回的响应不是有效 JSON。服务商可能已扣费，请先核对后台记录。");
     }
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    if (error instanceof Error && error.name === "AbortError") {
+      throw createImageGenerationTimeoutError(context.hasReference);
+    }
+    const networkMessage = buildRemoteNetworkFailureMessage(error);
+    throw new AppError(
+      context.hasReference ? "AI_REFERENCE_IMAGE_NETWORK_FAILED" : "AI_REMOTE_REQUEST_FAILED",
+      context.hasReference
+        ? `${networkMessage} 服务商可能已受理并扣费，未自动重发。请先核对后台记录，并确认接口支持 /images/edits。`
+        : `${networkMessage} 服务商可能已受理并扣费，未自动重发。请先核对后台记录再决定是否重新生成。`,
+    );
+  } finally {
+    clearTimeout(timer);
   }
-
-  throw new AppError("AI_REMOTE_REQUEST_FAILED", "图像生成失败，已达最大重试次数。");
 }
 
 function createImageGenerationTimeoutError(hasReference: boolean): AppError {
   return hasReference
     ? new AppError(
         "AI_REFERENCE_IMAGE_TIMEOUT",
-        "参考图生成请求超时。请先压缩参考图后重试，并确认当前接口支持 /images/edits 图生图。",
+        "参考图生成请求超时，服务商可能仍在处理并扣费。未自动重发，请先核对后台记录。",
       )
-    : new AppError("AI_REMOTE_TIMEOUT", "图像生成超时，请稍后重试。");
+    : new AppError("AI_REMOTE_TIMEOUT", "图像生成请求超时，服务商可能仍在处理并扣费。未自动重发，请先核对后台记录。");
 }
 
 function buildImageGenerationRequestError(
@@ -2600,8 +3202,8 @@ function buildImageGenerationRequestError(
   }
   if (status === 415) {
     return new AppError(
-      "AI_REFERENCE_IMAGE_FORMAT_UNSUPPORTED",
-      "接口不接受当前参考图格式。请转换为 PNG 或 JPEG 后重试。",
+      "AI_REFERENCE_IMAGE_REQUEST_FAILED",
+      "接口不接受参考图请求的媒体类型（状态码 415）。请检查服务商是否支持该模型及其图生图请求格式；此错误不能单独判定为图片格式有问题。",
     );
   }
 
@@ -2613,34 +3215,56 @@ function buildImageGenerationRequestError(
   );
 }
 
-async function fetchGeneratedImageBytes(url: string): Promise<Buffer> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), imageGenerationRequestTimeoutMs);
-
+async function fetchGeneratedImageBytes(url: string, endpoint: string, batchId: string): Promise<Buffer> {
+  let resolvedUrl: URL;
   try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) {
-      throw new AppError("AI_REMOTE_REQUEST_FAILED", `图像下载失败，状态码 ${response.status}。`);
+    resolvedUrl = new URL(url, endpoint);
+    if (!["https:", "http:"].includes(resolvedUrl.protocol) || resolvedUrl.username || resolvedUrl.password) {
+      throw new Error("unsupported URL");
     }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength === 0) {
-      throw new AppError("AI_IMAGE_OUTPUT_INVALID", "图像下载结果为空。");
-    }
-    return buffer;
-  } catch (error) {
-    if (error instanceof AppError) {
-      throw error;
-    }
-
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new AppError("AI_REMOTE_TIMEOUT", "图像下载超时，请稍后重试。");
-    }
-
-    throw new AppError("AI_REMOTE_REQUEST_FAILED", "图像下载失败，请检查网络或服务商返回的图片地址。");
-  } finally {
-    clearTimeout(timer);
+  } catch {
+    throw new AppError("AI_IMAGE_OUTPUT_INVALID", "服务商已返回结果，但图片地址无效。可能已扣费，请先核对后台记录，勿重复生成。");
   }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 60_000);
+    let status: number | undefined;
+
+    try {
+      // CDN 请求不携带服务商 API Key。相对地址按实际生成接口解析。
+      const response = await platformFetch(resolvedUrl, { signal: controller.signal });
+      status = response.status;
+      if (!response.ok) {
+        throw new AppError("AI_REMOTE_REQUEST_FAILED", `图像下载失败，状态码 ${response.status}。`);
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.byteLength === 0) {
+        throw new AppError("AI_IMAGE_OUTPUT_INVALID", "图像下载结果为空。");
+      }
+      return buffer;
+    } catch (error) {
+      const retryable = status === undefined || status === 408 || status === 429 || status >= 500 || status === 200;
+      const retry = retryable && attempt < 2;
+      logAiEvent("warn", "image-generation:download-failed", {
+        batchId,
+        downloadHost: resolvedUrl.host,
+        attempt: attempt + 1,
+        httpStatus: status,
+        code: error instanceof AppError ? error.code : "AI_IMAGE_DOWNLOAD_FAILED",
+        // 只保留 Chromium 网络错误码，避免错误信息泄露签名地址。
+        networkCode: error instanceof Error ? error.message.match(/net::ERR_[A-Z_]+/)?.[0] : undefined,
+        retry,
+      });
+      if (!retry) {
+        throw new AppError("AI_IMAGE_DOWNLOAD_FAILED", `服务商已返回图片，但下载失败${status ? `（HTTP ${status}）` : ""}。可能已扣费，未重新提交生图。请先到服务商后台查看或下载结果，勿重复生成。`);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    await sleep(retryBaseDelayMs * (attempt + 1));
+  }
+  throw new AppError("AI_IMAGE_DOWNLOAD_FAILED", "图片下载失败，请先核对服务商后台记录。");
 }
 
 function buildImageGenerationPrompt(

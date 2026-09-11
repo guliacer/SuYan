@@ -61,6 +61,7 @@ function isLibraryItem(input: unknown): input is LibraryItem {
     isOptionalString(input.authorName) &&
     isOptionalString(input.authorUrl) &&
     isOptionalString(input.authorAvatarUrl) &&
+    isOptionalString(input.accountOwnerUid) &&
     isOptionalNsfwRating(input.nsfwRating) &&
     isOptionalString(input.nsfwCheckedAt) &&
     isOptionalNumber(input.videoDurationSec) &&
@@ -94,6 +95,7 @@ function normalizeItem(item: LibraryItem): LibraryItem {
     authorName: normalizeOptionalString(item.authorName),
     authorUrl: normalizeOptionalString(item.authorUrl),
     authorAvatarUrl: normalizeOptionalString(item.authorAvatarUrl),
+    accountOwnerUid: normalizeOptionalString(item.accountOwnerUid),
     nsfwRating: normalizeNsfwRating(item.nsfwRating),
     nsfwCheckedAt: normalizeOptionalString(item.nsfwCheckedAt),
     videoDurationSec: normalizeOptionalNumber(item.videoDurationSec),
@@ -227,7 +229,7 @@ function isOptionalPromptType(input: unknown): boolean {
 }
 
 function isOptionalCategorySource(input: unknown): boolean {
-  return input === undefined || input === null || input === "system" || input === "user" || input === "ai";
+  return input === undefined || input === null || input === "system" || input === "user" || input === "ai" || input === "local";
 }
 
 function isOptionalConfidence(input: unknown): boolean {
@@ -235,7 +237,7 @@ function isOptionalConfidence(input: unknown): boolean {
 }
 
 function normalizeCategorySource(input: CategoryAssignmentSource | null | undefined): CategoryAssignmentSource | null {
-  return input === "system" || input === "user" || input === "ai" ? input : null;
+  return input === "system" || input === "user" || input === "ai" || input === "local" ? input : null;
 }
 
 function normalizeOptionalConfidence(input: number | null | undefined): number | null {

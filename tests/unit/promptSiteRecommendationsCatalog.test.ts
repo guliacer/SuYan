@@ -8,6 +8,7 @@ import {
 } from "../../src/features/library/components/recommendations/PromptSiteRecommendations";
 import { recommendationImageCatalog } from "../../src/features/library/components/recommendations/recommendationImageCatalog";
 import { RECOMMENDATION_IMAGE_ASSET_COUNT } from "../../src/features/library/components/recommendations/recommendationImages";
+import { IMAGE_GEN_SITE_RECOMMENDATIONS } from "../../src/features/library/types/recommendationSites";
 
 const source = readFileSync(
   "src/features/library/components/recommendations/PromptSiteRecommendations.tsx",
@@ -29,6 +30,15 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(SECOND_PINNED_PROMPT_SITE_URL).toBe("https://pan.quark.cn/s/3b60f26d43a8");
     expect(promptSiteRecommendations[0]?.url).toBe(PINNED_PROMPT_SITE_URL);
     expect(promptSiteRecommendations[1]?.url).toBe(SECOND_PINNED_PROMPT_SITE_URL);
+  });
+
+  it("keeps the remaining requested image-generation cards in order", () => {
+    expect(IMAGE_GEN_SITE_RECOMMENDATIONS.slice(0, 4).map((site) => site.url)).toEqual([
+      "https://ai.xmiaom.com/sign-up?aff=bibi",
+      "https://wisart.kuaileshifu.com/",
+      "https://platform.agnes-ai.com",
+      "https://chatgpt.com",
+    ]);
   });
 
   it("uses the online section order and free/paid API split", () => {
@@ -91,6 +101,16 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(source).toContain("https://github.com/guliacer/TapRelay-remote-adapter-test");
     // 生图网站数组已抽到共享文件 recommendationSites.ts，最后一条在此断言。
     expect(sharedSitesSource).toContain("https://wisart.kuaileshifu.com/");
+  });
+
+  it("includes Agnes as a free image-generation recommendation with registration methods", () => {
+    expect(sharedSitesSource).toContain('title: "Agnes"');
+    expect(sharedSitesSource).toContain("https://platform.agnes-ai.com");
+    expect(sharedSitesSource).toContain("GitHub 和 Google 注册");
+    expect(recommendationImageCatalog["https://platform.agnes-ai.com"]).toEqual([
+      "/images/agnes/pricing.webp",
+      "/images/agnes/usage-overview.webp",
+    ]);
   });
 
   it("ships the online recommendation screenshots and can resolve every catalog path", () => {

@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LibraryItem } from "@/features/library/types/library";
 import { exportLibraryZip } from "../../electron/main/library/archiveStore";
 import { rustCoreRuntime } from "../../electron/main/runtime/rustCoreRuntime";
+import * as rustFileOps from "../../electron/main/runtime/rustFileOps";
+import { normalizeLibraryViewSettings, writeLibraryViewSettings } from "../../electron/main/library/viewSettingsStore";
 
 const runtime = vi.hoisted(() => ({ userDataPath: "", savePath: "" }));
 
 vi.mock("electron", () => ({
-  app: { getPath: () => runtime.userDataPath, isPackaged: false },
+  app: { getPath: () => runtime.userDataPath, getVersion: () => "0.3.6", isPackaged: false },
   dialog: {
     showSaveDialog: async () =>
       runtime.savePath ? ({ canceled: false, filePath: runtime.savePath }) : ({ canceled: true, filePath: null }),
@@ -24,7 +26,11 @@ vi.mock("../../electron/main/library/libraryStore", () => {
   const { readFileSync } = require("node:fs");
   const path = require("node:path");
   return {
-    readLibraryFile: async () => JSON.parse(readFileSync(path.join(process.cwd(), "tests/fixtures/library-export-fixture.json"), "utf8")),
+    readLibraryFile: async () => {
+      const fixture = JSON.parse(readFileSync(path.join(process.cwd(), "tests/fixtures/library-export-fixture.json"), "utf8"));
+      fixture.items[0].tags = ["哈苏"];
+      return fixture;
+    },
     appendLibraryItems: async (items: unknown[]) => ({ items }),
   };
 });
@@ -53,10 +59,18 @@ describe("exportLibraryZip Rust integration", () => {
     temporaryDirectories.push(outDir);
     const zipPath = path.join(outDir, "out.zip");
     runtime.savePath = zipPath;
+    runtime.userDataPath = path.join(outDir, "data");
+    await fs.mkdir(path.join(runtime.userDataPath, "library/images"), { recursive: true });
+    await fs.copyFile(path.join(process.cwd(), "tests/fixtures/export-images/img1.png"), path.join(runtime.userDataPath, "library/images/cover.png"));
+    await writeLibraryViewSettings(normalizeLibraryViewSettings({ promptLexicons: { categories: [], tags: [
+      { id: "camera", label: "哈苏", group: "物品/数码设备/相机品牌", description: "已归纳", imageFileName: "cover.png" },
+    ] } }));
+    const rustExport = vi.spyOn(rustFileOps, "createZipViaRust");
 
     process.env.SUYAN_USE_RUST_ARCHIVE = "1";
 
     const result = await exportLibraryZip([]);
+    expect(await rustExport.mock.results[0].value).not.toBeNull();
 
     expect(result.canceled).toBe(false);
     expect(result.exportedCount).toBeGreaterThan(0);
@@ -72,9 +86,12 @@ describe("exportLibraryZip Rust integration", () => {
     ]);
 
     const dataJson = JSON.parse(await fs.readFile(path.join(destDir, "data.json"), "utf8"));
-    expect(dataJson.schemaVersion).toBe(1);
+    // v2 携带可选 author（方案 §十七）；未登录导出时 author 缺省。
+    expect(dataJson.schemaVersion).toBe(2);
     expect(Array.isArray(dataJson.items)).toBe(true);
     expect(dataJson.items.length).toBe(result.exportedCount);
+    expect(dataJson.analyzedLibraries.tags[0]).toMatchObject({ label: "哈苏", group: "物品/数码设备/相机品牌" });
+    expect(await fs.readFile(path.join(destDir, "knowledge-images/cover.png"))).toEqual(await fs.readFile(path.join(process.cwd(), "tests/fixtures/export-images/img1.png")));
 
     const imageFiles = await fs.readdir(path.join(destDir, "images"));
     expect(imageFiles.length).toBe(result.exportedCount);

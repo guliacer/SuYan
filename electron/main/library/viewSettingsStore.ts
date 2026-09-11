@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import { writeLibraryJsonAtomically } from "./libraryJsonPersistence";
+import { normalizeTagKnowledge } from "../../../src/features/library/utils/tagKnowledge";
 import type {
   LibraryViewSettings,
   MaterialBrowserCollectionMode,
@@ -13,18 +15,48 @@ import type {
   CategoryWorkspaceState,
 } from "../../../src/features/library/types/library";
 import type { CategoryTaxonomy } from "../../../src/features/library/types/category";
+import type { PromptViewSettings } from "../../../src/features/prompts/types";
+import { defaultAppLanguage, normalizeAppLanguage, isAppLanguage } from "../../../src/types/locale";
 import { createEmptyCategoryTaxonomy } from "../../../src/features/library/utils/categoryTaxonomy";
 import { defaultCanvasDraftSettings, normalizeCanvasDraftSettings } from "../../../src/features/library/utils/canvasGeneration";
 import type { BuiltinModuleStatePatch } from "../../../src/features/library/utils/moduleRegistry";
+import {
+  normalizeWorkspaceWidthPercent,
+} from "../../../src/features/library/types/library";
 import {
   isBuiltinModuleState,
   resolveBuiltinModuleState,
 } from "../../../src/features/library/utils/moduleRegistry";
 import {
+  isSidebarEntryVisibility,
+  normalizeSidebarEntryVisibility,
+} from "../../../src/features/library/utils/sidebarEntries";
+import {
   defaultNsfwGradingSpeed,
   isNsfwGradingSpeed,
   normalizeNsfwGradingSpeed,
 } from "../../../src/features/library/utils/nsfwGradingSpeed";
+import {
+  isNsfwDetectionMode,
+  normalizeNsfwDetectionMode,
+} from "../../../src/features/library/utils/nsfwDetectionMode";
+import {
+  DEFAULT_THEME_PRESET,
+  DEFAULT_THEME_OPACITY,
+  DEFAULT_THEME_ACCENT_OPACITY,
+  DEFAULT_THEME_CUSTOM_ACCENTS,
+  isThemePreset,
+  resolveThemePreset,
+  isThemeAccent,
+  normalizeThemeCustomAccents,
+  normalizeThemeOpacity,
+  normalizeThemeAccentOpacity,
+  normalizeThemeCustomTheme,
+  normalizeThemeAccentMemory,
+  createDefaultThemeAccentMemory,
+  getDefaultThemeAccentForPreset,
+  resolveThemeAccent,
+} from "../../../src/features/library/utils/themeMode";
 import { AppError } from "../ipc/errors";
 import {
   getCategoryLexiconPath,
@@ -33,7 +65,15 @@ import {
   getTagLexiconPath,
 } from "./libraryPaths";
 
+import { normalizeCanvasBackground } from "../../../src/features/library/utils/canvasBackground";
+
 const defaultMasonryColumnCount = 4;
+let settingsWriteQueue: Promise<unknown> = Promise.resolve();
+export function withViewSettingsWriteLock<T>(work: () => Promise<T>): Promise<T> {
+  const task = settingsWriteQueue.then(work, work);
+  settingsWriteQueue = task.catch(() => undefined);
+  return task;
+}
 const minMasonryColumnCount = 2;
 const maxMasonryColumnCount = 10;
 
@@ -76,7 +116,12 @@ export async function readLibraryViewSettings(): Promise<LibraryViewSettings> {
   });
 }
 
-export async function writeLibraryViewSettings(
+export function writeLibraryViewSettings(settings: LibraryViewSettings): Promise<LibraryViewSettings> {
+  return withViewSettingsWriteLock(() => writeLibraryViewSettingsUnlocked(settings));
+}
+
+/** Caller must hold withViewSettingsWriteLock for the entire transaction, including rollback. */
+export async function writeLibraryViewSettingsUnlocked(
   settings: LibraryViewSettings,
 ): Promise<LibraryViewSettings> {
   await fs.mkdir(getLibraryDataDir(), { recursive: true });
@@ -88,10 +133,9 @@ export async function writeLibraryViewSettings(
   const normalized = normalizeLibraryViewSettings(settings);
   const { categories, tags } = normalized.promptLexicons ?? { categories: [], tags: [] };
 
-  await Promise.all([
-    writeLexiconFile(getCategoryLexiconPath(), categories),
-    writeLexiconFile(getTagLexiconPath(), tags),
-  ]);
+  // Finish each write before reporting failure, so a caller can safely roll back.
+  await writeLexiconFile(getCategoryLexiconPath(), categories);
+  await writeLexiconFile(getTagLexiconPath(), tags);
   await writeLibraryViewSettingsCore(normalized);
 
   return normalized;
@@ -105,9 +149,8 @@ async function writeLibraryViewSettingsCore(settings: LibraryViewSettings): Prom
 }
 
 async function writeLexiconFile(filePath: string, entries: readonly PromptImageLexiconEntry[]): Promise<void> {
-  const tempPath = `${filePath}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(entries, null, 2), "utf8");
-  await fs.rename(tempPath, filePath);
+  // Keep the same rotating recovery copies as the main library JSON.
+  await writeLibraryJsonAtomically(filePath, JSON.stringify(entries, null, 2));
 }
 
 async function readJsonFile(filePath: string): Promise<unknown> {
@@ -145,18 +188,57 @@ export function normalizeLibraryViewSettings(input: unknown): LibraryViewSetting
     return createDefaultViewSettings();
   }
 
+  const normalizedCustomAccents = normalizeThemeCustomAccents(input.themeCustomAccents, input.themeCustomAccent);
+  const themePreset = resolveThemePreset(input.themePreset);
+  const legacyAccent = input.themeAccent === undefined
+    ? getDefaultThemeAccentForPreset(themePreset)
+    : resolveThemeAccent(input.themeAccent);
+  const themeAccentMemory = {
+    ...createDefaultThemeAccentMemory(),
+    ...normalizeThemeAccentMemory(input.themeAccentMemory),
+  };
+  if (!isRecord(input.themeAccentMemory) || !isRecord(input.themeAccentMemory[themePreset])) {
+    themeAccentMemory[themePreset] = {
+      accent: legacyAccent,
+      customAccents: normalizedCustomAccents,
+    };
+  }
+  const currentMemory = themeAccentMemory[themePreset];
+  const normalizedCustomTheme = normalizeThemeCustomTheme(input.customTheme);
+
   return {
+    language: normalizeAppLanguage(input.language),
     canvasDraft: normalizeCanvasDraftSettings(input.canvasDraft),
+    canvasBackground: normalizeCanvasBackground(input.canvasBackground),
     tagOrder: Array.isArray(input.tagOrder) ? uniqueStrings(input.tagOrder) : [],
     likedImageIds: Array.isArray(input.likedImageIds) ? uniqueStrings(input.likedImageIds) : [],
     starredRecommendations: Array.isArray(input.starredRecommendations) ? uniqueStrings(input.starredRecommendations) : [],
     webAssistantCustomUrls: Array.isArray(input.webAssistantCustomUrls) ? uniqueStrings(input.webAssistantCustomUrls) : [],
+    webAssistantLastPlatform: normalizeOptionalString(input.webAssistantLastPlatform) || null,
+    webAssistantLastCustomUrl: normalizeOptionalString(input.webAssistantLastCustomUrl) || null,
     generationModelOrder: Array.isArray(input.generationModelOrder) ? uniqueStrings(input.generationModelOrder) : [],
     hiddenGenerationModels: Array.isArray(input.hiddenGenerationModels) ? uniqueStrings(input.hiddenGenerationModels) : [],
     themeMode: normalizeThemeMode(input.themeMode),
+    themePreset,
+    themeAccent: currentMemory?.accent ?? getDefaultThemeAccentForPreset(themePreset),
+    themeOpacity: normalizeThemeOpacity(input.themeOpacity ?? input.themeNavigationOpacity),
+    themeNavigationOpacity: normalizeThemeOpacity(input.themeNavigationOpacity ?? input.themeOpacity),
+    themeBackgroundOpacity: normalizeThemeOpacity(input.themeBackgroundOpacity ?? input.themeOpacity),
+    themeWorkspaceOpacity: normalizeThemeOpacity(input.themeWorkspaceOpacity ?? input.themeOpacity),
+    themeAccentOpacity: normalizeThemeAccentOpacity(input.themeAccentOpacity),
+    themeCustomAccents: currentMemory?.customAccents ?? normalizedCustomAccents,
+    themeCustomAccent: (currentMemory?.customAccents ?? normalizedCustomAccents)[0],
+    themeAccentMemory,
+    customTheme: normalizedCustomTheme,
+    workspaceWidthPercent: normalizeWorkspaceWidthPercent(input.workspaceWidthPercent),
+    sidebarEntryVisibility: normalizeSidebarEntryVisibility(input.sidebarEntryVisibility),
+    featureGuideCompleted: Array.isArray(input.featureGuideCompleted)
+      ? uniqueStrings(input.featureGuideCompleted.filter((guideId): guideId is string => typeof guideId === "string"))
+      : [],
     autoNsfwGrading: input.autoNsfwGrading === true,
     blurNsfwImages: input.blurNsfwImages === true,
     nsfwGradingSpeed: normalizeNsfwGradingSpeed(input.nsfwGradingSpeed),
+    nsfwDetectionMode: normalizeNsfwDetectionMode(input.nsfwDetectionMode),
     masonryTileWidth: normalizeMasonryTileWidth(input.masonryTileWidth),
     materialBrowserCollectionMode: normalizeMaterialBrowserCollectionMode(input.materialBrowserCollectionMode),
     materialBrowserGalleryMode: normalizeMaterialBrowserGalleryMode(input.materialBrowserGalleryMode),
@@ -171,12 +253,14 @@ export function normalizeLibraryViewSettings(input: unknown): LibraryViewSetting
         : normalizePromptLexiconSettings(input.promptLexicons),
     moduleState: normalizeBuiltinModuleState(input.moduleState),
     categoryWorkspace: normalizeCategoryWorkspace(input.categoryWorkspace),
+    promptViewSettings: normalizePromptViewSettings(input.promptViewSettings),
   };
 }
 
 function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
   return (
     isRecord(input) &&
+    (input.language === undefined || isAppLanguage(input.language)) &&
     isRecord(input.canvasDraft) &&
     Array.isArray(input.tagOrder) &&
     input.tagOrder.every((tag) => typeof tag === "string") &&
@@ -188,14 +272,38 @@ function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
     (input.webAssistantCustomUrls === undefined ||
       (Array.isArray(input.webAssistantCustomUrls) &&
         input.webAssistantCustomUrls.every((url) => typeof url === "string"))) &&
+    (input.webAssistantLastPlatform === undefined ||
+      input.webAssistantLastPlatform === null ||
+      typeof input.webAssistantLastPlatform === "string") &&
+    (input.webAssistantLastCustomUrl === undefined ||
+      input.webAssistantLastCustomUrl === null ||
+      typeof input.webAssistantLastCustomUrl === "string") &&
     Array.isArray(input.generationModelOrder) &&
     input.generationModelOrder.every((model) => typeof model === "string") &&
     Array.isArray(input.hiddenGenerationModels) &&
     input.hiddenGenerationModels.every((model) => typeof model === "string") &&
     isThemeMode(input.themeMode) &&
+    (input.themePreset === undefined || isThemePreset(input.themePreset)) &&
+    (input.themeAccent === undefined || isThemeAccent(input.themeAccent)) &&
+    (input.themeCustomAccent === undefined || typeof input.themeCustomAccent === "string") &&
+    (input.themeOpacity === undefined || (typeof input.themeOpacity === "number" && Number.isFinite(input.themeOpacity))) &&
+    (input.themeAccentOpacity === undefined || (typeof input.themeAccentOpacity === "number" && Number.isFinite(input.themeAccentOpacity))) &&
+    (input.themeNavigationOpacity === undefined || (typeof input.themeNavigationOpacity === "number" && Number.isFinite(input.themeNavigationOpacity))) &&
+    (input.themeBackgroundOpacity === undefined || (typeof input.themeBackgroundOpacity === "number" && Number.isFinite(input.themeBackgroundOpacity))) &&
+    (input.themeWorkspaceOpacity === undefined || (typeof input.themeWorkspaceOpacity === "number" && Number.isFinite(input.themeWorkspaceOpacity))) &&
+    (input.themeCustomAccents === undefined || (Array.isArray(input.themeCustomAccents) && input.themeCustomAccents.every((accent) => typeof accent === "string"))) &&
+    (input.themeAccentMemory === undefined || isRecord(input.themeAccentMemory)) &&
+    (input.customTheme === undefined || isRecord(input.customTheme)) &&
+    (input.canvasBackground === undefined || isRecord(input.canvasBackground)) &&
+    (input.workspaceWidthPercent === undefined ||
+      (typeof input.workspaceWidthPercent === "number" && Number.isFinite(input.workspaceWidthPercent))) &&
+    (input.sidebarEntryVisibility === undefined || isSidebarEntryVisibility(input.sidebarEntryVisibility)) &&
+    (input.featureGuideCompleted === undefined ||
+      (Array.isArray(input.featureGuideCompleted) && input.featureGuideCompleted.every((guideId) => typeof guideId === "string"))) &&
     typeof input.autoNsfwGrading === "boolean" &&
     typeof input.blurNsfwImages === "boolean" &&
     isNsfwGradingSpeed(input.nsfwGradingSpeed) &&
+    isNsfwDetectionMode(input.nsfwDetectionMode) &&
     typeof input.masonryTileWidth === "number" &&
     isMaterialBrowserCollectionMode(input.materialBrowserCollectionMode) &&
     isMaterialBrowserGalleryMode(input.materialBrowserGalleryMode) &&
@@ -209,23 +317,43 @@ function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
     (input.promptLexicons === null ||
       input.promptLexicons === undefined ||
       isPromptLexiconSettings(input.promptLexicons)) &&
-    isBuiltinModuleState(input.moduleState)
+    isBuiltinModuleState(input.moduleState) &&
+    (input.promptViewSettings === undefined || isPromptViewSettings(input.promptViewSettings))
   );
 }
 
 function createDefaultViewSettings(): LibraryViewSettings {
   return {
+    language: defaultAppLanguage,
     canvasDraft: { ...defaultCanvasDraftSettings },
+    canvasBackground: normalizeCanvasBackground(undefined),
     tagOrder: [],
     likedImageIds: [],
     starredRecommendations: [],
     webAssistantCustomUrls: [],
+    webAssistantLastPlatform: null,
+    webAssistantLastCustomUrl: null,
     generationModelOrder: [],
     hiddenGenerationModels: [],
     themeMode: "light",
+    themePreset: DEFAULT_THEME_PRESET,
+    themeAccent: "coral",
+    themeOpacity: DEFAULT_THEME_OPACITY,
+    themeNavigationOpacity: DEFAULT_THEME_OPACITY,
+    themeBackgroundOpacity: DEFAULT_THEME_OPACITY,
+    themeWorkspaceOpacity: DEFAULT_THEME_OPACITY,
+    themeAccentOpacity: DEFAULT_THEME_ACCENT_OPACITY,
+    themeCustomAccents: [...DEFAULT_THEME_CUSTOM_ACCENTS] as [string, string, string],
+    themeCustomAccent: "#ff6363",
+    themeAccentMemory: createDefaultThemeAccentMemory(),
+    customTheme: normalizeThemeCustomTheme(undefined),
+    workspaceWidthPercent: 88,
+    sidebarEntryVisibility: normalizeSidebarEntryVisibility(undefined),
+    featureGuideCompleted: [],
     autoNsfwGrading: false,
     blurNsfwImages: false,
     nsfwGradingSpeed: defaultNsfwGradingSpeed,
+    nsfwDetectionMode: "local-first",
     masonryTileWidth: defaultMasonryColumnCount,
     materialBrowserCollectionMode: "all",
     materialBrowserGalleryMode: "masonry",
@@ -242,7 +370,36 @@ function createDefaultViewSettings(): LibraryViewSettings {
       candidates: [],
       learningEvents: [],
     },
+    promptViewSettings: createDefaultPromptViewSettings(),
   };
+}
+
+function createDefaultPromptViewSettings(): PromptViewSettings {
+  return { sidebarMode: "expanded", sidebarWidth: 220, viewMode: "grid", sortMode: "updated", cardDensity: "comfortable", todoSidebarVisible: false, todoSidebarWidth: 280 };
+}
+
+function normalizePromptViewSettings(input: unknown): PromptViewSettings {
+  if (!isRecord(input)) return createDefaultPromptViewSettings();
+  return {
+    sidebarMode: input.sidebarMode === "compact" || input.sidebarMode === "hidden" ? input.sidebarMode : "expanded",
+    sidebarWidth: typeof input.sidebarWidth === "number" && Number.isFinite(input.sidebarWidth) ? Math.min(360, Math.max(180, Math.round(input.sidebarWidth))) : 220,
+    viewMode: input.viewMode === "list" ? "list" : "grid",
+    sortMode: input.sortMode === "manual" || input.sortMode === "created" || input.sortMode === "lastUsed" || input.sortMode === "usageCount" || input.sortMode === "name" ? input.sortMode : "updated",
+    cardDensity: input.cardDensity === "compact" ? "compact" : "comfortable",
+    todoSidebarVisible: input.todoSidebarVisible === true,
+    todoSidebarWidth: typeof input.todoSidebarWidth === "number" && Number.isFinite(input.todoSidebarWidth) ? Math.min(380, Math.max(220, Math.round(input.todoSidebarWidth))) : 280,
+  };
+}
+
+function isPromptViewSettings(input: unknown): input is PromptViewSettings {
+  return isRecord(input) &&
+    (input.sidebarMode === "expanded" || input.sidebarMode === "compact" || input.sidebarMode === "hidden") &&
+    typeof input.sidebarWidth === "number" &&
+    (input.viewMode === "grid" || input.viewMode === "list") &&
+    (input.sortMode === "manual" || input.sortMode === "updated" || input.sortMode === "created" || input.sortMode === "lastUsed" || input.sortMode === "usageCount" || input.sortMode === "name") &&
+    (input.cardDensity === "compact" || input.cardDensity === "comfortable") &&
+    (input.todoSidebarVisible === undefined || typeof input.todoSidebarVisible === "boolean") &&
+    (input.todoSidebarWidth === undefined || typeof input.todoSidebarWidth === "number");
 }
 
 function normalizeCategoryWorkspace(input: unknown): CategoryWorkspaceState {
@@ -306,7 +463,7 @@ function normalizePromptLexiconSettings(input: unknown): PromptLexiconSettings {
   };
 }
 
-function normalizeImageLexiconEntry(input: unknown): PromptImageLexiconEntry | null {
+export function normalizeImageLexiconEntry(input: unknown): PromptImageLexiconEntry | null {
   if (!isRecord(input)) {
     return null;
   }
@@ -328,6 +485,7 @@ function normalizeImageLexiconEntry(input: unknown): PromptImageLexiconEntry | n
     description: normalizeOptionalString(input.description),
     parentId: parentId || null,
     imageFileName: imageFileName || null,
+    ...normalizeTagKnowledge(input),
   };
 }
 

@@ -1,0 +1,13 @@
+{
+  "name": "suyan-account-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuYan Account API 本地参考实现（供 Electron 客户端联调，零运行时依赖：node:http + node:sqlite + node:crypto）",
+  "scripts": {
+    "build": "tsc -p tsconfig.account-api.json",
+    "start": "node dist/src/server.js",
+    "dev": "pnpm build && node dist/src/server.js",
+    "typecheck": "tsc -p tsconfig.account-api.json --noEmit"
+  }
+}

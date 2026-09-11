@@ -1744,6 +1744,468 @@ describe("promptImportParser", () => {
     expect(draft.tags).toContain("ComfyUI");
   });
 
+  it("unwraps complete API metadata and reverse-traces CLIP text links instead of scanning unrelated nodes", () => {
+    const apiPrompt = {
+      "3": {
+        class_type: "KSampler",
+        inputs: {
+          model: ["4", 0],
+          positive: ["6", 0],
+          negative: ["7", 0],
+          latent_image: ["5", 0],
+        },
+      },
+      "6": {
+        class_type: "CLIPTextEncode",
+        // CLIP 自身没有文本，实际内容在上一个自定义文本节点。
+        inputs: { text: ["474", 0], clip: ["4", 1] },
+      },
+      "474": {
+        class_type: "Show Text",
+        inputs: { source_text: ["467", 0] },
+      },
+      "467": {
+        class_type: "提示词行",
+        inputs: { value_out: "API JSON 中真实连线的正向提示词" },
+      },
+      "7": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "low quality, watermark", clip: ["4", 1] },
+      },
+      "999": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "未连接节点的错误提示词" },
+      },
+    };
+
+    const metadata = {
+      prompt: apiPrompt,
+      workflow: { note: "完整 API JSON 外层包装" },
+      extra_pnginfo: { unrelated: "not a prompt" },
+    };
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("prompt", JSON.stringify(metadata)));
+
+    expect(draft.prompt).toBe("API JSON 中真实连线的正向提示词");
+    expect(draft.prompt).not.toContain("未连接节点");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("chooses the longest prompt emitted on the connected CLIP path when a short style label is also present", () => {
+    const graph = {
+      "3": {
+        class_type: "KSampler",
+        inputs: { model: ["4", 0], positive: ["6", 0], negative: ["7", 0], latent_image: ["5", 0] },
+      },
+      "6": {
+        class_type: "CLIPTextEncode",
+        inputs: {
+          text: "Prompt Style - Extreme Detailed",
+          content: ["8", 0],
+          clip: ["4", 1],
+        },
+      },
+      "8": {
+        class_type: "PromptOutput",
+        inputs: {
+          value: "A hyper-detailed, ethereal anime-style portrait with silver-white hair, layered newspaper background, soft diffused lighting, and cinematic composition.",
+        },
+      },
+      "7": { class_type: "CLIPTextEncode", inputs: { text: "low quality, watermark", clip: ["4", 1] } },
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("prompt", JSON.stringify(graph)));
+
+    expect(draft.prompt).toContain("A hyper-detailed, ethereal anime-style portrait");
+    expect(draft.prompt).not.toBe("Prompt Style - Extreme Detailed");
+  });
+
+  it("does not lock onto the first sampler when the API graph contains multiple connected samplers", () => {
+    const graph = {
+      "3": {
+        class_type: "KSampler",
+        inputs: { model: ["4", 0], positive: ["6", 0], negative: ["7", 0], latent_image: ["5", 0] },
+      },
+      "30": {
+        class_type: "KSampler",
+        inputs: { model: ["4", 0], positive: ["31", 0], negative: ["32", 0], latent_image: ["5", 0] },
+      },
+      "6": { class_type: "CLIPTextEncode", inputs: { text: "旧的短提示", clip: ["4", 1] } },
+      "7": { class_type: "CLIPTextEncode", inputs: { text: "low quality", clip: ["4", 1] } },
+      "31": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "最终输出的真实长提示：银白色长发人物在旧报纸墙前的电影感肖像，柔和漫射光和细腻织物纹理", clip: ["4", 1] },
+      },
+      "32": { class_type: "CLIPTextEncode", inputs: { text: "low quality, watermark", clip: ["4", 1] } },
+      "4": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "models/demo.safetensors" } },
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("prompt", JSON.stringify(graph)));
+
+    expect(draft.prompt).toContain("最终输出的真实长提示");
+    expect(draft.prompt).not.toBe("旧的短提示");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("prefers per-image ShowText output from workflow over a reused API prompt graph", () => {
+    const apiGraph = {
+      "3": {
+        class_type: "KSampler",
+        inputs: { model: ["4", 0], positive: ["6", 0], negative: ["7", 0], latent_image: ["5", 0] },
+      },
+      "6": { class_type: "CLIPTextEncode", inputs: { text: ["474", 0], clip: ["4", 1] } },
+      "474": { class_type: "ShowText|pysssss", inputs: { text_0: "复用的旧提示词" } },
+      "7": { class_type: "CLIPTextEncode", inputs: { text: "low quality", clip: ["4", 1] } },
+      "4": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "models/demo.safetensors" } },
+    };
+    const workflow = {
+      nodes: [
+        { id: 99, type: "PromptGenerator", inputs: [], widgets_values: [] },
+        { id: 474, type: "ShowText|pysssss", inputs: [{ name: "text", link: 10 }], widgets_values: [["这张图片实际使用的逐图提示词：银白长发少女在报纸墙前，紫色连帽衫，电影感柔光"]] },
+        { id: 416, type: "CLIPTextEncode", inputs: [{ name: "clip", link: 20 }, { name: "text", link: 11, widget: { name: "text" } }], widgets_values: [""] },
+        { id: 7, type: "CLIPTextEncode", inputs: [{ name: "text", link: null, widget: { name: "text" } }], widgets_values: ["low quality"] },
+        { id: 490, type: "KSampler", inputs: [{ name: "model", link: 30 }, { name: "positive", link: 21 }, { name: "negative", link: 22 }, { name: "latent_image", link: 23 }], widgets_values: [] },
+      ],
+      links: [
+        [10, 99, 0, 474, 0, "STRING"],
+        [11, 474, 0, 416, 1, "STRING"],
+        [20, 1, 0, 416, 0, "CLIP"],
+        [21, 416, 0, 490, 1, "CONDITIONING"],
+        [22, 7, 0, 490, 2, "CONDITIONING"],
+        [23, 5, 0, 490, 3, "LATENT"],
+        [30, 4, 0, 490, 0, "MODEL"],
+      ],
+    };
+
+    const png = createPngWithTexts([
+      ["prompt", JSON.stringify(apiGraph)],
+      ["workflow", JSON.stringify(workflow)],
+    ]);
+    const draft = parsePromptDraftFromImageMetadata(png);
+
+    expect(draft.prompt).toContain("这张图片实际使用的逐图提示词");
+    expect(draft.prompt).not.toBe("复用的旧提示词");
+  });
+
+  it("follows a workflow sampler's links instead of relying on node order or titles", () => {
+    const workflow = {
+      nodes: [
+        {
+          id: 7,
+          type: "CLIPTextEncode",
+          title: "",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["马赛克, 低质量, 水印"],
+        },
+        {
+          id: 6,
+          type: "CLIPTextEncode",
+          title: "",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["雨后街道上的红伞女孩，电影感自然光"],
+        },
+        {
+          id: 3,
+          type: "MyCustomSampler",
+          inputs: [
+            { name: "model", link: 22 },
+            { name: "positive", link: 20 },
+            { name: "negative", link: 21 },
+            { name: "latent_image", link: 23 },
+          ],
+          widgets_values: [],
+        },
+      ],
+      links: [
+        [20, 6, 0, 3, 0, "CONDITIONING"],
+        [21, 7, 0, 3, 1, "CONDITIONING"],
+        [22, 4, 0, 3, 2, "MODEL"],
+        [23, 5, 0, 3, 3, "LATENT"],
+      ],
+    };
+    const png = createPngWithText("workflow", JSON.stringify(workflow));
+
+    const draft = parsePromptDraftFromImageMetadata(png);
+
+    expect(draft.prompt).toBe("雨后街道上的红伞女孩，电影感自然光");
+    expect(draft.negativePrompt).toBe("马赛克, 低质量, 水印");
+  });
+
+  it("keeps tracing the sampler-connected CLIP text input when its saved widget text is empty", () => {
+    const workflow = {
+      nodes: [
+        {
+          id: 467,
+          type: "提示词行",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["经由实际连线传入的正向提示词，不能读取未连线节点"],
+        },
+        {
+          id: 474,
+          type: "Show Text",
+          inputs: [{ name: "text", link: 10 }],
+          widgets_values: [],
+        },
+        {
+          id: 416,
+          type: "CLIPTextEncode",
+          inputs: [
+            { name: "clip", link: 20 },
+            { name: "text", link: 11, widget: { name: "text" } },
+          ],
+          // 已接线后 ComfyUI 仍会保存旧的空文本控件值。
+          widgets_values: [""],
+        },
+        {
+          id: 7,
+          type: "CLIPTextEncode",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["low quality, watermark"],
+        },
+        {
+          id: 490,
+          type: "KSampler",
+          inputs: [
+            { name: "model", link: 30 },
+            { name: "positive", link: 21 },
+            { name: "negative", link: 22 },
+            { name: "latent_image", link: 23 },
+          ],
+          widgets_values: [],
+        },
+        {
+          id: 999,
+          type: "CLIPTextEncode",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["未连线的诱饵提示词，绝不能被使用"],
+        },
+      ],
+      links: [
+        [10, 467, 0, 474, 0, "STRING"],
+        [11, 474, 0, 416, 1, "STRING"],
+        [20, 1, 0, 416, 0, "CLIP"],
+        [21, 416, 0, 490, 1, "CONDITIONING"],
+        [22, 7, 0, 490, 2, "CONDITIONING"],
+        [23, 5, 0, 490, 3, "LATENT"],
+        [30, 4, 0, 490, 0, "MODEL"],
+      ],
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("workflow", JSON.stringify(workflow)));
+
+    expect(draft.prompt).toBe("经由实际连线传入的正向提示词，不能读取未连线节点");
+    expect(draft.prompt).not.toContain("未连线的诱饵");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("supports SamplerCustomAdvanced through CFGGuider and custom string-output nodes", () => {
+    const workflow = {
+      nodes: [
+        {
+          id: 100,
+          type: "PromptGeneratorCustom",
+          inputs: [],
+          outputs: [{ name: "STRING", type: "STRING", links: [10] }],
+          widgets_values: ["自定义节点链路中的正向提示词：银白色长发少女，紫色连帽衫，报纸墙背景，柔和电影光"],
+        },
+        {
+          id: 101,
+          type: "CLIPTextEncode",
+          inputs: [
+            { name: "clip", link: 20 },
+            { name: "text", link: 10, widget: { name: "text" } },
+          ],
+          widgets_values: ["旧的控件值不能覆盖连线"],
+        },
+        {
+          id: 102,
+          type: "CLIPTextEncode",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["low quality, watermark"],
+        },
+        {
+          id: 103,
+          type: "CFGGuider",
+          inputs: [
+            { name: "model", link: 30 },
+            { name: "positive", link: 21 },
+            { name: "negative", link: 22 },
+          ],
+          widgets_values: [],
+        },
+        {
+          id: 104,
+          type: "SamplerCustomAdvanced",
+          inputs: [
+            { name: "noise", link: 40 },
+            { name: "guider", link: 41 },
+            { name: "sampler", link: 42 },
+            { name: "sigmas", link: 43 },
+            { name: "latent_image", link: 44 },
+          ],
+          widgets_values: [],
+        },
+      ],
+      links: [
+        [10, 100, 0, 101, 1, "STRING"],
+        [20, 1, 0, 101, 0, "CLIP"],
+        [21, 101, 0, 103, 1, "CONDITIONING"],
+        [22, 102, 0, 103, 2, "CONDITIONING"],
+        [30, 2, 0, 103, 0, "MODEL"],
+        [40, 3, 0, 104, 0, "NOISE"],
+        [41, 103, 0, 104, 1, "GUIDER"],
+        [42, 4, 0, 104, 2, "SAMPLER"],
+        [43, 5, 0, 104, 3, "SIGMAS"],
+        [44, 6, 0, 104, 4, "LATENT"],
+      ],
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("workflow", JSON.stringify(workflow)));
+
+    expect(draft.prompt).toContain("自定义节点链路中的正向提示词");
+    expect(draft.prompt).not.toContain("旧的控件值");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("recognizes a sampler with a custom class name and custom positive/negative input names", () => {
+    const workflow = {
+      nodes: [
+        {
+          id: 10,
+          type: "OpaqueTextEmitter",
+          inputs: [],
+          widgets_values: ["自定义采样节点的正向提示词：雨后街道、红伞女孩、柔和电影光"],
+        },
+        {
+          id: 11,
+          type: "CLIPTextEncodeCustom",
+          inputs: [
+            { name: "clip", link: 20 },
+            { name: "text", link: 10, widget: { name: "text" } },
+          ],
+          widgets_values: ["不应覆盖连线文本"],
+        },
+        {
+          id: 12,
+          type: "CLIPTextEncodeCustom",
+          inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+          widgets_values: ["low quality, watermark"],
+        },
+        {
+          id: 13,
+          type: "DiffusionExecutor",
+          inputs: [
+            { name: "model", link: 30 },
+            { name: "positive_prompt", link: 21 },
+            { name: "negative_prompt", link: 22 },
+            { name: "latent", link: 23 },
+          ],
+          widgets_values: [],
+        },
+      ],
+      links: [
+        [10, 10, 0, 11, 1, "STRING"],
+        [20, 1, 0, 11, 0, "CLIP"],
+        [21, 11, 0, 13, 1, "CONDITIONING"],
+        [22, 12, 0, 13, 2, "CONDITIONING"],
+        [23, 5, 0, 13, 3, "LATENT"],
+        [30, 4, 0, 13, 0, "MODEL"],
+      ],
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("workflow", JSON.stringify(workflow)));
+
+    expect(draft.prompt).toBe("自定义采样节点的正向提示词：雨后街道、红伞女孩、柔和电影光");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("unwraps a workflow graph nested inside metadata instead of falling back to node order", () => {
+    const workflow = {
+      workflow: {
+        nodes: [
+          {
+            id: 1,
+            type: "CLIPTextEncode",
+            inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+            widgets_values: ["嵌套工作流中的正向提示词，来自实际采样链路"],
+          },
+          {
+            id: 2,
+            type: "CLIPTextEncode",
+            inputs: [{ name: "text", link: null, widget: { name: "text" } }],
+            widgets_values: ["low quality, watermark"],
+          },
+          {
+            id: 3,
+            type: "VendorExecutorNode",
+            inputs: [
+              { name: "model", link: 30 },
+              { name: "positive", link: 10 },
+              { name: "negative", link: 11 },
+              { name: "latent_image", link: 12 },
+            ],
+            widgets_values: [],
+          },
+        ],
+        links: [
+          [10, 1, 0, 3, 1, "CONDITIONING"],
+          [11, 2, 0, 3, 2, "CONDITIONING"],
+          [12, 4, 0, 3, 3, "LATENT"],
+          [30, 5, 0, 3, 0, "MODEL"],
+        ],
+      },
+    };
+
+    const draft = parsePromptDraftFromImageMetadata(createPngWithText("workflow", JSON.stringify(workflow)));
+
+    expect(draft.prompt).toBe("嵌套工作流中的正向提示词，来自实际采样链路");
+    expect(draft.negativePrompt).toBe("low quality, watermark");
+  });
+
+  it("does not treat a ComfyUI text node as a positive prompt without a sampler path", () => {
+    const graph = {
+      "7": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "马赛克, low quality, watermark" },
+      },
+      "6": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "正确的正向提示词不应依赖节点顺序" },
+      },
+    };
+    const png = createPngWithText("prompt", JSON.stringify(graph));
+
+    const draft = parsePromptDraftFromImageMetadata(png);
+
+    expect(draft.prompt).toBe("");
+    expect(draft.negativePrompt).toBe("");
+  });
+
+  it("ignores auxiliary sampler-named nodes without a diffusion sampler input contract", () => {
+    const graph = {
+      "6": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "不应被辅助节点误识别为正向提示词" },
+      },
+      "7": {
+        class_type: "CLIPTextEncode",
+        inputs: { text: "low quality, watermark" },
+      },
+      "3": {
+        class_type: "PromptSamplerHelper",
+        inputs: {
+          positive: ["6", 0],
+          negative: ["7", 0],
+        },
+      },
+    };
+    const png = createPngWithText("prompt", JSON.stringify(graph));
+
+    const draft = parsePromptDraftFromImageMetadata(png);
+
+    expect(draft.prompt).toBe("");
+    expect(draft.negativePrompt).toBe("");
+  });
+
   it("recognizes OpenNana / YouMind / prompts.chat share urls", () => {
     expect(extractOpenNanaPromptInfo("https://opennana.com/awesome-prompt-gallery/hyper-realistic-east-asian-woman-luxury-fashion-portrait")).toEqual({
       sourceUrl: "https://opennana.com/awesome-prompt-gallery/hyper-realistic-east-asian-woman-luxury-fashion-portrait",
@@ -1877,10 +2339,17 @@ describe("promptImportParser", () => {
 });
 
 function createPngWithText(keyword: string, text: string): Uint8Array {
-  const signature = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
-  const textData = concatBytes(encodeUtf8(keyword), Uint8Array.from([0]), encodeUtf8(text));
+  return createPngWithTexts([[keyword, text]]);
+}
 
-  return concatBytes(signature, createChunk("tEXt", textData), createChunk("IEND", new Uint8Array()));
+function createPngWithTexts(entries: Array<[keyword: string, text: string]>): Uint8Array {
+  const signature = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const chunks = entries.map(([keyword, text]) => {
+    const textData = concatBytes(encodeUtf8(keyword), Uint8Array.from([0]), encodeUtf8(text));
+    return createChunk("tEXt", textData);
+  });
+
+  return concatBytes(signature, ...chunks, createChunk("IEND", new Uint8Array()));
 }
 
 function createChunk(type: string, data: Uint8Array): Uint8Array {

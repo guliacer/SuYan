@@ -40,6 +40,7 @@ export type PromptCardData = {
   author: string | null;
   authorUrl: string | null;
   authorAvatarUrl: string | null;
+  accountOwnerUid?: string | null;
   sourceUrl: string | null;
   generationMethod: string;
   promptType: PromptContentType;
@@ -157,6 +158,7 @@ export function toPromptCardData(item: LibraryItem): PromptCardData {
     author,
     authorUrl,
     authorAvatarUrl,
+    accountOwnerUid: item.accountOwnerUid ?? null,
     sourceUrl,
     generationMethod,
     promptType,

@@ -6,6 +6,7 @@ type Sharp = {
 };
 
 type SharpPipeline = {
+  rotate(): SharpPipeline;
   jpeg(options: { quality: number; mozjpeg?: boolean }): SharpPipeline;
   png(options: { compressionLevel: number; palette: boolean; quality: number }): SharpPipeline;
   webp(options: { quality: number }): SharpPipeline;

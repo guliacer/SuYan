@@ -32,6 +32,7 @@ export function buildLibraryFile(items: LibraryItem[]): LibraryFile {
         authorName: normalizeOptionalString(item.authorName),
         authorUrl: normalizeOptionalString(item.authorUrl),
         authorAvatarUrl: normalizeOptionalString(item.authorAvatarUrl),
+        accountOwnerUid: normalizeOptionalString(item.accountOwnerUid),
         nsfwRating: normalizeNsfwRating(item.nsfwRating),
         nsfwCheckedAt: normalizeOptionalString(item.nsfwCheckedAt),
         videoDurationSec: normalizeOptionalNumber(item.videoDurationSec),
@@ -118,7 +119,7 @@ function normalizeOptionalConfidence(input: number | null | undefined): number |
 }
 
 function normalizeCategorySource(input: CategoryAssignmentSource | null | undefined): CategoryAssignmentSource | null {
-  return input === "system" || input === "user" || input === "ai" ? input : null;
+  return input === "system" || input === "user" || input === "ai" || input === "local" ? input : null;
 }
 
 export function uniqueTags(tags: string[]): string[] {

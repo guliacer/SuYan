@@ -1,4 +1,6 @@
 import { lazy, Profiler, Suspense, useEffect, type ProfilerOnRenderCallback } from "react";
+import { ExportProgressPanel } from "@/components/ui/ExportProgressPanel";
+import { useLocale } from "@/components/LocaleProvider";
 
 const LibraryView = lazy(() => import("@/features/library").then((module) => ({ default: module.LibraryView })));
 
@@ -25,6 +27,7 @@ const handleProfilerRender: ProfilerOnRenderCallback = (_id, phase, actualDurati
 export function App() {
   return (
     <Profiler id="LibraryView" onRender={handleProfilerRender}>
+      <ExportProgressPanel />
       <Suspense fallback={<AppLoadingFallback />}>
         <LibraryView />
       </Suspense>
@@ -38,6 +41,7 @@ export function App() {
  * visible white/blank flash between the HTML shell and the startup gallery.
  */
 function AppLoadingFallback() {
+  const { t } = useLocale();
   useEffect(() => {
     try {
       window.suyanApi.logStartupEvent("app:chunk-suspense", {
@@ -48,7 +52,7 @@ function AppLoadingFallback() {
   }, []);
 
   return (
-    <main className="app-loading-shell" aria-label="正在加载素言">
+    <main className="app-loading-shell" aria-label={t("正在加载素言")}>
       <div className="app-loading-magic" aria-hidden="true">
         <span className="app-loading-particle" />
         <span className="app-loading-particle" />
@@ -64,11 +68,11 @@ function AppLoadingFallback() {
         <div className="app-loading-panel">
           <div className="app-loading-brand">
             <span className="app-loading-mark" aria-hidden="true">
-              素
+              {t("素")}
             </span>
             <div>
-              <strong>素言</strong>
-              <p className="app-loading-copy">正在加载素材库...</p>
+              <strong>{t("素言")}</strong>
+              <p className="app-loading-copy">{t("正在加载素材库...")}</p>
             </div>
           </div>
           <div className="app-loading-progress" aria-hidden="true" />
@@ -83,10 +87,10 @@ function AppLoadingFallback() {
         </div>
         <div className="app-loading-transform" aria-hidden="true">
           <div className="app-loading-prompt-card">
-            <span className="app-loading-prompt-chip">柔和自然光</span>
-            <span className="app-loading-prompt-chip">产品构图</span>
-            <span className="app-loading-prompt-chip">细腻材质</span>
-            <span className="app-loading-prompt-chip">背景层次</span>
+            <span className="app-loading-prompt-chip">{t("柔和自然光")}</span>
+            <span className="app-loading-prompt-chip">{t("产品构图")}</span>
+            <span className="app-loading-prompt-chip">{t("细腻材质")}</span>
+            <span className="app-loading-prompt-chip">{t("背景层次")}</span>
           </div>
           <div className="app-loading-generate-flow" />
           <div className="app-loading-image-preview">

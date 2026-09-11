@@ -1,4 +1,7 @@
-export type AiProviderModelCapability = "text" | "vision" | "image-generation";
+import { tagRecognitionPolicy } from "../utils/tagKnowledge";
+import type { PromptType, PromptVariable } from "../../prompts/types";
+
+export type AiProviderModelCapability = "text" | "vision" | "image-generation" | "video-generation";
 
 export type AiProviderModelSettings = {
   id: string;
@@ -16,6 +19,10 @@ export type AiFeatureAction =
   | "image-category"
   | "image-tags"
   | "image-safety";
+
+export type AiModelSource = "remote";
+
+export type AiModelSelection = { source?: "remote"; profileId: string; modelId: string };
 
 export type AiRecognitionKind = "category" | "tags";
 export type AiRecognitionSource = "image" | "prompt";
@@ -42,6 +49,7 @@ export function normalizeAiRecognitionSourcePreferences(input: unknown): AiRecog
 export const aiRecognitionKinds: AiRecognitionKind[] = ["category", "tags"];
 
 export type AiActionPreference = {
+  source?: AiModelSource;
   profileId?: string;
   modelId?: string;
   rulePresetIds?: string[];
@@ -130,6 +138,9 @@ const structuredAnalysisConstraint =
   "必须先按 Role-Background-Attention-Profile-Skills-Goals-Constrains-Workflow-Suggestions-Examples 的框架进行内部分析，再按本规则的具体任务和输出格式执行。";
 
 function createStructuredRule({ constraints, core, modules, output, title }: StructuredRuleInput): string {
+  if (title.includes("标签")) {
+    return [`===== ${title} =====`, "【核心宗旨】", core, "【核心约束与归纳规则】", tagRecognitionPolicy, "【输出格式】", "输出简体中文短标签；名称统一、分组明确、保留依据，遵循系统 JSON 契约。"].join("\n");
+  }
   return [
     `===== ${title} =====`,
     "",
@@ -2170,6 +2181,7 @@ export type RemoteAnalysisCategoryCandidate = {
 };
 
 export type RemoteAnalysisTagCandidate = {
+  group?: string;
   label: string;
   /** Canonical spelling when the model normalized an alias. */
   normalizedLabel?: string;
@@ -2209,6 +2221,28 @@ export type AiAnalyzePromptData = {
   analysis: RemotePromptAnalysisV2;
 };
 
+export type AiPreparePromptEntryPayload = {
+  prompt: string;
+  knownCategories: Array<{ id: string; name: string }>;
+  apiProfileId?: string;
+  apiModelId?: string;
+  customInstructions?: string;
+};
+
+export type AiPreparePromptEntryData = {
+  type: PromptType;
+  title: string;
+  description: string;
+  categoryId?: string;
+  categoryName?: string;
+  categoryConfidence?: number;
+  tagIds: string[];
+  variables: PromptVariable[];
+  confidence: number;
+  source: "ai" | "local";
+  warnings: string[];
+};
+
 export type AiSettingsTestData = {
   connected: true;
 };
@@ -2218,6 +2252,9 @@ export type AiListProviderModelsData = {
 };
 
 export type AiImageGenerationSize = "auto" | `${number}x${number}`;
+/** Agnes Image 2.1 的原生宽高比档位。 */
+export type AiImageGenerationRatio = "1:1" | "3:4" | "4:3" | "16:9" | "9:16" | "2:3" | "3:2" | "21:9";
+export type AiImageGenerationResolution = "1K" | "2K" | "3K" | "4K";
 export type AiImageGenerationQuality = "auto" | "low" | "medium" | "high";
 export type AiImageGenerationFormat = "png" | "jpeg" | "webp";
 export type AiImageGenerationBackground = "auto" | "opaque" | "transparent";
@@ -2225,21 +2262,30 @@ export type AiImageGenerationBackground = "auto" | "opaque" | "transparent";
 export type AiImageGenerationPayload = {
   /** Standard configured API or the embedded Doubao free web canvas. */
   generationProvider?: "api" | "doubao-web";
+  /** The canvas media output. Omitted values retain the image default. */
+  mediaType?: "image" | "video";
   apiProfileId?: string;
   apiModelId?: string;
   customInstructions?: string;
-  referenceImageFileName?: string;
-  /** Reference image as a data URL (image-to-image). Empty string means none. */
-  referenceImageDataUrl?: string;
+  /** Multiple reference images for image-to-image generation. */
+  referenceImageFileNames?: string[];
+  /** Multiple reference images as data URLs (image-to-image). */
+  referenceImageDataUrls?: string[];
   prompt: string;
   negativePrompt?: string;
   size?: AiImageGenerationSize;
+  /** Agnes Image 2.1 的档位式尺寸请求所使用的宽高比。 */
+  ratio?: AiImageGenerationRatio;
   quality?: AiImageGenerationQuality;
   outputFormat?: AiImageGenerationFormat;
   background?: AiImageGenerationBackground;
   n?: number;
   /** 是否在生成完成或失败后向 TapRelay (localhost:1122) 发送提醒通知 */
   notificationEnabled?: boolean;
+  /** Agnes video duration in seconds (4-12 for the 2.5 family). */
+  videoSeconds?: number;
+  /** Agnes video resolution tier. Flash only accepts 720P. */
+  videoSize?: "720P" | "960P" | "2K";
   /** 豆包网页画布：用户选中的模型标签；空串表示跟随网页默认，不做自动切换。 */
   doubaoModel?: string;
   /** 豆包网页画布：用户选中的风格标签；空串表示跟随网页默认，不做自动切换。 */
@@ -2247,13 +2293,17 @@ export type AiImageGenerationPayload = {
 };
 
 export type AiGeneratedImage = {
+  /** Opaque main-process receipt for the account at generation time; not a login token. */
+  attributionId?: string;
   dataUrl: string;
   revisedPrompt?: string | null;
+  mediaType?: "image" | "video";
 };
 
 export type AiImageGenerationData = {
   images: AiGeneratedImage[];
   model: string;
+  mediaType?: "image" | "video";
 };
 
 export type AiSummarizePromptTitlePayload = {

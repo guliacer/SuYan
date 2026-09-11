@@ -10,6 +10,8 @@ describe("content security policy", () => {
     const imgSrcDirective = indexHtml.match(/img-src\s+([^;]+);/);
 
     expect(imgSrcDirective?.[1]).toContain("app-startup:");
+    expect(imgSrcDirective?.[1]).toContain("app-theme:");
+    expect(imgSrcDirective?.[1]).toContain("app-account-avatar:");
   });
 
   it("allows fetch from custom image protocols in connect-src", () => {
@@ -18,6 +20,14 @@ describe("content security policy", () => {
 
     expect(connectSrcDirective?.[1]).toContain("app-image:");
     expect(connectSrcDirective?.[1]).toContain("app-thumbnail:");
+    expect(connectSrcDirective?.[1]).toContain("app-theme:");
+  });
+
+  it("allows remote README video media", () => {
+    const indexHtml = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+    const mediaSrcDirective = indexHtml.match(/media-src\s+([^;]+);/);
+
+    expect(mediaSrcDirective?.[1]).toContain("https:");
   });
 
   it("keeps the Vite source entry instead of generated build assets", () => {

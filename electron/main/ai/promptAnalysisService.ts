@@ -1,9 +1,12 @@
 import type {
   AiAnalyzePromptData,
   AiImageGenerationData,
+  RemotePromptAnalysisV2,
   AiImageGenerationPayload,
   AiFeatureAction,
   AiAnalyzePromptPayload,
+  AiPreparePromptEntryData,
+  AiPreparePromptEntryPayload,
   AiListProviderModelsData,
   AiOptimizePromptData,
   AiOptimizePromptPayload,
@@ -16,21 +19,33 @@ import type {
   AiTranslatePromptPayload,
   SaveAiProviderSettingsPayload,
 } from "../../../src/features/library/types/ai";
+import type { PromptType } from "../../../src/features/prompts/types";
+import { extractPromptVariables } from "../../../src/features/prompts/utils/promptVariables";
+import { derivePromptTitle } from "../../../src/features/prompts/utils/promptClipboardParser";
+import { detectAccountType } from "../../../src/features/prompts/utils/promptAccount";
+import { classifyPromptContent } from "../../../src/features/prompts/utils/promptClassification";
+import { isCommandPrompt } from "../../../src/features/prompts/utils/promptRichText";
 import { AppError } from "../ipc/errors";
 import { logger } from "../appLogger";
-import { readPrivateAiProviderSettings, resolveAiProviderSettingsForPayload } from "./aiSettingsStore";
+import {
+  readPrivateAiProviderSettings,
+  resolveAiProviderSettingsForPayload,
+  writeAiProviderSettings,
+} from "./aiSettingsStore";
 import {
   resolveAiActionCustomInstructions,
   resolveAiProviderProfileForAction,
 } from "./aiSettingsModel";
 import {
   analyzePromptRemotely,
-  generateImagesWithOpenAiCompatible,
-  listOpenAiCompatibleModels,
+  generateImagesWithRemoteApi,
+  generateVideosWithRemoteApi,
+  isAgnesBaseUrl,
+  listRemoteModels,
   optimizePromptRemotely,
   reverseImagePromptRemotely,
   summarizeTitleRemotely,
-  testOpenAiCompatibleConnection,
+  testRemoteConnection,
   translatePromptRemotely,
 } from "./remoteAiClient";
 
@@ -40,6 +55,10 @@ export async function analyzePromptWithRemoteAi(
   if (!isAnalyzePayload(payload)) {
     throw new AppError("AI_ANALYZE_PAYLOAD_INVALID", "AI 分析参数不合法。");
   }
+
+  const settings = await readPrivateAiProviderSettings();
+  const selectedProfileId = payload.apiProfileId ?? settings.actionPreferences[payload.target]?.profileId;
+  const selectedModelId = payload.apiModelId ?? settings.actionPreferences[payload.target]?.modelId;
 
   const runtime = await resolveAiRuntimeSettings(
     payload.target,
@@ -98,6 +117,127 @@ export async function summarizePromptTitleWithRemoteAi(
   };
 }
 
+/** 统一的新建提示词归档管线；远程 AI 的任何单项失败都会降级为本地结果。 */
+export async function preparePromptEntryWithAi(
+  payload: AiPreparePromptEntryPayload,
+): Promise<AiPreparePromptEntryData> {
+  if (!isPreparePromptEntryPayload(payload)) {
+    throw new AppError("AI_PREPARE_PROMPT_PAYLOAD_INVALID", "提示词自动整理参数不合法。");
+  }
+
+  const prompt = payload.prompt.trim();
+  const categories = payload.knownCategories;
+  const warnings: string[] = [];
+  const local = createLocalPromptEntryData(prompt, categories);
+  const base = {
+    title: local.title,
+    description: local.description,
+    categoryId: local.categoryId,
+    categoryName: local.categoryName,
+    categoryConfidence: local.categoryConfidence,
+    tagIds: local.tagIds,
+    variables: local.variables,
+    type: local.type,
+    confidence: 0.35,
+    source: "local" as const,
+    warnings,
+  };
+  // 终端命令属于可直接执行的原始内容，不调用标题/分类/标签生成链路，
+  // 避免把命令文档改写成说明性文本。
+  if (isCommandPrompt(prompt) && local.type === "text") {
+    return base;
+  }
+
+  const categoryPayload: AiAnalyzePromptPayload = {
+    target: "prompt-category",
+    apiProfileId: payload.apiProfileId,
+    apiModelId: payload.apiModelId,
+    customInstructions: payload.customInstructions,
+    title: "",
+    prompt,
+    negativePrompt: "",
+    tags: [],
+    category: "",
+    knownCategories: categories.map((category) => category.name),
+  };
+  const tagsPayload: AiAnalyzePromptPayload = { ...categoryPayload, target: "prompt-tags" };
+  const [categoryResult, tagsResult, titleResult] = await Promise.allSettled([
+    analyzePromptWithRemoteAi(categoryPayload),
+    analyzePromptWithRemoteAi(tagsPayload),
+    summarizePromptTitleWithRemoteAi({
+      prompt,
+      apiProfileId: payload.apiProfileId,
+      apiModelId: payload.apiModelId,
+      customInstructions: payload.customInstructions,
+    }),
+  ]);
+
+  let source: "ai" | "local" = "local";
+  if (titleResult.status === "fulfilled" && titleResult.value.title.trim()) {
+    base.title = clampTitle(titleResult.value.title);
+    source = "ai";
+  } else {
+    warnings.push("标题未能通过 AI 整理，已使用本地标题。");
+  }
+  if (categoryResult.status === "fulfilled") {
+    const candidate = [...categoryResult.value.analysis.categories]
+      .sort((a, b) => b.confidence - a.confidence)
+      .find((item) => categories.some((category) => category.name === item.label || category.id === item.categoryId));
+    if (candidate) {
+      const matched = categories.find((category) => category.id === candidate.categoryId || category.name === candidate.label);
+      if (matched) {
+        base.categoryId = matched.id;
+        base.categoryName = matched.name;
+        base.categoryConfidence = clampConfidence(candidate.confidence);
+        source = "ai";
+      }
+    }
+    const summary = categoryResult.value.analysis.summary.trim();
+    if (summary) base.description = summary.slice(0, 240);
+  } else {
+    warnings.push("分类和说明未能通过 AI 整理，已使用本地结果。");
+  }
+  if (tagsResult.status === "fulfilled") {
+    base.tagIds = normalizeTags(tagsResult.value.analysis.tags.map((tag) => tag.normalizedLabel || tag.label));
+    source = "ai";
+  } else {
+    warnings.push("标签未能通过 AI 整理，已使用本地结果。");
+  }
+  base.confidence = source === "ai" ? 0.8 : 0.35;
+  base.warnings = warnings;
+  return { ...base, source };
+}
+
+function isPreparePromptEntryPayload(input: unknown): input is AiPreparePromptEntryPayload {
+  return isRecord(input) && typeof input.prompt === "string" && input.prompt.trim().length > 0 &&
+    Array.isArray(input.knownCategories) && input.knownCategories.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string") &&
+    isOptionalString(input.apiProfileId) && isOptionalString(input.apiModelId) && isOptionalString(input.customInstructions);
+}
+
+function createLocalPromptEntryData(prompt: string, categories: AiPreparePromptEntryPayload["knownCategories"]): AiPreparePromptEntryData {
+  const lower = prompt.toLocaleLowerCase();
+const type: PromptType = /视频|video|镜头运动|时长|秒/.test(lower) ? "video"
+    : /工作流|workflow|comfyui|节点/.test(lower) ? "workflow"
+    : /api.key|api_key|apikey|endpoint|base.url|base_url|大模型|大语言模型|llm|openai|claude|deepseek|gemini|groq|通义千问|文心一言|glm|模型配置|密钥|api接口|接口配置|端点配置|sk-[a-zA-Z\d]|bearer|token\s*[:=]/.test(lower) ? "api-config"
+    : /邮箱|email|smtp|imap|pop3|邮件|mail|@.*\.com/.test(lower) ? "email-config"
+    : /写一篇|文章|代码|函数|翻译|总结|write|code|translate/.test(lower) ? "text" : "image";
+  const matched = categories.find((category) => /摄影|portrait|photo|cinematic|镜头|画面/.test(category.name) && /人像|portrait|摄影|photo|镜头|cinematic/.test(lower));
+  const localClassification = classifyPromptContent(prompt);
+  return { type: localClassification.type || type, title: localClassification.title || derivePromptTitle(prompt), description: "", categoryId: matched?.id, categoryName: matched?.name, categoryConfidence: matched ? 0.45 : undefined, tagIds: [], variables: extractPromptVariables(prompt), confidence: 0.35, source: "local", warnings: [] };
+}
+
+function clampTitle(input: string): string {
+  return input.replace(/[\r\n"“”「」。，、.!！?？:：]+/g, " ").trim().slice(0, 50) || "未命名提示词";
+}
+
+function normalizeTags(tags: string[]): string[] {
+  return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 10);
+}
+
+function clampConfidence(input: number): number {
+  return Number.isFinite(input) ? Math.max(0, Math.min(1, input)) : 0;
+}
+
 export async function translatePromptWithRemoteAi(
   payload: AiTranslatePromptPayload,
 ): Promise<AiTranslatePromptData> {
@@ -151,21 +291,34 @@ export async function generateImagesWithRemoteAi(
 
   const startedAt = Date.now();
   const notifyEnabled = payload.notificationEnabled === true;
+  // Keep the route correct even for older renderer payloads that predate the
+  // explicit mediaType field. Agnes video model IDs are unambiguous and must
+  // never be sent to /v1/images/generations.
+  const isVideo = payload.mediaType === "video" || isAgnesVideoModel(runtime.settings.model);
   try {
-    const data = await generateImagesWithOpenAiCompatible(
-      runtime.settings,
-      payload,
-      runtime.customInstructions,
-    );
+    const data = isVideo
+      ? await generateVideosWithRemoteApi(runtime.settings, payload, runtime.customInstructions)
+      : isAgnesBaseUrl(runtime.settings.baseUrl)
+      ? await generateImagesWithRemoteApi(
+          runtime.settings,
+          payload,
+          runtime.customInstructions,
+          (endpoint) => persistResolvedImageEndpoint(runtime.settings.id, endpoint),
+        )
+      : await generateImagesWithRemoteApi(
+          runtime.settings,
+          payload,
+          runtime.customInstructions,
+        );
     const durationMs = Date.now() - startedAt;
     const promptPreview = truncateText(payload.prompt, 60);
     if (notifyEnabled) {
       const message =
-        `图像生成完成（${data.model}）\n` +
-        `耗时 ${(durationMs / 1000).toFixed(1)} 秒，共 ${data.images.length} 张\n` +
+        `${isVideo ? "视频" : "图像"}生成完成（${data.model}）\n` +
+        `耗时 ${(durationMs / 1000).toFixed(1)} 秒，共 ${data.images.length} 个\n` +
         `提示词：${promptPreview}`;
       void notifyTapRelay(message, {
-        event: "image-generation-success",
+        event: isVideo ? "video-generation-success" : "image-generation-success",
         status: "completed",
         taskId: `image-generation-${startedAt}`,
         durationMs,
@@ -182,12 +335,12 @@ export async function generateImagesWithRemoteAi(
     const promptPreview = truncateText(payload.prompt, 60);
     if (notifyEnabled) {
       const message =
-        `图像生成失败（${errorCode}）\n` +
+        `${isVideo ? "视频" : "图像"}生成失败（${errorCode}）\n` +
         `耗时 ${(durationMs / 1000).toFixed(1)} 秒\n` +
         `错误：${truncateText(errorMessage, 120)}\n` +
         `提示词：${promptPreview}`;
       void notifyTapRelay(message, {
-        event: "image-generation-failed",
+        event: isVideo ? "video-generation-failed" : "image-generation-failed",
         status: "failed",
         taskId: `image-generation-${startedAt}`,
         durationMs,
@@ -198,6 +351,31 @@ export async function generateImagesWithRemoteAi(
     }
     throw error;
   }
+}
+
+/** Persist a successfully discovered Agnes image endpoint without changing the
+ * user's selected model, action preferences, or encrypted API key. */
+async function persistResolvedImageEndpoint(profileId: string, endpoint: string): Promise<void> {
+  const current = await readPrivateAiProviderSettings();
+  const target = current.profiles.find((profile) => profile.id === profileId);
+  if (!target || target.baseUrl.trim().replace(/\/+$/, "") === endpoint.trim().replace(/\/+$/, "")) {
+    return;
+  }
+
+  await writeAiProviderSettings({
+    activeProfileId: current.activeProfileId,
+    ...(current.actionOrder?.length ? { actionOrder: current.actionOrder } : {}),
+    actionPreferences: current.actionPreferences,
+    recognitionSourcePreferences: current.recognitionSourcePreferences,
+    profiles: current.profiles.map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      enabled: profile.enabled,
+      baseUrl: profile.id === profileId ? endpoint : profile.baseUrl,
+      model: profile.model,
+      models: profile.models,
+    })),
+  });
 }
 
 function truncateText(text: string, maxLength: number): string {
@@ -269,13 +447,13 @@ function sanitizeTapRelayLogContext(context: Record<string, unknown>): Record<st
 export async function testAiProviderSettings(
   payload: SaveAiProviderSettingsPayload,
 ): Promise<AiSettingsTestData> {
-  return testOpenAiCompatibleConnection(await resolveAiProviderSettingsForPayload(payload));
+  return testRemoteConnection(await resolveAiProviderSettingsForPayload(payload));
 }
 
 export async function listAiProviderModels(
   payload: SaveAiProviderSettingsPayload,
 ): Promise<AiListProviderModelsData> {
-  return { models: await listOpenAiCompatibleModels(await resolveAiProviderSettingsForPayload(payload)) };
+  return { models: await listRemoteModels(await resolveAiProviderSettingsForPayload(payload)) };
 }
 
 
@@ -283,24 +461,28 @@ function isImageGenerationPayload(input: unknown): input is AiImageGenerationPay
   return (
     isRecord(input) &&
     typeof input.prompt === "string" &&
+    (input.mediaType === undefined || input.mediaType === "image" || input.mediaType === "video") &&
     input.prompt.trim().length > 0 &&
     isOptionalString(input.negativePrompt) &&
     isOptionalString(input.apiProfileId) &&
     isOptionalString(input.apiModelId) &&
     isOptionalString(input.customInstructions) &&
-    isOptionalString(input.referenceImageFileName) &&
-    isOptionalString(input.referenceImageDataUrl) &&
+    isOptionalStringArray(input.referenceImageFileNames) &&
+    isOptionalStringArray(input.referenceImageDataUrls) &&
     isOptionalString(input.doubaoModel) &&
     isOptionalString(input.doubaoStyle) &&
     (input.generationProvider === undefined ||
       input.generationProvider === "api" ||
       input.generationProvider === "doubao-web") &&
     (input.size === undefined || isImageGenerationSize(input.size)) &&
+    (input.ratio === undefined || isImageGenerationRatio(input.ratio)) &&
     (input.quality === undefined || input.quality === "auto" || input.quality === "low" || input.quality === "medium" || input.quality === "high") &&
     (input.outputFormat === undefined || input.outputFormat === "png" || input.outputFormat === "jpeg" || input.outputFormat === "webp") &&
     (input.background === undefined || input.background === "auto" || input.background === "opaque" || input.background === "transparent") &&
     (input.notificationEnabled === undefined || typeof input.notificationEnabled === "boolean") &&
     (input.n === undefined || (typeof input.n === "number" && Number.isInteger(input.n) && input.n >= 1 && input.n <= 4))
+    && (input.videoSeconds === undefined || (typeof input.videoSeconds === "number" && Number.isFinite(input.videoSeconds) && input.videoSeconds >= 1 && input.videoSeconds <= 30))
+    && (input.videoSize === undefined || input.videoSize === "720P" || input.videoSize === "960P" || input.videoSize === "2K")
   );
 }
 
@@ -319,7 +501,13 @@ function isImageGenerationSize(input: unknown): input is AiImageGenerationPayloa
 
   const width = Number(match[1]);
   const height = Number(match[2]);
-  return width >= 256 && width <= 4096 && height >= 256 && height <= 4096;
+  // Agnes 4K landscape/portrait tiers reach 6272x2688 and 2944x5248.
+  return width >= 256 && width <= 8192 && height >= 256 && height <= 8192;
+}
+
+function isImageGenerationRatio(input: unknown): input is NonNullable<AiImageGenerationPayload["ratio"]> {
+  return input === "1:1" || input === "3:4" || input === "4:3" || input === "16:9" ||
+    input === "9:16" || input === "2:3" || input === "3:2" || input === "21:9";
 }
 
 function isAnalyzePayload(input: unknown): input is AiAnalyzePromptPayload {
@@ -370,6 +558,13 @@ function isOptionalString(input: unknown): boolean {
   return input === undefined || typeof input === "string";
 }
 
+function isOptionalStringArray(input: unknown): boolean {
+  return (
+    input === undefined ||
+    (Array.isArray(input) && input.every((value) => typeof value === "string"))
+  );
+}
+
 function isOptimizePayload(input: unknown): input is AiOptimizePromptPayload {
   return (
     isRecord(input) &&
@@ -377,8 +572,6 @@ function isOptimizePayload(input: unknown): input is AiOptimizePromptPayload {
     (input.promptKind === undefined || input.promptKind === "positive" || input.promptKind === "negative") &&
     isOptionalString(input.apiProfileId) &&
     isOptionalString(input.apiModelId) &&
-    isOptionalString(input.customInstructions) &&
-    isOptionalString(input.referenceImageFileName) &&
     isOptionalString(input.customInstructions)
   );
 }
@@ -405,8 +598,6 @@ function isTranslatePayload(input: unknown): input is AiTranslatePromptPayload {
     (input.targetLanguage === "zh" || input.targetLanguage === "en") &&
     isOptionalString(input.apiProfileId) &&
     isOptionalString(input.apiModelId) &&
-    isOptionalString(input.customInstructions) &&
-    isOptionalString(input.referenceImageFileName) &&
     isOptionalString(input.customInstructions)
   );
 }
@@ -439,4 +630,8 @@ async function resolveAiRuntimeSettings(
 
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null;
+}
+
+function isAgnesVideoModel(model: string): boolean {
+  return /^agnes-video-(?:v2\.0|2\.5(?:-flash)?)$/i.test(model.trim());
 }

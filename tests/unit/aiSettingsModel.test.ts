@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { aiFeatureActionMeta, aiFeatureActions } from "../../src/features/library/types/ai";
+import {
+  aiFeatureActionMeta,
+  aiFeatureActions,
+} from "../../src/features/library/types/ai";
 import { aiSettingsGeneralActions } from "../../src/features/library/utils/aiSettingsDraft";
+import { aiSettingsActionEntries, resolveAiSettingsEntryAction } from "../../src/features/library/components/aiSettingsDialogData";
 import {
   defaultAiProviderSettings,
   mergeAiProviderSettingsPayload,
@@ -129,13 +133,14 @@ describe("aiSettingsModel", () => {
     expect(detailCaptionRule?.instructions).toContain("visible source chips");
   });
 
-  it("keeps visible source UI tags separate from hidden source metadata", () => {
+  it("uses evidence-based entity tags and excludes source UI metadata", () => {
     const tagRule = aiFeatureActionMeta["image-tags"].rulePresets.find((preset) => preset.id === "concrete-image-tags");
 
     expect(tagRule?.label).toBe("具体标签");
     expect(tagRule?.instructions).toContain("来源头像");
-    expect(tagRule?.instructions).toContain("不可见来源或营销元信息");
-    expect(tagRule?.instructions).toContain("域名标签");
+    expect(tagRule?.instructions).toContain("不提取水印、来源头像、网站图标、平台名称");
+    expect(tagRule?.instructions).toContain("dimension、confidence");
+    expect(tagRule?.instructions).toContain("红叶/黄叶/绿叶保留差异");
   });
 
   it("includes the CJL image-to-video prompt rule for image reverse", () => {
@@ -357,7 +362,7 @@ describe("aiSettingsModel", () => {
     });
   });
 
-  it("requires a complete connection only when remote AI is enabled", () => {
+  it("does not block saves on incomplete profiles", () => {
     expect(
       mergeAiProviderSettingsPayload(defaultAiProviderSettings, {
         activeProfileId: "default",
@@ -375,21 +380,26 @@ describe("aiSettingsModel", () => {
       }).profiles[0].enabled,
     ).toBe(false);
 
-    expect(() =>
-      mergeAiProviderSettingsPayload(defaultAiProviderSettings, {
-        activeProfileId: "default",
-        profiles: [
-          {
-            id: "default",
-            name: "默认 API",
-            enabled: true,
-            baseUrl: "https://api.example.com/v1",
-            model: "test-model",
-            models: [model("test-model")],
-          },
-        ],
-      }),
-    ).toThrow("请先填写接口地址、模型和 API Key。");
+    // mergeAiProviderSettingsPayload no longer validates per-profile completeness
+    // in the save path — incomplete enabled profiles are allowed to pass through
+    // so saves on other profiles are not blocked. Validation is enforced in the
+    // import/merge path (aiSettingsMerge.ts) and connection test / model query
+    // paths (resolveAiProviderSettingsForPayload).
+    const result = mergeAiProviderSettingsPayload(defaultAiProviderSettings, {
+      activeProfileId: "default",
+      profiles: [
+        {
+          id: "default",
+          name: "默认 API",
+          enabled: true,
+          baseUrl: "https://api.example.com/v1",
+          model: "test-model",
+          models: [model("test-model")],
+        },
+      ],
+    });
+    expect(result.profiles[0].enabled).toBe(true);
+    expect(result.profiles[0].apiKey).toBe("");
   });
 
   it("persists only encrypted API keys", () => {
@@ -557,6 +567,11 @@ describe("aiSettingsModel", () => {
       category: "image",
       tags: "prompt",
     });
+    const reloaded = toPublicAiProviderSettings(normalizeAiProviderSettings(JSON.parse(JSON.stringify(
+      toPersistedAiSettingsFile(settings, (apiKey) => `encrypted:${apiKey.length}`),
+    ))));
+    expect(resolveAiSettingsEntryAction(aiSettingsActionEntries[0]!, "image-reverse", reloaded.recognitionSourcePreferences)).toBe("image-category");
+    expect(resolveAiSettingsEntryAction(aiSettingsActionEntries[1]!, "image-category", reloaded.recognitionSourcePreferences)).toBe("prompt-tags");
   });
 
   it("persists selected rule presets and combines them with custom instructions", () => {

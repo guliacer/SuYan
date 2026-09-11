@@ -1,11 +1,13 @@
 import {
   Check,
   FileText,
+  Film,
   ImageIcon,
   Search,
   Sparkles,
   X,
 } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 import { Button } from "@/components/ui/Button";
 import type { AiProviderModelCapability, AiProviderModelSettings } from "../types/ai";
 import {
@@ -24,11 +26,12 @@ type ModelRowProps = {
 };
 
 export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggleCapability }: ModelRowProps) {
+  const { t } = useLocale();
   const modelLabel = model.label || model.id;
 
   return (
     <div
-      className={`grid min-h-12 grid-cols-[minmax(220px,1fr)_280px_96px] items-center border-b border-border/60 px-3 py-1.5 text-sm last:border-b-0 ${
+      className={`grid min-h-12 grid-cols-[minmax(220px,1fr)_260px_96px] items-center border-b border-border/60 px-3 py-1.5 text-sm last:border-b-0 ${
         active ? "bg-primary-soft/70" : "bg-panel"
       }`}
     >
@@ -53,25 +56,31 @@ export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggl
         <CapabilityButton
           active={model.capabilities.includes("text")}
           icon={<FileText size={13} />}
-          label="文本"
+          label={t("文本")}
           onClick={() => onToggleCapability("text")}
         />
         <CapabilityButton
           active={model.capabilities.includes("vision")}
           icon={<ImageIcon size={13} />}
-          label="视觉"
+          label={t("图像")}
           onClick={() => onToggleCapability("vision")}
         />
         <CapabilityButton
           active={model.capabilities.includes("image-generation")}
           icon={<Sparkles size={13} />}
-          label="生图"
+          label={t("生图")}
           onClick={() => onToggleCapability("image-generation")}
+        />
+        <CapabilityButton
+          active={model.capabilities.includes("video-generation")}
+          icon={<Film size={13} />}
+          label={t("视频")}
+          onClick={() => onToggleCapability("video-generation")}
         />
       </div>
       <div className="flex items-center justify-center gap-1">
         <button
-          aria-label={`设为当前模型 ${modelLabel}`}
+          aria-label={t("设为当前模型 {model}", { model: modelLabel })}
           aria-pressed={active}
           className={`icon-tooltip-button flex size-8 items-center justify-center rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
             active ? "bg-primary text-primary-foreground" : "text-muted hover:bg-primary-soft hover:text-foreground"
@@ -83,11 +92,11 @@ export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggl
         >
           {active ? <Check size={13} /> : <span className="size-3 rounded-full border border-border bg-background" />}
           <span className="icon-tooltip-button__bubble" role="tooltip">
-            {active ? "当前模型" : "设为当前模型"}
+            {active ? t("当前模型") : t("设为当前模型")}
           </span>
         </button>
         <button
-          aria-label={`删除模型 ${modelLabel}`}
+          aria-label={t("删除模型 {model}", { model: modelLabel })}
           className="icon-tooltip-button flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-danger-soft hover:text-danger focus-visible:ring-2 focus-visible:ring-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
           data-tooltip-align="end"
           data-tooltip-placement="above"
@@ -97,7 +106,7 @@ export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggl
         >
           <X size={13} />
           <span className="icon-tooltip-button__bubble" role="tooltip">
-            删除模型
+            {t("删除模型")}
           </span>
         </button>
       </div>
@@ -113,21 +122,22 @@ type CapabilityButtonProps = {
 };
 
 export function CapabilityButton({ active, icon, label, onClick }: CapabilityButtonProps) {
+  const { t } = useLocale();
   return (
     <button
-      aria-label={label}
+      aria-label={t(label)}
       aria-pressed={active}
-      className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+      className={`inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
         active
           ? "border-primary bg-primary text-primary-foreground"
           : "border-border bg-background text-muted hover:bg-primary-soft hover:text-foreground"
       }`}
-      title={label}
+      title={t(label)}
       type="button"
       onClick={onClick}
     >
       {icon}
-      <span>{label}</span>
+      <span>{t(label)}</span>
     </button>
   );
 }
@@ -147,6 +157,7 @@ export function ModelPickerPanel({
   onQueryChange,
   onToggleModel,
 }: ModelPickerPanelProps) {
+  const { t } = useLocale();
   const query = normalizeModelSearch(picker.query);
   const visibleModels = picker.models.filter((model) => {
     if (!query) {
@@ -161,9 +172,9 @@ export function ModelPickerPanel({
       <div className="relative border-b border-border bg-panel">
         <Search className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
         <input
-          aria-label="搜索模型"
+          aria-label={t("搜索模型")}
           className="h-11 w-full bg-transparent px-4 pr-10 text-sm text-foreground outline-none placeholder:text-muted"
-          placeholder="搜索 LLM 模型..."
+          placeholder={t("搜索 LLM 模型...")}
           value={picker.query}
           onChange={(event) => onQueryChange(event.target.value)}
         />
@@ -196,18 +207,24 @@ export function ModelPickerPanel({
           })
         ) : (
           <p className="rounded-md border border-border bg-panel px-3 py-6 text-center text-xs text-muted">
-            没有匹配的模型
+            {t("没有匹配的模型")}
           </p>
         )}
       </div>
       <div className="flex items-center justify-between gap-3 border-t border-border bg-panel px-3 py-3">
-        <span className="text-xs text-muted">已选 {picker.selectedModelIds.length} 项</span>
+        <span className="text-xs text-muted">{t("已选 {count} 项", { count: picker.selectedModelIds.length })}</span>
         <div className="flex gap-2">
-          <Button icon={<X size={15} />} variant="ghost" onClick={onCancel}>
-            取消
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<X size={14} />} variant="ghost" onClick={onCancel}>
+            {t("取消")}
           </Button>
-          <Button disabled={picker.selectedModelIds.length === 0} icon={<Check size={15} />} variant="primary" onClick={onConfirm}>
-            确定
+          <Button
+            className="min-h-8 px-2.5 py-1.5 text-xs"
+            disabled={picker.selectedModelIds.length === 0}
+            icon={<Check size={14} />}
+            variant="primary"
+            onClick={onConfirm}
+          >
+            {t("确定")}
           </Button>
         </div>
       </div>
@@ -221,6 +238,7 @@ export function ModelCapabilityIcons({ capabilities }: { capabilities: readonly 
       {capabilities.includes("text") ? <FileText size={13} /> : null}
       {capabilities.includes("vision") ? <ImageIcon size={13} /> : null}
       {capabilities.includes("image-generation") ? <Sparkles size={13} /> : null}
+      {capabilities.includes("video-generation") ? <Film size={13} /> : null}
     </span>
   );
 }

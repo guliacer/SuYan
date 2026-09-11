@@ -1,4 +1,6 @@
-import { dialog } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { formatExportFileName } from "../app/exportFileName";
+import { reportExportProgress } from "../app/exportTask";
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import type { PublicAiProviderSettings } from "../../../src/features/library/types/ai";
@@ -17,10 +19,14 @@ import {
 } from "./aiSettingsBackup";
 import { mergeBackupIntoCurrent, type MergeBackupMode } from "./aiSettingsMerge";
 import type { AiSettingsBackupPayload } from "./aiSettingsBackup";
+import { parseAccountBackup, serializeAccountBackup } from "./aiSettingsAccountBackup";
+import { getAccountBackupKey, getAuthorInfo } from "../account/accountService";
 
 type ImportCacheEntry = {
   payload: AiSettingsBackupPayload;
   expiresAt: number;
+  ownerUid?: string;
+  keyId?: string;
 };
 
 type ExportResult = { canceled: true; filePath?: undefined } | { canceled: false; filePath: string };
@@ -37,19 +43,23 @@ function generateToken(): string {
 }
 
 async function atomicWriteJson(filePath: string, data: string): Promise<void> {
+  reportExportProgress("正在保存 AI 设置备份…");
   const tmpPath = `${filePath}.tmp.${crypto.randomBytes(8).toString("hex")}`;
   await fs.writeFile(tmpPath, data, "utf8");
   await fs.rename(tmpPath, filePath);
 }
 
 export async function exportSettingsBackup(options: {
-  type: "plain" | "full";
+  type: "plain" | "full" | "account";
   password?: string;
 }): Promise<ExportResult> {
+  if (!options || !["plain", "full", "account"].includes(options.type)) throw new AppError("AI_SETTINGS_BACKUP_INVALID", "请选择有效的导出方式。");
+  const exportUid = getAuthorInfo()?.uid;
+  if (options.type === "account" && !exportUid) throw new AppError("AI_BACKUP_LOGIN_REQUIRED", "请先登录再导出账户加密备份。");
   const settings = await readPrivateAiProviderSettings();
 
-  const defaultPath =
-    options.type === "plain" ? "AI设置备份.suyan-ai.json" : "AI设置备份.suyan-ai";
+  const backupLabels = { plain: "AI设置-普通", full: "AI设置-密码加密", account: "AI设置-账户加密" };
+  const defaultPath = formatExportFileName(backupLabels[options.type], options.type === "plain" ? "suyan-ai.json" : "suyan-ai");
   const filters =
     options.type === "plain"
       ? [PLAIN_BACKUP_FILTER, FULL_BACKUP_FILTER]
@@ -68,13 +78,21 @@ export async function exportSettingsBackup(options: {
   const filePath = result.filePath;
 
   try {
-    if (options.type === "plain") {
+    if (options.type === "account") {
+      reportExportProgress("正在验证账户并加密设置…");
+      if (getAuthorInfo()?.uid !== exportUid) throw new AppError("AI_BACKUP_ACCOUNT_CHANGED", "账户已变化，请重新导出。");
+      const envelope = await serializeAccountBackup(settings);
+      if (getAuthorInfo()?.uid !== exportUid) throw new AppError("AI_BACKUP_ACCOUNT_CHANGED", "账户已变化，请重新导出。");
+      await atomicWriteJson(filePath, JSON.stringify(envelope, null, 2));
+    } else if (options.type === "plain") {
+      reportExportProgress("正在整理 AI 设置…");
       const payload = serializePlainBackup(settings);
       await atomicWriteJson(filePath, JSON.stringify(payload, null, 2));
     } else {
       if (!options.password) {
         throw new AppError("AI_SETTINGS_BACKUP_INVALID", "加密导出需要提供密码。");
       }
+      reportExportProgress("正在加密 AI 设置…");
       const envelope = await serializeFullBackup(settings, options.password);
       await atomicWriteJson(filePath, JSON.stringify(envelope, null, 2));
     }
@@ -120,9 +138,12 @@ export async function importSettingsPreview(options: {
   }
 
   const filePath = result.filePaths[0];
+  if ((await fs.stat(filePath)).size > 32 * 1024 * 1024) throw new AppError("AI_SETTINGS_BACKUP_INVALID", "备份文件超过 32 MiB，无法导入。");
   const content = await fs.readFile(filePath, "utf8");
-
-  const parsed = parseBackupFile(content, options.password);
+  let envelope: unknown;
+  try { envelope = JSON.parse(content); } catch { throw new AppError("AI_SETTINGS_BACKUP_INVALID", "备份文件不是有效的 JSON。"); }
+  const accountBackup = (envelope as { formatVersion?: number } | null)?.formatVersion === 3 ? await parseAccountBackup(envelope) : null;
+  const parsed = accountBackup ? { ok: true as const, data: accountBackup.payload } : parseBackupFile(content, options.password);
 
   if (!parsed.ok) {
     logger.warn("ai", "ai-settings-import:parse-error", {
@@ -147,11 +168,12 @@ export async function importSettingsPreview(options: {
   importTokenCache.set(token, {
     payload,
     expiresAt: Date.now() + IMPORT_TOKEN_TTL_MS,
+    ...(accountBackup ? { ownerUid: accountBackup.ownerUid, keyId: accountBackup.keyId } : {}),
   });
 
   logger.info("ai", "ai-settings-import:preview", {
     fileName,
-    formatVersion: payload.formatVersion,
+    formatVersion: accountBackup ? 3 : payload.formatVersion,
     providerCount,
     modelCount,
     hasApiKeyProfiles,
@@ -161,7 +183,7 @@ export async function importSettingsPreview(options: {
   return {
     token,
     fileName,
-    formatVersion: payload.formatVersion,
+    formatVersion: accountBackup ? 3 : payload.formatVersion,
     providerCount,
     newProviderCount: providerCount,
     modelCount,
@@ -174,6 +196,7 @@ export async function importSettingsApply(
   token: string,
   mode: MergeBackupMode,
 ): Promise<PublicAiProviderSettings> {
+  if (!["merge", "replace", "add-new"].includes(mode)) throw new AppError("AI_SETTINGS_BACKUP_INVALID", "导入方式无效。");
   const cacheEntry = importTokenCache.get(token);
 
   if (!cacheEntry) {
@@ -186,6 +209,13 @@ export async function importSettingsApply(
   }
 
   importTokenCache.delete(token);
+  if (cacheEntry.ownerUid) {
+    const material = await getAccountBackupKey(cacheEntry.ownerUid, cacheEntry.keyId);
+    material.key.fill(0);
+  }
+  const assertSameAccount = () => {
+    if (cacheEntry.ownerUid && getAuthorInfo()?.uid !== cacheEntry.ownerUid) throw new AppError("AI_BACKUP_ACCOUNT_CHANGED", "账户已变化，请重新验证备份。");
+  };
 
   const backupPayload = cacheEntry.payload;
   const current = await readPrivateAiProviderSettings();
@@ -196,6 +226,7 @@ export async function importSettingsApply(
 
   const merged = mergeBackupIntoCurrent(current, backupAsSettings, mode);
 
+  assertSameAccount();
   const publicResult = await writeAiProviderSettings({
     activeProfileId: merged.activeProfileId,
     profiles: merged.profiles.map((p) => ({
@@ -210,7 +241,7 @@ export async function importSettingsApply(
     actionPreferences: merged.actionPreferences,
     ...(merged.actionOrder?.length ? { actionOrder: merged.actionOrder } : {}),
     recognitionSourcePreferences: merged.recognitionSourcePreferences,
-  });
+  }, assertSameAccount);
 
   logger.info("ai", "ai-settings-import:applied", {
     mode,

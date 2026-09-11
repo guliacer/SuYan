@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, RefreshCw, Search, Wifi } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
@@ -58,6 +59,7 @@ export function ProxySettingsDialog({
   onTest,
   onNotify,
 }: ProxySettingsDialogProps) {
+  const { t } = useLocale();
   const [draft, setDraft] = useState<ProxySettings>(() => settings);
   const [feedbackText, setFeedbackText] = useState("");
   const [detection, setDetection] = useState<ProxyDetectionData | null>(null);
@@ -78,11 +80,11 @@ export function ProxySettingsDialog({
   }, [feedbackText, onNotify]);
 
   async function handleDetect() {
-    setFeedbackText("正在检测系统和本机代理...");
+    setFeedbackText(t("正在检测系统和本机代理..."));
     const detectedProxy = await onDetect();
 
     if (!detectedProxy) {
-      setFeedbackText("自动检测失败，请稍后重试。");
+      setFeedbackText(t("自动检测失败，请稍后重试。"));
       return;
     }
 
@@ -109,19 +111,18 @@ export function ProxySettingsDialog({
       return;
     }
 
-    setFeedbackText("正在测试代理连接...");
+    setFeedbackText(t("正在测试代理连接..."));
     const isConnected = await onTest(payload);
 
-    setFeedbackText(isConnected ? "代理连接测试成功。" : "代理连接测试失败。");
+    setFeedbackText(isConnected ? t("代理连接测试成功。") : t("代理连接测试失败。"));
   }
 
   const body = (
-      <div className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
+      <div data-feature-guide="system-preferences-panel-proxy" className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
         <section className="grid gap-3 rounded-md border border-border bg-background p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-foreground">连接方式</p>
-              <p className="mt-1 text-xs leading-5 text-muted">影响分享链接解析、网页抓取和远程下载。</p>
+              <p className="text-sm font-semibold text-foreground">{t("连接方式")}</p>
             </div>
             <Button
               className="min-h-9 px-2.5 py-1.5 text-xs"
@@ -129,7 +130,7 @@ export function ProxySettingsDialog({
               icon={<Search size={14} />}
               onClick={() => void handleDetect()}
             >
-              自动检测
+              {t("自动检测")}
             </Button>
             <Button
               className="min-h-9 px-2.5 py-1.5 text-xs"
@@ -137,11 +138,11 @@ export function ProxySettingsDialog({
               icon={<RefreshCw size={14} />}
               onClick={() => void handleTest()}
             >
-              测试连接
+              {t("测试连接")}
             </Button>
           </div>
 
-          <div className="grid gap-2 min-[720px]:grid-cols-3" role="radiogroup" aria-label="选择代理模式">
+          <div className="grid gap-2 min-[720px]:grid-cols-3" role="radiogroup" aria-label={t("选择代理模式")}>
             {proxyModeOptions.map((option) => {
               const selected = draft.mode === option.value;
 
@@ -162,7 +163,7 @@ export function ProxySettingsDialog({
                   }}
                 >
                   <span className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold">{option.label}</span>
+                    <span className="truncate text-sm font-semibold">{t(option.label)}</span>
                     <span
                       className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
                         selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"
@@ -171,7 +172,7 @@ export function ProxySettingsDialog({
                       {selected ? <Check size={12} /> : null}
                     </span>
                   </span>
-                  <span className="text-xs leading-5">{option.description}</span>
+                  <span className="text-xs leading-5">{t(option.description)}</span>
                 </button>
               );
             })}
@@ -181,19 +182,18 @@ export function ProxySettingsDialog({
         <section className="grid gap-3 rounded-md border border-border bg-background p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-foreground">自定义代理</p>
-              <p className="mt-1 text-xs leading-5 text-muted">选择自定义后填写本机端口或局域网地址。</p>
+              <p className="text-sm font-semibold text-foreground">{t("自定义代理")}</p>
             </div>
             <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-              {getProxyModeLabel(draft.mode)}
+              {t(getProxyModeLabel(draft.mode))}
             </span>
           </div>
 
           <label className="grid gap-2 text-xs font-medium text-muted">
-            代理地址
+            {t("代理地址")}
             <TextField
               disabled={draft.mode !== "custom" || isBusy}
-              placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:7890"
+              placeholder={t("http://127.0.0.1:7890 或 socks5://127.0.0.1:7890")}
               value={draft.server}
               onChange={(event) => {
                 setDraft((current) => ({ ...current, server: event.target.value }));
@@ -203,7 +203,7 @@ export function ProxySettingsDialog({
           </label>
 
           <label className="grid gap-2 text-xs font-medium text-muted">
-            绕过地址
+            {t("绕过地址")}
             <TextField
               disabled={draft.mode !== "custom" || isBusy}
               placeholder="localhost,127.0.0.1,<local>"
@@ -217,36 +217,32 @@ export function ProxySettingsDialog({
 
           {validationError ? (
             <p className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-sm text-danger">
-              {validationError}
+              {t(validationError)}
             </p>
-          ) : (
-            <p className="rounded-md border border-border bg-panel px-3 py-2 text-sm text-muted">
-              修改后立即应用；进行中的下载可能需重试。
-            </p>
-          )}
+          ) : null}
         </section>
 
         {detection ? (
           <section className="grid gap-2 rounded-md border border-border bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-foreground">检测结果</p>
+              <p className="text-sm font-semibold text-foreground">{t("检测结果")}</p>
               <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-                {getDetectionSourceLabel(detection.source)}
+                {t(getDetectionSourceLabel(detection.source))}
               </span>
             </div>
             <p className="text-sm leading-6 text-muted">{detection.summary}</p>
             <div className="grid gap-1 text-xs text-muted">
               <p>
-                系统代理：
+                {t("系统代理：")}
                 {detection.systemProxy.enabled || detection.systemProxy.autoConfigUrl || detection.systemProxy.autoDetect
-                  ? "已发现配置"
-                  : "未启用"}
+                  ? t("已发现配置")
+                  : t("未启用")}
               </p>
               <p>
-                运行中的代理软件：
+                {t("运行中的代理软件：")}
                 {detection.processes.length > 0
                   ? detection.processes.map((process) => `${process.name}${formatProxyPorts(process.ports)}`).join("、")
-                  : "未发现常见代理软件"}
+                  : t("未发现常见代理软件")}
               </p>
             </div>
           </section>
@@ -264,7 +260,7 @@ export function ProxySettingsDialog({
 
   return (
     <AppDialog
-      panelClassName="flex max-h-[92vh] w-full max-w-3xl flex-col"
+      panelClassName="flex max-h-full w-full max-w-3xl flex-col"
       titleId="proxy-settings-title"
       onClose={onClose ?? (() => undefined)}
     >
@@ -275,9 +271,8 @@ export function ProxySettingsDialog({
           </span>
           <div className="min-w-0">
             <h2 className="text-lg font-semibold" id="proxy-settings-title">
-              网络代理
+              {t("网络代理")}
             </h2>
-            <p className="mt-1 text-sm text-muted">用于网页解析和远程下载</p>
           </div>
         </div>
         <DialogCloseButton onClick={() => onClose?.()} />

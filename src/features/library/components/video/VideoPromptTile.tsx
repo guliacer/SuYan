@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
 import { Film, Play } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 import { NsfwImage } from "../NsfwImage";
 import { getImageThumbnailSrc } from "../../utils/getImageSrc";
 import { formatVideoDuration } from "../../utils/videoDisplay";
@@ -13,6 +14,7 @@ type VideoPromptTileProps = {
 };
 
 function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onViewDetail }: VideoPromptTileProps) {
+  const { t } = useLocale();
   const [isHovered, setIsHovered] = useState(false);
   const handleViewDetail = useCallback(() => onViewDetail(item.id), [onViewDetail, item.id]);
   const durationLabel = formatVideoDuration(item.videoDurationSec);
@@ -30,8 +32,8 @@ function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onVie
     >
       <div className="group relative block w-full overflow-hidden text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
         <NsfwImage
-          activateLabel={`查看 ${item.title || "未命名视频提示词"} 的详情`}
-          alt={item.title || "视频提示词封面"}
+          activateLabel={t("查看 {title} 的详情", { title: item.title || t("未命名视频提示词") })}
+          alt={item.title || t("视频提示词封面")}
           blurNsfwImages={blurNsfwImages}
           className="w-full"
           fetchPriority={isPriorityImage ? "high" : "auto"}
@@ -52,7 +54,7 @@ function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onVie
 
         <span className="pointer-events-none absolute left-2 top-2 z-[2] inline-flex min-h-6 items-center gap-1 rounded-lg bg-overlay/55 px-2 text-[11px] font-medium text-primary-foreground backdrop-blur">
           <Film size={12} />
-          视频
+          {t("视频")}
         </span>
         {durationLabel ? (
           <span className="pointer-events-none absolute bottom-2 right-2 z-[2] inline-flex min-h-6 items-center rounded-lg bg-overlay/55 px-2 text-[11px] font-medium tabular-nums text-primary-foreground backdrop-blur">
@@ -70,7 +72,7 @@ function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onVie
               title={keyframe.label}
             >
               <img
-                alt={`关键帧 ${keyframe.label}`}
+                alt={t("关键帧 {label}", { label: keyframe.label })}
                 className="block aspect-video w-full object-cover"
                 decoding="async"
                 loading="lazy"

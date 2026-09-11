@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const serviceSpies = vi.hoisted(() => ({
   generateImages: vi.fn(),
+  generateVideos: vi.fn(),
+  writeSettings: vi.fn(),
   logger: {
     error: vi.fn(),
     info: vi.fn(),
@@ -14,10 +16,12 @@ vi.mock("../../electron/main/appLogger", () => ({ logger: serviceSpies.logger })
 vi.mock("../../electron/main/ai/aiSettingsStore", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../electron/main/ai/aiSettingsStore")>()),
   readPrivateAiProviderSettings: serviceSpies.readSettings,
+  writeAiProviderSettings: serviceSpies.writeSettings,
 }));
 vi.mock("../../electron/main/ai/remoteAiClient", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../electron/main/ai/remoteAiClient")>()),
-  generateImagesWithOpenAiCompatible: serviceSpies.generateImages,
+  generateImagesWithRemoteApi: serviceSpies.generateImages,
+  generateVideosWithRemoteApi: serviceSpies.generateVideos,
 }));
 
 import { generateImagesWithRemoteAi } from "../../electron/main/ai/promptAnalysisService";
@@ -69,6 +73,7 @@ describe("promptAnalysisService image generation", () => {
     vi.clearAllMocks();
     serviceSpies.readSettings.mockResolvedValue(privateSettings);
     serviceSpies.generateImages.mockResolvedValue(generatedData);
+    serviceSpies.writeSettings.mockResolvedValue(privateSettings);
   });
 
   afterEach(() => {
@@ -86,6 +91,64 @@ describe("promptAnalysisService image generation", () => {
     expect(serviceSpies.generateImages.mock.calls[0]?.[2]).toContain(
       "Keep all visible product text unchanged.",
     );
+  });
+
+  it("routes an Agnes video model to the video API when older payloads omit mediaType", async () => {
+    const videoSettings = {
+      ...privateSettings,
+      actionPreferences: {
+        ...privateSettings.actionPreferences,
+        "image-generation": {
+          ...privateSettings.actionPreferences["image-generation"],
+          modelId: "agnes-video-2.5",
+        },
+      },
+      profiles: privateSettings.profiles.map((profile) => ({
+        ...profile,
+        model: "agnes-video-2.5",
+        models: [{ id: "agnes-video-2.5", label: "Agnes Video 2.5", capabilities: ["video-generation" as const] }],
+      })),
+    };
+    const videoData = {
+      images: [{ dataUrl: "data:video/mp4;base64,AA==", mediaType: "video" as const }],
+      mediaType: "video" as const,
+      model: "agnes-video-2.5",
+    };
+    serviceSpies.readSettings.mockResolvedValue(videoSettings);
+    serviceSpies.generateVideos.mockResolvedValue(videoData);
+
+    await expect(generateImagesWithRemoteAi({ prompt: "雨夜城市" })).resolves.toEqual(videoData);
+    expect(serviceSpies.generateVideos).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "agnes-video-2.5" }),
+      expect.objectContaining({ prompt: "雨夜城市" }),
+      expect.any(String),
+    );
+    expect(serviceSpies.generateImages).not.toHaveBeenCalled();
+  });
+
+  it("persists the working Agnes image endpoint after fallback", async () => {
+    const agnesSettings = {
+      ...privateSettings,
+      profiles: privateSettings.profiles.map((profile) => ({
+        ...profile,
+        baseUrl: "https://platform.agnes-ai.com/v1",
+      })),
+    };
+    serviceSpies.readSettings.mockResolvedValue(agnesSettings);
+    serviceSpies.generateImages.mockImplementation(async (...args: unknown[]) => {
+      const onEndpointResolved = args[3] as ((endpoint: string) => Promise<void>) | undefined;
+      await onEndpointResolved?.("https://apihub.agnes-ai.com/v1/images/generations");
+      return generatedData;
+    });
+
+    await generateImagesWithRemoteAi({ prompt: "A ceramic tea set" });
+
+    expect(serviceSpies.writeSettings).toHaveBeenCalledWith(expect.objectContaining({
+      profiles: [expect.objectContaining({
+        id: "image-profile",
+        baseUrl: "https://apihub.agnes-ai.com/v1/images/generations",
+      })],
+    }));
   });
 
   it("does not contact TapRelay when completion notifications are disabled", async () => {

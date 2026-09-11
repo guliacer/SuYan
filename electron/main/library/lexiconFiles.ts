@@ -1,6 +1,9 @@
-import { dialog } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { formatExportFileName } from "../app/exportFileName";
+import { reportExportProgress } from "../app/exportTask";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import { normalizeTagKnowledge } from "../../../src/features/library/utils/tagKnowledge";
 import type {
   PromptImageLexiconEntry,
   PromptLexiconEntry,
@@ -63,7 +66,7 @@ export async function exportPromptLexicon(
   const normalizedItems = normalizeLexiconEntries(kind, items);
   const result = await dialog.showSaveDialog({
     title: `导出${getLexiconKindLabel(kind)}`,
-    defaultPath: `${getLexiconKindLabel(kind)}.json`,
+    defaultPath: formatExportFileName(getLexiconKindLabel(kind), "json"),
     filters: [{ name: "JSON 词库", extensions: ["json"] }],
   });
 
@@ -78,6 +81,7 @@ export async function exportPromptLexicon(
     items: normalizedItems,
   };
 
+  reportExportProgress(`正在保存 ${normalizedItems.length} 条词库记录…`);
   await fs.writeFile(result.filePath, JSON.stringify(payload, null, 2), "utf8");
 
   return {
@@ -168,6 +172,7 @@ function normalizeImageEntry(input: unknown): PromptImageLexiconEntry | null {
     group: normalizeOptionalString(input.group),
     label,
     description: normalizeOptionalString(input.description),
+    ...normalizeTagKnowledge(input),
     parentId: normalizeOptionalString(input.parentId) || null,
     imageFileName: normalizeOptionalString(input.imageFileName) || null,
   };

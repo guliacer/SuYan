@@ -180,4 +180,89 @@ describe("wordDocumentImport", () => {
     ]);
   });
 
+  it("does not merge different prompts that happen to share one page", () => {
+    const blocks = extractWordDocumentBlocks(`
+      <w:document>
+        <w:body>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>第一组提示词。</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId2"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>第二组提示词。</w:t></w:r></w:p>
+          <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId3"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>第三组提示词。</w:t></w:r></w:p>
+        </w:body>
+      </w:document>
+    `);
+
+    const pairs = pairWordDocumentPrompts(blocks);
+    expect(pairs.map((pair) => pair.prompt)).toEqual(["第一组提示词。", "第二组提示词。", "第三组提示词。"]);
+    expect(new Set(pairs.map((pair) => pair.groupId)).size).toBe(3);
+  });
+
+  it("keeps repeated prompts separate when their image runs are not adjacent", () => {
+    const blocks = extractWordDocumentBlocks(`
+      <w:document>
+        <w:body>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>相同提示词。</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId2"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>中间提示词。</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId3"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>相同提示词。</w:t></w:r></w:p>
+        </w:body>
+      </w:document>
+    `);
+
+    const pairs = pairWordDocumentPrompts(blocks);
+    expect(pairs.map((pair) => pair.prompt)).toEqual(["相同提示词。", "中间提示词。", "相同提示词。"]);
+    expect(new Set(pairs.map((pair) => pair.groupId)).size).toBe(3);
+  });
+
+  it("supports prompt-before-image tables without merging table cells", () => {
+    const blocks = extractWordDocumentBlocks(`
+      <w:document>
+        <w:body>
+          <w:tbl>
+            <w:tr>
+              <w:tc><w:p><w:r><w:t>表格提示词一。</w:t></w:r></w:p></w:tc>
+              <w:tc><w:p><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p></w:tc>
+              <w:tc><w:p><w:r><w:drawing><a:blip r:embed="rId2"/></w:drawing></w:r></w:p></w:tc>
+            </w:tr>
+            <w:tr>
+              <w:tc><w:p><w:r><w:t>表格提示词二。</w:t></w:r></w:p></w:tc>
+              <w:tc><w:p><w:r><w:drawing><a:blip r:embed="rId3"/></w:drawing></w:r></w:p></w:tc>
+            </w:tr>
+          </w:tbl>
+        </w:body>
+      </w:document>
+    `);
+
+    const pairs = pairWordDocumentPrompts(blocks);
+    expect(pairs.map((pair) => pair.imageRelationshipId)).toEqual(["rId1", "rId2", "rId3"]);
+    expect(pairs.map((pair) => pair.prompt)).toEqual(["表格提示词一。", "表格提示词一。", "表格提示词二。"]);
+    expect(pairs[0]?.groupId).toBe(pairs[1]?.groupId);
+    expect(pairs[1]?.groupId).not.toBe(pairs[2]?.groupId);
+  });
+
+  it("ignores a short document heading before image-first prompt sections", () => {
+    const blocks = extractWordDocumentBlocks(`
+      <w:document>
+        <w:body>
+          <w:p><w:r><w:t>素材整理</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>第一组完整提示词：城市夜景、柔和光影与电影感构图。</w:t></w:r></w:p>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId2"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:t>第二组完整提示词：森林人像、自然光线与浅景深效果。</w:t></w:r></w:p>
+        </w:body>
+      </w:document>
+    `);
+
+    const pairs = pairWordDocumentPrompts(blocks);
+    expect(pairs.map((pair) => pair.prompt)).toEqual([
+      "第一组完整提示词：城市夜景、柔和光影与电影感构图。",
+      "第二组完整提示词：森林人像、自然光线与浅景深效果。",
+    ]);
+  });
+
 });

@@ -4,422 +4,246 @@
 
 [简体中文](./README.md) | **English**
 
-**Local AI prompt & image library manager**
+**A local-first AI prompt, image, and creative-material manager**
 
-Keep your artwork and prompts together — find, edit, and take them anywhere
+Keep artwork, videos, prompts, categories, tags, and creative plans together so they are easy to find, reuse, organize, and share.
 
-[GitHub](https://github.com/guliacer/SuYan) · [Highlights](#-highlights) · [Features](#-features) · [Quick start](#-quick-start) · [Changelog](#-changelog) · [FAQ](#-faq) · [Paid listings](#-paid-listings) · [Acknowledgements](#-acknowledgements)
+[GitHub](https://github.com/guliacer/SuYan) · [Features](#features) · [Quick start](#quick-start) · [Changelog](#changelog) · [FAQ](#faq)
 
-**Forever free · Open source · Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues)**
+**Free forever · MIT licensed · No paid activation**
 
-<br/>
+<br />
 
-<img src="./photo/界面展示.gif" alt="SuYan overview" width="860" />
-
-<p><sub>
-<strong>Main window at a glance:</strong> left nav for library, import, lexicons, and settings; center masonry cards bind artwork with prompt summaries.
-Adjust columns, search titles or prompts, filter by category / tag / favorites, sort by time, size, or random.
-Open a card to edit, copy, or share.
-</sub></p>
+<img src="./photo/readme/library.png" alt="SuYan library" width="100%" />
 
 </div>
 
-> 💚 **SuYan is always free.**  
-> MIT-licensed open source — no app fees, no paid unlock, no membership.  
-> If someone sells the installer or charges an “install fee”, **report it**, do not pay, and download from [GitHub](https://github.com/guliacer/SuYan).  
-> Send links, screenshots, or shop names via [Issues](https://github.com/guliacer/SuYan/issues). Verified cases appear in [Paid listings](#-paid-listings).
+> SuYan stores materials, prompts, settings, and logs locally by default. Sign-in is used for identity, authorship, and account-verified imports; it is not cloud sync. Local work created before sign-in is not automatically uploaded or claimed.
 
----
+## Features
 
-## ✨ Highlights
+### Local library
 
-> **SuYan** keeps artwork, positive/negative prompts, categories, tags, and replaceable terms in one local library — searchable, reusable, and easy to share.
+- Browse images, videos, and grouped artwork in a responsive masonry or grid / list view.
+- Search titles, filenames, prompts, categories, and tags; filter by favorites and sort by time, size, or random order.
+- Edit positive / negative prompts, copy text or images, favorite items, manage categories and tags, record model information, and keep multiple artwork files per prompt group.
+- Keep the original artwork first in a group; later imports are appended by import time.
+- Recover gracefully when thumbnails are missing, generating, or failed by waiting or falling back to the original media.
 
-- 🗂️ **Local first** — data stays on your machine; no cloud account required
-- 🖼️ **Image + prompt together** — browse, edit, copy, and share in one flow
-- ✨ **AI when you need it** — split parameters, expand terms, reverse-prompt, translate, optimize; works offline without AI
-- 🧹 **Easy cleanup** — compress, dedupe, batch import/export
+<img src="./photo/readme/library.png" alt="Library browsing" width="100%" />
 
----
+### Import, batch processing, and export
 
-## 🚀 Features
+- Import local images / videos, paste clipboard images, read Word documents, import share ZIPs, or parse supported web share links.
+- Mount existing media folders as external indexes without copying or deleting the original files. Watch, re-locate, rescan, and clean missing indexes when needed.
+- Batch-select, copy, delete, deduplicate, compress images, and compress videos.
+- Export runs with progress in the background so the main UI remains usable; import and export dialogs remember the last folder.
+- Prompt share packages can include the selected works' related category and tag knowledge, groups, and covers.
+- Export filenames include the app name, version, content type, and timestamp.
 
-Browse in everyday order. Each section lists capabilities, then shows a demo GIF.
+<img src="./photo/readme/import-menu.png" alt="Import options" width="100%" />
 
-### 🏠 Library browse
+<img src="./photo/readme/batch-manager.png" alt="Batch manager" width="100%" />
 
-- **Masonry gallery** — card view for image / video prompts; column count adjustable
-- **Full-text search** — title, filename, prompt text, or tags
-- **Filter & sort** — category, tag, favorites; by import / modified time, size, or random
-- **Favorites** — star items and view them alone
+### AI assistant
 
-<img src="./photo/界面展示.gif" alt="Library browse" width="860" />
+- Configure providers, models, and rules independently for category recognition, tag recognition, prompt optimization, translation, image reverse prompting, and generation.
+- Analyze categories and tags from either the prompt or artwork. Model selectors use the provider's actual model IDs and remember each action's preferred model and analysis source.
+- Split prompts into parameter capsules, variables, and replaceable terms. Local rules constrain AI results so visual attributes are not treated as categories and unsupported tags are not invented.
+- Use **Organize** beside AI tags to merge synonyms, group unorganized tags, classify entities, and correct wrong groups with preview, confirmation, and undo.
+- Export AI settings normally, with a password, or with account verification. Account-verified backups can only be imported after the same account is verified.
 
----
+<img src="./photo/readme/ai-settings.png" alt="AI model and rule settings" width="100%" />
 
-### 📥 Import
+> AI endpoints and API keys are user-provided. Browsing, editing, local lexicons, import, and export remain available without an AI configuration.
 
-- **Import images** — batch add local files
-- **Mount folders** — index existing image / video folders without copying the source media
-- **Paste** — clipboard images go straight in
-- **Import documents** — extract images and prompts from Word
-- **Import shares** — ZIP packages or shared web links
+### Creative canvas
 
-#### Local import
+- Edit prompts and call configured image / video models inside the app.
+- Fit generated artwork to the available canvas area; copy, favorite, export, regenerate, or add results to the local library.
+- Collapse and restore the parameter panel. Canvas backgrounds can follow the theme, use the classic white style, or use a custom color or image.
+- Generation mode adds scanning, energy-field, particle, and completion effects while the idle canvas stays restrained.
+- Use reference images, clipboard paste, quick model switching, and structured generation errors.
 
-Left sidebar **Import** → **Import images**, multi-select local files; paste and Word import also work.
+<img src="./photo/readme/canvas.png" alt="Creative canvas" width="100%" />
 
-<img src="./photo/本地素材导入.gif" alt="Local import" width="860" />
+### Ideas and tasks
 
-#### Network import
+- Save text-only prompts, workflows, configuration notes, and GitHub project notes without needing an artwork file.
+- Rich text, variables, categories, tags, favorites, drag sorting, copy, import, and export are supported.
+- Tasks support projects, subtasks, priority, progress, tags, archives, and quick creation.
+- The monthly calendar supports single-day-off, alternate-week, and two-day-off schedules. Workdays, rest days, holidays, and make-up workdays can be queried and adjusted manually.
+- Export all tasks or only selected tasks.
 
-Paste a share link; SuYan downloads remote images and prompts. Configure **Network proxy** first if the site needs it.
+<img src="./photo/readme/ideas.png" alt="Ideas library" width="100%" />
 
-<img src="./photo/网络素材导入.gif" alt="Network import" width="860" />
+<img src="./photo/readme/todo.png" alt="Task center" width="100%" />
 
-#### Share package
+### Accounts and authorship
 
-Export a ZIP (images + prompts) from detail or **Batch manage**; the other side uses **Import share** — no account required.
+- Uses real OIDC Authorization Code + PKCE authorization through [Guli Identity](https://auth.guliacer.dpdns.org).
+- Email registration / sign-in, Google, GitHub, Linux.do, and device-code flows complete in the system default browser. SuYan never receives provider passwords or a `client_secret`.
+- Link multiple sign-in methods. After authorization, confirm whether to use the current or new account's name and avatar, or enter custom profile details.
+- New generated or imported works can record the signed-in account. Older local works are not automatically synced; detail and batch views provide explicit sync actions with confirmation before replacing existing authorship.
+- Local linked works follow a new avatar after the account profile changes; share packages can retain author information.
+- Tokens are protected by the operating system secure store in the Electron main process.
 
-<img src="./photo/分享与导入.gif" alt="Share and import" width="860" />
+### ComfyUI, web assistant, and resources
 
----
+- A local receiver listens on `127.0.0.1:9477` and accepts images, prompts, negative prompts, titles, and generation methods from ComfyUI.
+- ComfyUI PNG prompt / workflow metadata is parsed automatically and uses the same local import path.
+- The web assistant provides a controlled web workspace and site directory for common creative websites.
+- Resource recommendations focus on maintained model, tool, prompt, and creative-resource links; expired entries are removed or updated.
 
-### 🗂️ Batch manage
+### Content rating and optional components
 
-- **Unified list** — group counts and tag overview
-- **Batch export / import** — export selected groups or import packages
-- **Batch delete** — multi-select with confirmation
-- **Image compress** — original format or WebP; quality adjustable
-- **Video compress** — choose target resolution
-- **Dedupe** — scan duplicates, keep one copy
+- Local NSFW rating, default blur, temporary reveal in detail, and batch re-rating are supported.
+- FFmpeg and the local NSFW runtime are optional components. Fixed download locations, signed manifests, and file hashes are verified before installation.
+- The app does not package personal media, accounts, settings, or logs.
 
-<img src="./photo/去重-压缩.gif" alt="Dedupe and compress" width="860" />
+### Appearance, language, and guidance
 
----
+- Translucent glass title bar and sidebar, with independent accent, secondary, tertiary, navigation, background, and workspace colors.
+- Canvas backgrounds, sidebar entries, layout, and always-on-top state persist locally.
+- Simplified Chinese is the default UI language; switch to English in System Settings. User prompts, tags, categories, and material content are not automatically translated.
+- First-use guidance covers each page's real controls, including import methods, prompt cards, canvas parameters, AI connections, system settings, and window controls.
+- Check official GitHub releases and choose update now, remind later, ignore this version, or never remind.
 
-### 📝 Prompt detail
+<img src="./photo/readme/system-settings.png" alt="System settings" width="100%" />
 
-- **Side-by-side** — artwork with positive / negative prompts
-- **Copy / share** — clipboard or share package
-- **Category & tags** — manual or AI suggestions
-- **Model notes** — record how it was generated
-- **Multi-image** — several artworks per prompt group
+## Quick start
 
-Open any masonry card to enter detail.
+### Use a release build
 
----
+Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The repository's `0.3.6` is currently an unpublished development line; the latest public version is the one shown on the Releases page.
 
-### ✨ AI assistant
+If GitHub downloads are slow, mirror downloads are also available:
 
-- **Parameter analysis** — long prompts become clickable capsules
-- **AI terms** — similar replaceable candidates for the current parameter
-- **Prompt polish** — restructure by rules for better control
-- **EN / ZH translate** — keep parameter structure where possible
-- **Image reverse prompt** — generate a full prompt from artwork
-- **Rule presets** — different providers / models / rules per action; right-click to switch
+- [Quark Drive](https://pan.quark.cn/s/5d22e38ac71a)
+- [Baidu Netdisk](https://pan.baidu.com/s/1clGqo2sebMwzt3WhwESWQA), extraction code: `bf8y`
 
-<img src="./photo/AI分析操作指引.gif" alt="AI analysis" width="860" />
+Choose the installer or portable file matching the required edition, then use the included `SHA256SUMS.txt` to verify the download.
 
-> Configure an API under **Model settings** first. Local browse and edit work without AI.
+Run the installer and choose a directory, or extract the portable build to a writable folder and run `素言.exe`. The first launch creates `data\` and `logs\` beside the app.
 
----
+### Develop locally
 
-### 🎬 Video prompts
+Requirements: Windows 10 / 11, Node.js, and pnpm 11.9.0.
 
-- **Video cards** — cover and duration
-- **Keyframe timeline** — one-click keyframes for pacing review
-- **References** — import reference images / audio from file, clipboard, or link
+```powershell
+pnpm install
+pnpm dev
+```
 
----
+Useful checks:
 
-### 📚 Lexicons
+```powershell
+pnpm typecheck
+pnpm test
+pnpm check:secrets
+pnpm check:empty-shell
+```
 
-- **Categories** — groups, notes, cover images
-- **Tags** — consistent naming for search
-- **Parameter lexicon** — parameters, variables, defaults; import / export
+Build the development Windows portable directory:
 
-<img src="./photo/分类-标签-参数页面.gif" alt="Lexicons" width="860" />
+```powershell
+pnpm package:win
+```
 
----
+Build installer and portable release artifacts:
 
-### 🌐 Resource links
+```powershell
+pnpm package:win:release
+```
 
-- **Site shortcuts** — Jimeng, Civitai, LibLib, and more
-- **Copy URL** — open in your browser
+Release artifacts must not include `data\`, `logs\`, API keys, account credentials, personal media, or private configuration. See [docs/Windows四版本打包.md](./docs/Windows四版本打包.md) for optional-component editions.
 
----
+### Guli Identity configuration
 
-### ⚙️ Settings
+The packaged desktop client only needs public OIDC client metadata; it never needs a `client_secret`. Use the ignored `private/guli-identity.env` for local development or packaging, or provide `config/guli-identity.public.env`:
 
-- **Model settings** — multiple APIs, models, keys; per-action rules
-- **Content rating** — auto NSFW, default blur, batch regrade, speed control
-- **Network proxy** — system / manual / direct; auto-detect
-- **Startup acceleration** — hardware acceleration (restart required)
-- **Startup gallery** — custom splash carousel
-- **Appearance** — light / dark theme
+```env
+GULI_IDENTITY_ISSUER=https://auth.guliacer.dpdns.org
+GULI_IDENTITY_CLIENT_ID=your-public-client-id
+GULI_IDENTITY_REDIRECT_URI=suyan://oauth/callback
+GULI_IDENTITY_SCOPES=openid email profile offline_access
+```
 
-#### Model settings
+Register `suyan://oauth/callback` with the identity service. Discovery, authorization, token, userinfo, and JWKS endpoints must use HTTPS in production.
 
-Keys stay on your machine and are encrypted; they are never baked into the installer or repo.
+## Data and privacy
 
-<img src="./photo/API模型设置.gif" alt="API model settings" width="860" />
+- Managed materials live under `data\library\`; logs live under `logs\`. External materials keep only relative indexes under registered roots.
+- API keys and account tokens are not written to the README, installer, or logs. Logs are sanitized and do not contain full prompts, image bytes, or credentials.
+- The library, ideas, tasks, lexicons, and settings are local by default. Sign-in is not cloud sync and does not upload older local work.
+- Before upgrading or uninstalling, exit the app and copy the entire `data\` folder outside the app directory. A share ZIP contains selected works, not a complete backup.
 
-#### NSFW rating
+## Changelog
 
-Sensitive cards blur in the masonry by default; temporary reveal in detail; batch regrade supported.
+### v0.3.6 (current development line, unpublished)
 
-<img src="./photo/NSFW分级.gif" alt="NSFW rating" width="860" />
+Compared with the latest public `v0.2.10`, this release line adds:
 
-#### Startup gallery
-
-Six default splash images ship with the app; replace them with your own for next launch.
-
-<img src="./photo/启动图库.gif" alt="Startup gallery" width="860" />
-
----
-
-## 📥 Quick start
-
-### Requirements
-
-| Item | Requirement |
-|------|-------------|
-| OS | Windows 10 / 11 (64-bit) |
-| Disk | Enough space for your images / videos |
-| Network | Optional; needed for AI and share-link parsing |
-
-### Install
-
-1. **Download** the latest installer from [GitHub Releases](https://github.com/guliacer/SuYan/releases) (e.g. `SuYan-Setup-x.y.z.exe`), or portable ZIP then run `素言.exe`  
-   (Free software. Current version is `v0.2.10`; first release `v0.1.0` remains separate and is not overwritten. Report paid resellers via [Issues](https://github.com/guliacer/SuYan/issues).)
-2. **Install or open** via the wizard, or run the portable build
-3. **Import** images, paste, documents, or share packages from the left sidebar  
-   (see [Local import](#local-import) / [Network import](#network-import))
-4. **Organize** in the masonry; open detail to edit prompts; configure AI when ready  
-   (see [AI assistant](#-ai-assistant) / [Model settings](#model-settings))
-
----
-
-## 📝 Changelog
+- Real Guli Identity browser authorization, email registration, Google / GitHub / Linux.do sign-in, device codes, and multiple linked methods.
+- Account profile confirmation and custom name / avatar, authorship, batch work association, and account-verified exports.
+- Ideas library, task calendar, work schedules, holiday lookup, and task exchange.
+- ComfyUI receiver, web assistant, local NSFW rating, optional signed components, localized UI, update notifications, and page-by-page guidance.
+- Canvas fitting and themed backgrounds, model-ID discovery, persistent per-action AI preferences, stricter category / tag organization, clipboard image fixes, thumbnail fallback, non-blocking export progress, folder memory, and release safety checks.
 
 ### v0.2.10
 
-**New**
+- Added mounted material folders, built-in canvas generation, configurable analysis sources, prompt-site adapters, and resource recommendations.
+- Improved sharing, data placement, menus, drag grouping, native dialogs, category / tag analysis, AI error feedback, and layout.
 
-- **Mount folders directly** — attach existing image / video folders on disk to your library without copying the originals again. Thanks to community member [@wysl](https://github.com/wysl) — see [PR #1](https://github.com/guliacer/SuYan/pull/1)
-- **Built-in canvas** — generate images right inside the app once an API is configured
-- **Default recognition source** — choose whether category / tag recognition analyzes the "prompt" or the "artwork" by default, switchable with one star click
-- **More prompt sites** — added site recommendations with matching import adapters
-- **More resource picks** — browse them whenever you need
-
-**Improved**
-
-- **Sharing** — delivers on the "packaged share" intent; share packages are more complete
-- **Data storage** — cleaner rules for where portable and installer builds keep data
-- **Column menus** — fixed menus that were cut off at some resolutions
-- **Drag-to-group** — smarter grouping when dropping multiple images into a prompt group
-- **Native dialogs** — unified the look and behavior of native dialogs across the app
-- **Category / tags** — reworked category and tag features for more accurate, easier-to-understand results
-- **AI feedback** — clearer API error messages and steadier recognition on reasoning models (e.g. GLM, DeepSeek)
-- **Tech stack** — upgraded the stack for smoother future iteration
-- **Layout** — refined many layout details
-
-**Roadmap**
-
-1. The current parameter lexicon isn't good enough yet — it will return after a rework
-2. Evaluating whether plain-text prompt saving is worth keeping
-3. Evaluating ComfyUI integration
-
----
-
-## ❓ FAQ
+## FAQ
 
 <details>
-<summary><b>Is SuYan paid? What if someone sells the installer?</b></summary>
+<summary><b>Is SuYan paid?</b></summary>
 
-**A:** No. MIT open source, always free — no paid unlock or membership.  
-If someone sells packages or charges install fees, **report it**, do not pay; download from [GitHub Releases](https://github.com/guliacer/SuYan/releases).  
-Send evidence to [Issues](https://github.com/guliacer/SuYan/issues). Verified cases go to [Paid listings](#-paid-listings).
+No. It is MIT licensed and free to use. Download from [GitHub Releases](https://github.com/guliacer/SuYan); report paid installers or activation services via [Issues](https://github.com/guliacer/SuYan/issues).
 
 </details>
 
 <details>
-<summary><b>Where is my library? Is it uploaded?</b></summary>
+<summary><b>Can I use it without AI?</b></summary>
 
-**A:** On your machine by default. Browse and edit offline. Network is used only when you call remote AI, parse share links, or download remote images.
-
-</details>
-
-<details>
-<summary><b>How do I use images already on disk?</b></summary>
-
-**A:** Left sidebar **Import** → **Add folder** scans existing image/video folders. Media stays in place; the app only stores indexes, size/mtime, and thumbnail cache — it does **not** copy source media. Deleting a library entry does not delete the original file.
-
-Each mounted folder can enable **Watch this folder** (off by default). While enabled, new media is indexed automatically; removals are marked missing without deleting the index or source files. Uniquely identifiable renames update the stored relative path; otherwise it becomes "old entry missing + new entry added". Turning watching off stops automatic synchronization.
-
-You can also validate, re-locate, incrementally rescan, or unmount from **Material folders**. After re-locating, items recover by original relative paths.
-
-ZIP shares read external sources and embed media into the package (no in-library copy required). External items are not compressed/transcoded in-app and are never overwritten in place; create a managed copy via normal import first if you need compression.
+Yes. Browsing, search, editing, copying, favorites, import / export, lexicons, and tasks work locally. AI analysis, online generation, web parsing, and some web features need network access or configured services.
 
 </details>
 
 <details>
-<summary><b>How do I handle missing source files?</b></summary>
+<summary><b>Does sign-in automatically sync older work?</b></summary>
 
-**A:** If a mount is disconnected or files were moved/deleted on disk, cards show **source missing** (both masonry and batch manage).
-
-- If files only moved: **re-locate** the mount under **Material folders** to restore by relative paths.
-- If the originals are gone for good and only missing indexes remain: open **Material folders**, then use the **clean** action on that folder row (tooltip: clear prompt indexes for deleted files under this folder). It removes missing-file indexes and app thumbnail cache for that root only — it does **not** delete remaining files on disk or affect other folders.
+No. Older local works stay local. New work can be associated after explicit confirmation, and replacing existing authorship requires another confirmation.
 
 </details>
 
 <details>
-<summary><b>How do I configure AI?</b></summary>
+<summary><b>Why does third-party sign-in open the browser?</b></summary>
 
-**A:** Open **Model settings**, add endpoint, model, and API key. Right-click AI actions in detail to switch provider / model / rules. See [Model settings](#model-settings).
-
-</details>
-
-<details>
-<summary><b>Share link parsing failed?</b></summary>
-
-**A:** Check the network. If the site needs a proxy, enable or enter one under **Network proxy**, or try auto-detect.
+That is the real OIDC authorization flow. SuYan starts a PKCE request and does not collect Google, GitHub, or Linux.do passwords. The browser returns to the app through `suyan://oauth/callback`.
 
 </details>
 
 <details>
-<summary><b>How do I share with others?</b></summary>
+<summary><b>How do I back up before an upgrade?</b></summary>
 
-**A:** Use **Share** in detail, or export selected groups in **Batch manage**. See [Share package](#share-package).
-
-</details>
-
-<details>
-<summary><b>How is NSFW handled?</b></summary>
-
-**A:** Enable auto rating and default blur under **Content rating**. Temporary reveal in detail; batch regrade supported. See [NSFW rating](#nsfw-rating).
+Exit the app and copy the entire `data\` folder outside the app directory. A share package is for exchanging selected works and is not a full backup.
 
 </details>
 
 <details>
-<summary><b>Video features unavailable?</b></summary>
+<summary><b>How should I report a problem?</b></summary>
 
-**A:** Video cards, keyframes, and video compress need video support. Confirm it is enabled; reinstall or update if needed.
+Use **Export Logs** in the app, then open a [GitHub Issue](https://github.com/guliacer/SuYan/issues) with the reproduction steps, expected result, actual result, and app version. Review exported attachments before sharing them.
 
 </details>
 
----
+## Contributing and license
 
-## 🚨 Paid listings
+Bug reports, feature ideas, and UX feedback are welcome. Include the version, operating system, reproduction steps, expected result, and actual result when possible.
 
-SuYan is **forever free**. Channels below were reported and verified — **do not buy or download there**.
-
-### How to report
-
-1. Open a new [GitHub Issue](https://github.com/guliacer/SuYan/issues)
-2. Include **link / shop name / screenshot / how they charge** when possible
-3. Verified entries are listed here
-
-> Official downloads: [GitHub Releases](https://github.com/guliacer/SuYan/releases) only. Absence from this list does not mean a third-party channel is safe.
-
-### Verified list
-
-| Channel / shop | Behavior | Reported | Notes |
-|----------------|----------|----------|-------|
-| (none yet) | — | — | Will update after verification |
-
----
-
-## 🤝 Contributing
-
-Feature ideas, UX feedback, and bug reports are welcome.
-
-Please include when possible:
-
-1. What you wanted to do
-2. What happened vs what you expected
-3. Repro steps (if any)
-
----
-
-## 🙏 Acknowledgements
-
-SuYan uses and thanks the open-source projects below. This section lists direct dependencies, build/test tools, and the core open-source components used by the packaged application; exact versions are tracked in [`package.json`](./package.json) and [`pnpm-lock.yaml`](./pnpm-lock.yaml). Copyright and licensing remain with the respective authors, and each project is used under its own license.
-
-### Feature references and implementation sources
-
-The projects below informed feature, interaction, or low-level technology choices. Unless stated otherwise, SuYan does not copy their source code; the implementation in this repository is authoritative.
-
-| Feature | Reference / project used | Notes |
-| --- | --- | --- |
-| Creative canvas | [CookSleep/gpt_image_playground](https://github.com/CookSleep/gpt_image_playground) | Canvas interaction and layout reference |
-| Image compression | [meowtec/Imagine](https://github.com/meowtec/Imagine) | Compression UX reference; actual image processing uses [Sharp](https://github.com/lovell/sharp) |
-| Image deduplication | [Node.js](https://github.com/nodejs/node) | The current implementation uses `node:crypto` SHA-256 exact file-content matching; no separate third-party image-deduplication project is bundled |
-| Video compression | [FFmpeg](https://ffmpeg.org/) / [eugeneware/ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) | FFmpeg encoding; the FFmpeg binary is downloaded on demand, signature-verified, and installed on first use of video features — no longer bundled with the app |
-
-### Runtime and core capabilities
-
-| Project | Use in SuYan | License | Project |
-| --- | --- | --- | --- |
-| [Electron](https://github.com/electron/electron) | Cross-platform desktop runtime | MIT | [electron/electron](https://github.com/electron/electron) |
-| [Node.js](https://github.com/nodejs/node) | Main-process Node APIs provided by Electron | MIT | [nodejs/node](https://github.com/nodejs/node) |
-| [React / React DOM](https://github.com/facebook/react) | UI rendering and components | MIT | [facebook/react](https://github.com/facebook/react) |
-| [Zustand](https://github.com/pmndrs/zustand) | Renderer state management | MIT | [pmndrs/zustand](https://github.com/pmndrs/zustand) |
-| [Lucide](https://github.com/lucide-icons/lucide) | UI icons (`lucide-react`) | ISC | [lucide-icons/lucide](https://github.com/lucide-icons/lucide) |
-| [JSZip](https://github.com/Stuk/jszip) | ZIP shares, log packages, and document reads | MIT / GPL-3.0-or-later | [Stuk/jszip](https://github.com/Stuk/jszip) |
-| [Sharp](https://github.com/lovell/sharp) | Image compression, thumbnails, and processing | Apache-2.0 | [lovell/sharp](https://github.com/lovell/sharp) |
-| [libvips](https://github.com/libvips/libvips) | High-performance image layer used by Sharp | LGPL-3.0-or-later | [libvips/libvips](https://github.com/libvips/libvips) |
-| [Chokidar](https://github.com/paulmillr/chokidar) | External material-folder watching | MIT | [paulmillr/chokidar](https://github.com/paulmillr/chokidar) |
-| [uuid](https://github.com/uuidjs/uuid) | Unique IDs for materials and records | MIT | [uuidjs/uuid](https://github.com/uuidjs/uuid) |
-| [FFmpeg](https://ffmpeg.org/) | Video compression and keyframes; the binary is downloaded, signature-verified, and installed on demand (`ffmpeg-static` is used only for build-time development and testing) | GPL-3.0-or-later | [ffmpeg.org](https://ffmpeg.org/) |
-
-### Build, test, and release tooling
-
-| Project | Use in SuYan | License | Project |
-| --- | --- | --- | --- |
-| [Vite](https://github.com/vitejs/vite) | Renderer development and builds | MIT | [vitejs/vite](https://github.com/vitejs/vite) |
-| [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react) | React compiler plugin for Vite | MIT | [vitejs/vite-plugin-react](https://github.com/vitejs/vite-plugin-react) |
-| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) / `@tailwindcss/vite` | Styling system and Vite integration | MIT | [tailwindlabs/tailwindcss](https://github.com/tailwindlabs/tailwindcss) |
-| [TypeScript](https://github.com/microsoft/TypeScript) | Type checking and Electron builds | Apache-2.0 | [microsoft/TypeScript](https://github.com/microsoft/TypeScript) |
-| [Vitest](https://github.com/vitest-dev/vitest) | Unit tests and regression checks | MIT | [vitest-dev/vitest](https://github.com/vitest-dev/vitest) |
-| [electron-builder](https://github.com/electron-userland/electron-builder) | Windows installer and portable builds | MIT | [electron-userland/electron-builder](https://github.com/electron-userland/electron-builder) |
-| [javascript-obfuscator](https://github.com/javascript-obfuscator/javascript-obfuscator) | Electron code protection for release builds | BSD-2-Clause | [javascript-obfuscator/javascript-obfuscator](https://github.com/javascript-obfuscator/javascript-obfuscator) |
-| [DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) | `@types/node`, `@types/react`, and `@types/react-dom` declarations | MIT | [DefinitelyTyped/DefinitelyTyped](https://github.com/DefinitelyTyped/DefinitelyTyped) |
-| [Go](https://github.com/golang/go) | Builds the file-copy helper (standard library only) | BSD-3-Clause | [golang/go](https://github.com/golang/go) |
-| [pnpm](https://github.com/pnpm/pnpm) | Dependency installation and lockfile management | MIT | [pnpm/pnpm](https://github.com/pnpm/pnpm) |
-
-## Disclaimer
-
-This project is open source under the [MIT License](./LICENSE), **forever free**, for learning and personal creative organization. Follow applicable laws; use AI-generated content responsibly. You assume the risk of use.
-
-If SuYan helps you, a ⭐ or a share with friends is appreciated.
-
-### Buy me a coffee ~
-
-The app is free. Optional tips keep development going (no effect on features):
-
-<div align="center">
-
-<table>
-  <tr>
-    <td align="center" width="280">
-      <img src="./photo/赞助-微信.png" alt="WeChat tip" width="180" />
-      <br/>
-      <sub>WeChat</sub>
-    </td>
-    <td width="48"></td>
-    <td align="center" width="280">
-      <img src="./photo/赞助-支付宝.jpg" alt="Alipay tip" width="180" />
-      <br/>
-      <sub>Alipay</sub>
-    </td>
-  </tr>
-</table>
-
-</div>
-
----
+SuYan is released under the [MIT License](./LICENSE). It uses open-source projects including Electron, React, Vite, TypeScript, Zustand, Lucide, JSZip, Sharp, Chokidar, openid-client, Vitest, and electron-builder. Exact versions and licenses are tracked in [package.json](./package.json) and [pnpm-lock.yaml](./pnpm-lock.yaml).
 
 <div align="center">
 

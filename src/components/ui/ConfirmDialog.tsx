@@ -2,12 +2,14 @@ import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AppDialog } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
 
 export type ConfirmDialogTone = "danger" | "primary";
 
 export type ConfirmDialogProps = {
   cancelLabel?: string;
   confirmLabel?: string;
+  confirmDisabled?: boolean;
   description: ReactNode;
   icon?: ReactNode;
   isBusy?: boolean;
@@ -28,12 +30,13 @@ export type ConfirmDialogProps = {
  * Portaled to document.body so transformed cards (hover previews) cannot cover it.
  */
 export function ConfirmDialog({
-  cancelLabel = "取消",
-  confirmLabel = "确定",
+  cancelLabel,
+  confirmLabel,
+  confirmDisabled = false,
   description,
   icon,
   isBusy = false,
-  busyLabel = "处理中…",
+  busyLabel,
   open,
   title,
   tone = "danger",
@@ -41,6 +44,10 @@ export function ConfirmDialog({
   onCancel,
   onConfirm,
 }: ConfirmDialogProps) {
+  const { t } = useLocale();
+  const resolvedCancelLabel = cancelLabel ?? t("取消");
+  const resolvedConfirmLabel = confirmLabel ?? t("确定");
+  const resolvedBusyLabel = busyLabel ?? t("处理中…");
   useEffect(() => {
     if (!open) {
       return;
@@ -57,7 +64,7 @@ export function ConfirmDialog({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isBusy, onCancel, open]);
 
-  if (!open || typeof document === "undefined") {
+  if (!open) {
     return null;
   }
 
@@ -95,16 +102,24 @@ export function ConfirmDialog({
       </div>
 
       <footer className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
-        <Button disabled={isBusy} type="button" variant="secondary" onClick={onCancel}>
-          {cancelLabel}
-        </Button>
         <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
           disabled={isBusy}
           type="button"
-          variant={confirmVariant}
-          onClick={onConfirm}
+          variant="secondary"
+          onClick={onCancel}
         >
-          {isBusy ? busyLabel : confirmLabel}
+          {resolvedCancelLabel}
+        </Button>
+        <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
+          disabled={isBusy || confirmDisabled}
+          type="button"
+          variant={confirmVariant}
+          aria-disabled={confirmDisabled || isBusy}
+          onClick={() => { if (!confirmDisabled && !isBusy) onConfirm(); }}
+        >
+          {isBusy ? resolvedBusyLabel : resolvedConfirmLabel}
         </Button>
       </footer>
     </AppDialog>,

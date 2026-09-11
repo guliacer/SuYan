@@ -137,9 +137,21 @@ export async function safeExtractZip(
   const destResolved = path.resolve(destDir);
   await fs.mkdir(destResolved, { recursive: true });
   const written: string[] = [];
+  const exactPaths = new Set<string>();
+  const foldedPaths = new Set<string>();
   let totalBytes = 0;
   for (const entry of entries) {
     const relativePath = assertSafeRelativePath(entry.name);
+    const foldedPath = relativePath.toLowerCase();
+    if (exactPaths.has(relativePath) || foldedPaths.has(foldedPath)) {
+      throw new Error(`ZIP 条目路径重复或大小写冲突: ${entry.name}`);
+    }
+    exactPaths.add(relativePath);
+    foldedPaths.add(foldedPath);
+    const permissions = entry as SafeZipEntry & { unixPermissions?: number };
+    if (((permissions.unixPermissions ?? 0) & 0o170000) === 0o120000) {
+      throw new Error(`ZIP 条目为符号链接: ${entry.name}`);
+    }
     const target = path.resolve(destResolved, relativePath);
     if (target !== destResolved && !target.startsWith(destResolved + path.sep)) {
       throw new Error(`ZIP 条目逃逸目标目录: ${entry.name}`);

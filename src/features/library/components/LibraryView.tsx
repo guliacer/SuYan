@@ -1,3 +1,7 @@
+import { TagOrganizationDialog } from "./TagOrganizationDialog";
+import { normalizeTagKnowledge } from "../utils/tagKnowledge";
+import { matchesTagAliasQuery } from "../utils/tagOrganization";
+import { CanvasPageBackground } from "./CanvasPageBackground";
 import {
   lazy,
   memo,
@@ -11,15 +15,25 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { usePromptCards } from "@/hooks/usePromptCards";
-import type { AppUpdateCheckData, LogExportFormat, LogExportLevel, LogExportRange } from "@/types/suyanApi";
+import { useLexiconMenuViewport } from "../hooks/useLexiconMenuViewport";
+import { CanvasPageAtmosphere } from "./CanvasPageAtmosphere";
+import type {
+  AppUpdateCheckData,
+  ExportZipData,
+  LogExportFormat,
+  LogExportLevel,
+  LogExportRange,
+} from "@/types/suyanApi";
 import {
   ArrowDown,
   ArrowUp,
   BookOpen,
+  BookOpenText,
   Check,
   CheckSquare,
   ChevronRight,
@@ -32,6 +46,7 @@ import {
   Eye,
   ExternalLink,
   FileText,
+  FileArchive,
   FolderTree,
   GripVertical,
   Globe2,
@@ -42,11 +57,12 @@ import {
   ImagePlus,
   Info,
   LayoutGrid,
+  ListTodo,
   Minus,
-  Moon,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  Palette,
   Pencil,
   Plus,
   RefreshCw,
@@ -58,7 +74,6 @@ import {
   Sparkles,
   Square,
   Star,
-  Sun,
   Tags,
   Trash2,
   Upload,
@@ -68,7 +83,7 @@ import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { AppLogoMark } from "@/components/ui/AppLogoMark";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { CAPSULE_TONES } from "@/components/ui/capsuleTones";
+import { PromptLibraryErrorBoundary } from "@/components/ui/PromptLibraryErrorBoundary";
 import { CardScrollTopButton } from "./CardScrollTopButton";
 import { appVersion, suyanGithubReleasesUrl } from "../appVersion";
 import { ImageDropOverlay } from "./shell/ImageDropOverlay";
@@ -77,6 +92,7 @@ import { AiErrorDialog } from "./shell/AiErrorDialog";
 import { DeferredViewFallback, PromptDetailFallback } from "./shell/DeferredFallbacks";
 import { AppTitleBar } from "./shell/AppTitleBar";
 import { AboutDialog } from "./shell/AboutDialog";
+import { AppUpdateDialog } from "./shell/AppUpdateDialog";
 import { LogExportDialog, type LogExportSelection } from "./shell/LogExportDialog";
 import {
   PromptSiteRecommendationsView,
@@ -85,6 +101,8 @@ import {
   type PromptSiteCardToneClassNames,
 } from "./recommendations/PromptSiteRecommendations";
 import { StartupLoadingScreen } from "./startup/StartupLoadingScreen";
+import { FeatureGuide } from "./FeatureGuide";
+import { featureGuideDefinitions } from "./featureGuides";
 import startupArt1 from "../assets/startup-art-1.png?url";
 import startupArt2 from "../assets/startup-art-2.png?url";
 import startupArt3 from "../assets/startup-art-3.png?url";
@@ -98,7 +116,8 @@ import type {
   PromptLexiconEntry,
   PromptLexiconKind,
   PromptLexiconSettings,
-  ThemeMode,
+  SidebarEntryVisibility,
+  ThemePreset,
 } from "../types/library";
 import type { AiAnalyzePromptPayload, AiImageGenerationPayload } from "../types/ai";
 import type { CanvasPromptOrigin, DoubaoWebCanvasStatus } from "../types/canvas";
@@ -106,6 +125,8 @@ import { NsfwImage } from "./NsfwImage";
 import { MediaFullscreenOverlay } from "./MediaFullscreenOverlay";
 import { VideoPromptTile } from "./video/VideoPromptTile";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { AccountSidebarEntry } from "@/features/account/components/AccountSidebarEntry";
+import { useAccountStore } from "@/features/account/store/useAccountStore";
 import {
   allCategoriesValue,
   filterFavoritePromptCards,
@@ -147,7 +168,7 @@ import {
 } from "../utils/categoryTaxonomy";
 import type { CategoryTaxonomy } from "../types/category";
 import { buildCustomCategoryId, normalizeCategoryLabelKey } from "../utils/categoryId";
-import { getImageSrc, getStartupGalleryImageSrc } from "../utils/getImageSrc";
+import { getImageSrc, getImageThumbnailSrc, getStartupGalleryImageSrc } from "../utils/getImageSrc";
 import {
   selectRandomStartupGalleryImages,
   startupGalleryDisplayCount,
@@ -172,7 +193,6 @@ import {
   normalizeSidebarWidth,
   resizeSidebarWidthBy,
 } from "../utils/sidebarLayout";
-import { getThemeModeLabel } from "../utils/themeMode";
 import {
   orderTagsWithPreference,
   type TagConfigurationDraft,
@@ -182,6 +202,18 @@ import {
   defaultSystemPreferenceSection,
   type SystemPreferenceSection,
 } from "../utils/systemPreferences";
+import { sidebarEntryGroups, sidebarFooterEntryIds } from "../utils/sidebarEntries";
+import { useLocale } from "@/components/LocaleProvider";
+
+const systemPreferenceGuideSections: readonly SystemPreferenceSection[] = [
+  "proxy",
+  "performance",
+  "canvasBackground",
+  "layout",
+  "sidebar",
+  "modules",
+  "startupGallery",
+];
 
 const AiSettingsDialog = lazy(() =>
   import("./AiSettingsDialog").then((module) => ({ default: module.AiSettingsDialog })),
@@ -203,11 +235,17 @@ const CanvasView = lazy(() =>
 const WebAssistantView = lazy(() =>
   import("./WebAssistantView").then((module) => ({ default: module.WebAssistantView })),
 );
+const TextPromptLibrary = lazy(() =>
+  import("@/features/prompts").then((module) => ({ default: module.PromptLibrary })),
+);
+const TodoWorkspace = lazy(() =>
+  import("@/features/prompts").then((module) => ({ default: module.TodoWorkspace })),
+);
 
 const pageSize = 16;
 const gridVisibleTagCount = 5;
-const contentShellClassName = "mx-auto w-full max-w-[min(100%,1280px)]";
-const lexiconShellClassName = "mx-auto w-full max-w-[min(100%,1400px)]";
+const contentShellClassName = "mx-auto w-full";
+const lexiconShellClassName = "mx-auto w-full";
 // 网页助手是沉浸式工作区，不沿用素材浏览的 1280px 内容壳层。
 const webAssistantShellClassName = "mx-auto h-full min-h-0 w-full max-w-[1760px]";
 const contentShellMaxWidth = 1280;
@@ -228,22 +266,25 @@ const defaultTagGroupLabel = "自定义标签";
 const ungroupedImageGroupLabel = "未分组";
 
 /**
- * Fixed startup gallery duration. Always reserve this wall-clock window so the
- * intro is not auto-dismissed early; users may click to skip manually.
- * Also keeps category/tag workspaces warming in the background.
+ * 启动页默认播放时长。这是「预留的墙钟窗口」，不是「防闪白的最小值」：
+ * 无论素材库多快就绪，都必须完整播完这段时间，只有用户点击「跳过」才能提前结束。
+ * 数值必须覆盖 StartupLoadingScreen 自己的时间线（步骤逐条揭示 + 画廊把每张图都翻到），
+ * 否则启动页会在动画还没走完时就开始淡出，看起来就是「直接跳过了」。
+ * 见 .codex/rules/04-核心铁律与避坑.md R12。
  */
-const STARTUP_OVERLAY_FIXED_MS = 6000;
+const STARTUP_OVERLAY_FIXED_MS = 9000;
+const STARTUP_OVERLAY_FADE_MS = 420;
 const STARTUP_PREWARM_VIEWS: LibraryMainView[] = ["categoryLexicon", "tagLexicon"];
 
 type CollectionMode = "all" | "featured";
 type GalleryMode = "masonry" | "grid";
-type LibraryMainView = "home" | "canvas" | "webAssistant" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
+type LibraryMainView = "home" | "canvas" | "webAssistant" | "textPrompts" | "todo" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
 type LibrarySidebarActiveView =
   | LibraryMainView
   | "aiSettings"
   | "nsfwSettings"
   | "systemPreferences";
-type CategoryAnalysisStatus = "running" | "completed" | "canceled";
+type CategoryAnalysisStatus = "running" | "completed" | "canceled" | "failed";
 type CategoryAnalysisProgress = {
   analyzed: number;
   currentTitle: string;
@@ -261,11 +302,6 @@ type MasonryPromptItem = {
   imageCount: number;
   item: PromptCardData;
 };
-
-const themeModeOptions: Array<{ value: ThemeMode; label: string; icon: React.ReactNode }> = [
-  { value: "light", label: getThemeModeLabel("light"), icon: <Sun size={15} /> },
-  { value: "dark", label: getThemeModeLabel("dark"), icon: <Moon size={15} /> },
-];
 
 let libraryViewRenderCount = 0;
 let libraryViewFirstRenderMs = 0;
@@ -319,6 +355,7 @@ function measureDerivation<T>(label: string, inputSize: number, compute: () => T
 }
 
 export function LibraryView() {
+  const { t } = useLocale();
   recordLibraryViewRender();
   const items = useLibraryStore((state) => state.items);
   const libraryRoots = useLibraryStore((state) => state.libraryRoots);
@@ -329,9 +366,25 @@ export function LibraryView() {
   const toggleRecommendationStar = useLibraryStore((state) => state.toggleRecommendationStar);
   const generationModelOrder = useLibraryStore((state) => state.generationModelOrder);
   const hiddenGenerationModels = useLibraryStore((state) => state.hiddenGenerationModels);
+  const themeMode = useLibraryStore((state) => state.themeMode);
+  const language = useLibraryStore((state) => state.language);
+  const themePreset = useLibraryStore((state) => state.themePreset);
+  const themeAccent = useLibraryStore((state) => state.themeAccent);
+  const themeCustomAccent = useLibraryStore((state) => state.themeCustomAccent);
+  const themeOpacity = useLibraryStore((state) => state.themeOpacity);
+  const themeNavigationOpacity = useLibraryStore((state) => state.themeNavigationOpacity);
+  const themeBackgroundOpacity = useLibraryStore((state) => state.themeBackgroundOpacity);
+  const themeWorkspaceOpacity = useLibraryStore((state) => state.themeWorkspaceOpacity);
+  const themeAccentOpacity = useLibraryStore((state) => state.themeAccentOpacity);
+  const themeCustomAccents = useLibraryStore((state) => state.themeCustomAccents);
+  const customTheme = useLibraryStore((state) => state.customTheme);
+  const workspaceWidthPercent = useLibraryStore((state) => state.workspaceWidthPercent);
+  const sidebarEntryVisibility = useLibraryStore((state) => state.sidebarEntryVisibility);
+  const featureGuideCompleted = useLibraryStore((state) => state.featureGuideCompleted);
   const autoNsfwGrading = useLibraryStore((state) => state.autoNsfwGrading);
   const blurNsfwImages = useLibraryStore((state) => state.blurNsfwImages);
   const nsfwGradingSpeed = useLibraryStore((state) => state.nsfwGradingSpeed);
+  const nsfwDetectionMode = useLibraryStore((state) => state.nsfwDetectionMode);
   const promptLexicons = useLibraryStore((state) => state.promptLexicons);
   const categoryTaxonomy = useLibraryStore((state) => state.categoryTaxonomy);
   const savedMasonryTileWidth = useLibraryStore((state) => state.masonryTileWidth);
@@ -412,6 +465,20 @@ export function LibraryView() {
   const movePromptGroupsToCategory = useLibraryStore((state) => state.movePromptGroupsToCategory);
   const upsertCustomCategory = useLibraryStore((state) => state.upsertCustomCategory);
   const deleteCustomCategory = useLibraryStore((state) => state.deleteCustomCategory);
+  const setThemePreset = useLibraryStore((state) => state.setThemePreset);
+  const setThemeMode = useLibraryStore((state) => state.setThemeMode);
+  const setLanguage = useLibraryStore((state) => state.setLanguage);
+  const setThemeAccent = useLibraryStore((state) => state.setThemeAccent);
+  const setThemeOpacity = useLibraryStore((state) => state.setThemeOpacity);
+  const setThemeNavigationOpacity = useLibraryStore((state) => state.setThemeNavigationOpacity);
+  const setThemeBackgroundOpacity = useLibraryStore((state) => state.setThemeBackgroundOpacity);
+  const setThemeWorkspaceOpacity = useLibraryStore((state) => state.setThemeWorkspaceOpacity);
+  const setThemeAccentOpacity = useLibraryStore((state) => state.setThemeAccentOpacity);
+  const setCustomTheme = useLibraryStore((state) => state.setCustomTheme);
+  const setWorkspaceWidthPercent = useLibraryStore((state) => state.setWorkspaceWidthPercent);
+  const saveSidebarEntryVisibility = useLibraryStore((state) => state.saveSidebarEntryVisibility);
+  const completeFeatureGuide = useLibraryStore((state) => state.completeFeatureGuide);
+  const resetFeatureGuides = useLibraryStore((state) => state.resetFeatureGuides);
   const saveMasonryTileWidth = useLibraryStore((state) => state.saveMasonryTileWidth);
   const saveMaterialBrowserSettings = useLibraryStore((state) => state.saveMaterialBrowserSettings);
   const saveMaterialBrowserScrollTop = useLibraryStore((state) => state.saveMaterialBrowserScrollTop);
@@ -422,6 +489,25 @@ export function LibraryView() {
   const deleteItems = useLibraryStore((state) => state.deleteItems);
   const exportZip = useLibraryStore((state) => state.exportZip);
   const openExternalUrl = useLibraryStore((state) => state.openExternalUrl);
+  const initializeAccountStore = useAccountStore((state) => state.initialize);
+  const accountDialogOpen = useAccountStore((state) => state.dialogOpen);
+  const accountProfile = useAccountStore(state => state.user);
+  const [exportAuthorPrompt, setExportAuthorPrompt] = useState<{ itemIds: string[]; data: ExportZipData } | null>(null);
+  const refreshWorkAuthors = useLibraryStore(state => state.refreshWorkAuthors);
+  useEffect(() => { if (accountProfile) void refreshWorkAuthors(); }, [accountProfile?.uid, accountProfile?.avatarUrl, accountProfile?.username, refreshWorkAuthors]);
+  const requestExportZip = async (itemIds: string[]): Promise<void> => {
+    const result = await exportZip(itemIds);
+    if (result?.requiresAuthorChoice) {
+      setExportAuthorPrompt({ itemIds: [...itemIds], data: result });
+    }
+  };
+  const resolveExportAuthorPrompt = async (choice: "keep" | "associate"): Promise<void> => {
+    const pending = exportAuthorPrompt;
+    setExportAuthorPrompt(null);
+    if (pending) {
+      await exportZip(pending.itemIds, choice);
+    }
+  };
   const [sortMode, setSortMode] = useState<PromptSortMode>(savedMaterialBrowserSortMode);
   const [sortDirection, setSortDirection] = useState<PromptSortDirection>(savedMaterialBrowserSortDirection);
   const [randomSeed, setRandomSeed] = useState(savedMaterialBrowserRandomSeed);
@@ -442,11 +528,22 @@ export function LibraryView() {
   const [visibleCount, setVisibleCount] = useState(pageSize);
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
   const [fullscreenMedia, setFullscreenMedia] = useState<PromptCardData | null>(null);
+  const [isCanvasResultPreviewOpen, setIsCanvasResultPreviewOpen] = useState(false);
+
+  const handleCanvasResultPreviewChange = useCallback((open: boolean) => {
+    setIsCanvasResultPreviewOpen(open);
+  }, []);
 
   const openFullscreenMedia = useCallback((item: PromptCardData) => {
     setDetailItemId(null);
     setFullscreenMedia(item);
   }, []);
+
+  useEffect(() => {
+    if (mainView !== "canvas") {
+      setIsCanvasResultPreviewOpen(false);
+    }
+  }, [mainView]);
 
   const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
   const [isNsfwSettingsOpen, setIsNsfwSettingsOpen] = useState(false);
@@ -462,6 +559,8 @@ export function LibraryView() {
     normalizeSidebarWidth(getStoredSidebarWidth(defaultSidebarWidth)),
   );
   const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateCheckData | null>(null);
+  const updateCheckStartedRef = useRef(false);
   const [isLogExportOpen, setIsLogExportOpen] = useState(false);
   const [logExportAction, setLogExportAction] = useState<"save" | "feedback" | null>(null);
   const isExportingLogs = logExportAction !== null;
@@ -469,7 +568,8 @@ export function LibraryView() {
   const [hasInitialLoadFinished, setHasInitialLoadFinished] = useState(false);
   const [mountedLexiconViews, setMountedLexiconViews] = useState<Set<LibraryMainView>>(() => new Set());
   const [hasPremountedLexicons, setHasPremountedLexicons] = useState(false);
-  /** Tracks when the startup sequence began so we can enforce a fixed intro length. */
+  const [startupOverlayPhase, setStartupOverlayPhase] = useState<"visible" | "exiting" | "hidden">("visible");
+  /** Tracks when the startup sequence began so we can avoid a one-frame flash. */
   const startupSequenceStartedAtRef = useRef<number>(performance.now());
   const [hasStartupHoldElapsed, setHasStartupHoldElapsed] = useState(false);
   const cardsStartRef = useRef<HTMLDivElement | null>(null);
@@ -543,11 +643,52 @@ export function LibraryView() {
         setHasInitialLoadFinished(true);
       }
     });
+    void initializeAccountStore();
 
     return () => {
       isCanceled = true;
     };
-  }, [load]);
+  }, [initializeAccountStore, load]);
+
+  useEffect(() => {
+    if (!hasInitialLoadFinished || startupOverlayPhase !== "hidden" || updateCheckStartedRef.current) {
+      return;
+    }
+
+    updateCheckStartedRef.current = true;
+    let isCanceled = false;
+
+    async function checkForStartupUpdate() {
+      try {
+        if (typeof window.suyanApi.readAppUpdatePreferences !== "function") {
+          return;
+        }
+
+        const preferencesResult = await window.suyanApi.readAppUpdatePreferences();
+        if (!preferencesResult.ok || !preferencesResult.data.automaticCheck) {
+          return;
+        }
+
+        const result = await window.suyanApi.checkForUpdates();
+        if (
+          !isCanceled &&
+          result.ok &&
+          result.data.status === "update_available" &&
+          result.data.latestVersion !== preferencesResult.data.ignoredVersion
+        ) {
+          setAvailableUpdate(result.data);
+        }
+      } catch {
+        // 更新检查是后台能力，网络不可用时不打扰正常使用；主进程会记录失败日志。
+      }
+    }
+
+    void checkForStartupUpdate();
+
+    return () => {
+      isCanceled = true;
+    };
+  }, [hasInitialLoadFinished, startupOverlayPhase]);
 
   useEffect(() => {
     setCollectionMode(savedMaterialBrowserCollectionMode);
@@ -620,6 +761,53 @@ export function LibraryView() {
     mainView,
   ]);
 
+  useEffect(() => {
+    // A saved preference can change while its page or dialog is open. Return
+    // to the required material browser instead of leaving an unreachable view.
+    if (mainView !== "home" && !sidebarEntryVisibility[mainView]) {
+      setMainView("home");
+      setSidebarActiveView("home");
+    }
+
+    if (isAiSettingsOpen && !sidebarEntryVisibility.aiSettings) {
+      setIsAiSettingsOpen(false);
+    }
+
+    if (isNsfwSettingsOpen && !sidebarEntryVisibility.nsfwSettings) {
+      setIsNsfwSettingsOpen(false);
+    }
+
+    if (isLibraryRootsOpen && !sidebarEntryVisibility.libraryRoots) {
+      setIsLibraryRootsOpen(false);
+    }
+
+    if (
+      (isDirectoryImportModeOpen || isImportMenuOpen) &&
+      !sidebarEntryVisibility.importMaterial
+    ) {
+      setIsDirectoryImportModeOpen(false);
+      setIsImportMenuOpen(false);
+    }
+
+    if (isLogExportOpen && !sidebarEntryVisibility.logExport) {
+      setIsLogExportOpen(false);
+    }
+
+    if (isAboutOpen && !sidebarEntryVisibility.about) {
+      setIsAboutOpen(false);
+    }
+  }, [
+    isAboutOpen,
+    isAiSettingsOpen,
+    isDirectoryImportModeOpen,
+    isImportMenuOpen,
+    isLibraryRootsOpen,
+    isLogExportOpen,
+    isNsfwSettingsOpen,
+    mainView,
+    sidebarEntryVisibility,
+  ]);
+
   useLayoutEffect(() => {
     const switchInfo = viewSwitchStartedAtRef.current;
 
@@ -670,8 +858,8 @@ export function LibraryView() {
   }, [hasInitialLoadFinished, hasStartupHoldElapsed]);
 
   useEffect(() => {
-    // Fixed wall-clock hold from first mount (covers the early full-screen phase too).
-    // Do not auto-dismiss earlier than STARTUP_OVERLAY_FIXED_MS unless the user skips.
+    // 从首次挂载开始的固定墙钟计时（覆盖早期全屏阶段），到点才放行。
+    // 素材库提前就绪不会缩短它，只有 skipStartupIntro（用户点「跳过」）能提前结束。
     const elapsed = performance.now() - startupSequenceStartedAtRef.current;
     const remaining = Math.max(0, STARTUP_OVERLAY_FIXED_MS - elapsed);
     const timer = window.setTimeout(() => {
@@ -684,7 +872,8 @@ export function LibraryView() {
 
   useEffect(() => {
     // Mount only the active lexicon workspace while navigating.
-    // Startup prewarm may mount others once under the overlay (see below).
+    // The selected lexicon view mounts on demand; the other two are warmed only
+    // after the first usable frame.
     if (mainView !== "categoryLexicon" && mainView !== "tagLexicon") {
       return;
     }
@@ -700,26 +889,45 @@ export function LibraryView() {
   }, [mainView]);
 
   useEffect(() => {
-    if (!hasInitialLoadFinished || !hasStartupHoldElapsed) {
+    if (!hasInitialLoadFinished || !hasStartupHoldElapsed || startupOverlayPhase !== "visible") {
       return;
     }
 
-    // Dismiss only after BOTH library ready and fixed hold elapsed.
+    // Mount the real shell first, then fade the overlay over it. This avoids the
+    // abrupt white flash that occurred when the full-screen loader was removed.
     setHasPremountedLexicons(true);
-    logRendererStartupEvent("startup-overlay:dismissed", {
+    setStartupOverlayPhase("exiting");
+    logRendererStartupEvent("startup-overlay:exiting", {
       holdMs: STARTUP_OVERLAY_FIXED_MS,
       elapsedMs: Math.round(performance.now() - startupSequenceStartedAtRef.current),
       libraryReady: true,
     });
-  }, [hasInitialLoadFinished, hasStartupHoldElapsed]);
+  }, [hasInitialLoadFinished, hasStartupHoldElapsed, startupOverlayPhase]);
 
   useEffect(() => {
-    if (!hasInitialLoadFinished) {
+    if (startupOverlayPhase !== "exiting") {
       return;
     }
 
-    // While the fixed startup page is up, stagger-prewarm heavy workspaces so
-    // opening 分类/标签/参数 later is smoother (they stay hidden until selected).
+    const timer = window.setTimeout(() => {
+      setStartupOverlayPhase("hidden");
+      logRendererStartupEvent("startup-overlay:dismissed", {
+        fadeMs: STARTUP_OVERLAY_FADE_MS,
+        elapsedMs: Math.round(performance.now() - startupSequenceStartedAtRef.current),
+        libraryReady: true,
+      });
+    }, STARTUP_OVERLAY_FADE_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [startupOverlayPhase]);
+
+  useEffect(() => {
+    if (!hasInitialLoadFinished || !hasStartupHoldElapsed || !hasPremountedLexicons) {
+      return;
+    }
+
+    // Prewarm after the first usable frame, when the browser is idle. Doing this
+    // under the startup page caused a burst of renders while the user was waiting.
     let cancelled = false;
     const timers: number[] = [];
 
@@ -742,7 +950,7 @@ export function LibraryView() {
           return next;
         });
         logRendererStartupEvent("startup-overlay:prewarm", { view, index });
-      }, 280 + index * 420);
+      }, 800 + index * 420);
       timers.push(timer);
     });
 
@@ -752,7 +960,7 @@ export function LibraryView() {
         window.clearTimeout(timer);
       }
     };
-  }, [hasInitialLoadFinished]);
+  }, [hasInitialLoadFinished, hasPremountedLexicons, hasStartupHoldElapsed]);
 
   const promptCards = usePromptCards();
   const popularTags = useMemo(() => getPopularTags(promptCards), [promptCards]);
@@ -798,6 +1006,13 @@ export function LibraryView() {
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node;
+
+      // The feature guide is rendered into document.body. Its controls are
+      // intentionally outside the import menu DOM, but interacting with the
+      // guide must not close the menu that the guide is explaining.
+      if (target instanceof Element && target.closest('[data-feature-guide-overlay="true"]')) {
+        return;
+      }
 
       if (!importMenuRef.current?.contains(target) && !importMenuContentRef.current?.contains(target)) {
         setIsImportMenuOpen(false);
@@ -857,6 +1072,44 @@ export function LibraryView() {
     }
     void window.suyanApi.hideWebAssistant();
   }, [mainView]);
+
+  // 原生 WebContentsView 总在 renderer DOM 上层；打开应用弹窗/浮层时先隐藏网页层，
+  // 否则模型配置、内容分级、系统设置、日志导出等内容会被网页内容盖住。
+  // 网页助手自己的目录和「导入素材」菜单由 WebAssistantView 负责截屏垫底，避免网页块消失。
+  useEffect(() => {
+    if (mainView !== "webAssistant") {
+      return;
+    }
+
+    const hasBlockingOverlay = Boolean(
+      aiErrorDialog ||
+        detailItemId ||
+        fullscreenMedia ||
+        isAiSettingsOpen ||
+        isNsfwSettingsOpen ||
+        isSystemPreferencesOpen ||
+        isLibraryRootsOpen ||
+        isDirectoryImportModeOpen ||
+        isAboutOpen ||
+        isLogExportOpen ||
+        accountDialogOpen,
+    );
+
+    void window.suyanApi.setWebAssistantVisibility(!hasBlockingOverlay);
+  }, [
+    accountDialogOpen,
+    aiErrorDialog,
+    detailItemId,
+    fullscreenMedia,
+    isAboutOpen,
+    isAiSettingsOpen,
+    isDirectoryImportModeOpen,
+    isLibraryRootsOpen,
+    isLogExportOpen,
+    isNsfwSettingsOpen,
+    isSystemPreferencesOpen,
+    mainView,
+  ]);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -1041,64 +1294,9 @@ export function LibraryView() {
     }
 
     const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-    if (maxScrollTop < targetScrollTop && visibleCount < displayCount) {
-      setVisibleCount((current) => Math.min(current + pageSize, displayCount));
-      return;
-    }
-
-    // 所有卡片已渲染但 scrollHeight 仍不足时，图片可能还在加载中。
-    // 使用 ResizeObserver 等待 scrollHeight 增长后再恢复滚动位置。
-    if (maxScrollTop < targetScrollTop && visibleCount >= displayCount) {
-      let retryCount = 0;
-      const maxRetries = 10;
-      let resizeObserver: ResizeObserver | null = null;
-      let retryTimer: number | null = null;
-
-      const tryRestore = () => {
-        const currentMax = Math.max(0, container.scrollHeight - container.clientHeight);
-        if (currentMax >= targetScrollTop || retryCount >= maxRetries) {
-          if (resizeObserver) {
-            resizeObserver.disconnect();
-            resizeObserver = null;
-          }
-          if (retryTimer !== null) {
-            window.clearTimeout(retryTimer);
-            retryTimer = null;
-          }
-          const restoredScrollTop = Math.min(targetScrollTop, currentMax);
-          container.scrollTop = restoredScrollTop;
-          pendingHomeScrollRestoreRef.current = null;
-          logRendererStartupEvent("view-scroll:restore", {
-            requestedScrollTop: targetScrollTop,
-            restoredScrollTop,
-            view: "home",
-          });
-          return;
-        }
-
-        retryCount += 1;
-        retryTimer = window.setTimeout(tryRestore, 200);
-      };
-
-      resizeObserver = new ResizeObserver(() => {
-        if (retryTimer !== null) {
-          window.clearTimeout(retryTimer);
-        }
-        retryTimer = window.setTimeout(tryRestore, 50);
-      });
-      resizeObserver.observe(container);
-      retryTimer = window.setTimeout(tryRestore, 200);
-
-      return () => {
-        if (resizeObserver) {
-          resizeObserver.disconnect();
-        }
-        if (retryTimer !== null) {
-          window.clearTimeout(retryTimer);
-        }
-      };
-    }
-
+    // Do not inflate the render window just to reach an old scroll offset. That
+    // used to mount hundreds of cards on startup and start a thumbnail storm.
+    // Normal scroll pagination will continue from this clamped position.
     const restoredScrollTop = Math.min(targetScrollTop, maxScrollTop);
     container.scrollTop = restoredScrollTop;
     pendingHomeScrollRestoreRef.current = null;
@@ -1238,6 +1436,81 @@ export function LibraryView() {
   );
   const detailGroupIndex = detailItem ? detailGroupItems.findIndex((item) => item.id === detailItem.id) : -1;
   const isDetailOverlayOpen = Boolean(detailItemId || fullscreenMedia);
+  const activeFeatureGuideId = useMemo(() => {
+    if (accountDialogOpen) {
+      return "account";
+    }
+    if (isAiSettingsOpen) {
+      return "aiSettings";
+    }
+    if (isNsfwSettingsOpen) {
+      return "nsfwSettings";
+    }
+    if (isSystemPreferencesOpen) {
+      return systemPreferencesSection === "appearance" ? "appearance" : "systemPreferences";
+    }
+    if (isLibraryRootsOpen) {
+      return "libraryRoots";
+    }
+    if (isDirectoryImportModeOpen || isImportMenuOpen) {
+      return "importMaterial";
+    }
+    if (isLogExportOpen) {
+      return "logExport";
+    }
+    if (isAboutOpen) {
+      return "about";
+    }
+    if (isCanvasResultPreviewOpen) {
+      return "canvasResult";
+    }
+    if (detailItemId && !featureGuideCompleted.includes("promptDetail")) {
+      return "promptDetail";
+    }
+    if (
+      mainView === "home" &&
+      hasVisibleResults &&
+      featureGuideCompleted.includes("home") &&
+      !featureGuideCompleted.includes(galleryMode === "grid" ? "promptCard" : "promptCardMasonry")
+    ) {
+      return galleryMode === "grid" ? "promptCard" : "promptCardMasonry";
+    }
+    return mainView;
+  }, [
+    accountDialogOpen,
+    detailItemId,
+    featureGuideCompleted,
+    galleryMode,
+    hasVisibleResults,
+    isAboutOpen,
+    isCanvasResultPreviewOpen,
+    isAiSettingsOpen,
+    isDirectoryImportModeOpen,
+    isImportMenuOpen,
+    isLibraryRootsOpen,
+    isLogExportOpen,
+    isNsfwSettingsOpen,
+    isSystemPreferencesOpen,
+    mainView,
+    systemPreferencesSection,
+  ]);
+  const handleFeatureGuideStepChange = useCallback((stepIndex: number) => {
+    const nextSection = systemPreferenceGuideSections[stepIndex];
+    if (nextSection) {
+      setSystemPreferencesSection(nextSection);
+    }
+  }, []);
+  const shouldShowFeatureGuide =
+    hasInitialLoadFinished &&
+    startupOverlayPhase === "hidden" &&
+    !isLoading &&
+    !availableUpdate &&
+    !exportAuthorPrompt &&
+    !aiErrorDialog &&
+    (!detailItemId || activeFeatureGuideId === "promptDetail") &&
+    !fullscreenMedia &&
+    !featureGuideCompleted.includes(activeFeatureGuideId) &&
+    Boolean(featureGuideDefinitions[activeFeatureGuideId as keyof typeof featureGuideDefinitions]);
 
   useEffect(() => {
     if (isInitialLibraryLoading || hasNotifiedRendererReadyRef.current) {
@@ -1314,9 +1587,9 @@ export function LibraryView() {
   );
   const handleCopyPromptItem = useCallback(
     (item: PromptCardData) => {
-      void copyText(buildPromptText(item), "已复制提示词。");
+      void copyText(buildPromptText(item, t), t("已复制提示词。"));
     },
-    [copyText],
+    [copyText, t],
   );
   const handleSavePromptLexiconItem = useCallback(
     (itemId: string, patch: Partial<LibraryItem>) =>
@@ -1332,7 +1605,7 @@ export function LibraryView() {
     (
       itemIds: readonly string[],
       categoryId: string | null,
-      source: "system" | "user" | "ai" = "user",
+      source: "system" | "user" | "ai" | "local" = "user",
     ) => movePromptGroupsToCategory(itemIds, categoryId, source),
     [movePromptGroupsToCategory],
   );
@@ -1392,7 +1665,7 @@ export function LibraryView() {
     negativePrompt: string,
   ) {
     if (!item.imageFileName) {
-      showStatusMessage({ type: "error", text: "当前效果图不可用，无法传送到画布。" });
+      showStatusMessage({ type: "error", text: t("当前效果图不可用，无法传送到画布。") });
       return;
     }
 
@@ -1423,24 +1696,21 @@ export function LibraryView() {
           }
           resolve(result);
         };
-        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.onerror = () => reject(new Error(t("读取图片失败")));
         reader.readAsDataURL(blob);
       });
 
-      if (
-        canvasDraft.referenceImageFileName &&
-        canvasDraft.referenceImageFileName !== item.imageFileName
-      ) {
-        void window.suyanApi.removeCanvasReferenceImage(canvasDraft.referenceImageFileName);
-      }
+      const newEntry = {
+        dataUrl,
+        fileName: item.imageFileName,
+        title: item.title || t("参考图"),
+      };
 
       updateCanvasDraft({
         prompt,
         negativePrompt,
         negativePromptHidden: false,
-        referenceImageDataUrl: dataUrl,
-        referenceImageTitle: item.title || "参考图",
-        referenceImageFileName: item.imageFileName,
+        referenceImages: [...canvasDraft.referenceImages, newEntry],
         promptOrigin: buildCanvasPromptOrigin(item),
       });
       setDetailItemId(null);
@@ -1452,14 +1722,14 @@ export function LibraryView() {
       });
       showStatusMessage({
         type: "success",
-        text: prompt.trim() ? "已把效果图及关联提示词传送到画布。" : "已把效果图传送到画布作为参考图。",
+        text: prompt.trim() ? t("已把效果图及关联提示词传送到画布。") : t("已把效果图传送到画布作为参考图。"),
       });
     } catch (error) {
       logRendererStartupEvent("canvas-transfer:failed", {
         code: error instanceof Error ? error.message.slice(0, 80) : "CANVAS_TRANSFER_FAILED",
         durationMs: Math.round(performance.now() - startedAt),
       });
-      showStatusMessage({ type: "error", text: "读取参考图失败，请重试。" });
+      showStatusMessage({ type: "error", text: t("读取参考图失败，请重试。") });
     }
   }
 
@@ -1477,7 +1747,7 @@ export function LibraryView() {
     updateCanvasDraft(patch);
     setDetailItemId(null);
     openMainView("canvas");
-    showStatusMessage({ type: "success", text: "已把提示词传送到画布。" });
+    showStatusMessage({ type: "success", text: t("已把提示词传送到画布。") });
   }
 
   function openHomeView() {
@@ -1502,7 +1772,7 @@ export function LibraryView() {
       return null;
     }
     if (result.data.loginRequired) {
-      showStatusMessage({ type: "info", text: "请在画布内完成豆包登录，登录后会自动切回原生画布。" });
+      showStatusMessage({ type: "info", text: t("请在画布内完成豆包登录，登录后会自动切回原生画布。") });
     }
     return result.data;
   }, [showStatusMessage]);
@@ -1549,9 +1819,10 @@ export function LibraryView() {
     }
 
     setLogExportAction(action);
+    setIsLogExportOpen(false);
     showStatusMessage({
       type: "info",
-      text: action === "feedback" ? "正在生成日志 ZIP 并打开 GitHub..." : "正在整理并导出日志...",
+      text: action === "feedback" ? t("正在生成日志 ZIP 并打开 GitHub...") : t("正在整理并导出日志..."),
       autoDismissMs: null,
     });
 
@@ -1563,15 +1834,15 @@ export function LibraryView() {
       });
 
       if (!result.ok) {
-        showStatusMessage({ type: "error", text: result.error.message || "日志导出失败，请稍后重试。" });
+        showStatusMessage({ type: "error", text: result.error.message || t("日志导出失败，请稍后重试。") });
         return;
       }
 
       if (!result.data.exported) {
         if (result.data.entryCount === 0) {
-          showStatusMessage({ type: "info", text: "当前筛选条件下没有可导出的日志。" });
+          showStatusMessage({ type: "info", text: t("当前筛选条件下没有可导出的日志。") });
         } else {
-          showStatusMessage({ type: "info", text: "已取消日志导出。" });
+          showStatusMessage({ type: "info", text: t("已取消日志导出。") });
         }
         return;
       }
@@ -1581,21 +1852,19 @@ export function LibraryView() {
           type: "success",
           text:
             result.data.entryCount > 0
-              ? "已打开 GitHub，并在资源管理器中选中日志 ZIP；请把它拖入附件区域。"
-              : "已打开 GitHub；当前筛选无日志，已生成说明 ZIP 并在资源管理器中选中。",
+              ? t("已打开 GitHub，并在资源管理器中选中日志 ZIP；请把它拖入附件区域。")
+              : t("已打开 GitHub；当前筛选无日志，已生成说明 ZIP 并在资源管理器中选中。"),
         });
-        setIsLogExportOpen(false);
         return;
       }
 
       const formatLabel = result.data.format === "zip" ? "ZIP" : "TXT";
       showStatusMessage({
         type: "success",
-        text: `已导出 ${result.data.entryCount} 条日志（${formatLabel}）。`,
+        text: t("已导出 {count} 条日志（{format}）。", { count: result.data.entryCount, format: formatLabel }),
       });
-      setIsLogExportOpen(false);
     } catch {
-      showStatusMessage({ type: "error", text: "日志导出失败，请稍后重试。" });
+      showStatusMessage({ type: "error", text: t("日志导出失败，请稍后重试。") });
     } finally {
       setLogExportAction(null);
     }
@@ -1873,27 +2142,37 @@ export function LibraryView() {
   }
 
   if (isInitialLibraryLoading) {
-    return <StartupLoadingScreen onSkip={skipStartupIntro} />;
+    return (
+      <main className="app-shell relative flex h-full max-h-full min-h-0 flex-col overflow-hidden text-foreground">
+        <AppTitleBar isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar} />
+        <div className="app-window-startup relative min-h-0 flex-1 overflow-hidden">
+          <StartupLoadingScreen onSkip={skipStartupIntro} />
+        </div>
+      </main>
+    );
   }
 
-  const isStartupOverlayVisible = !hasPremountedLexicons;
+  const isStartupOverlayVisible = startupOverlayPhase !== "hidden";
   // Prefer the live ref so incidental re-renders mid-drag do not snap the
   // width CSS variable back to the last committed React state.
   const liveSidebarWidth = sidebarWidthRef.current;
   const scrollContainerStyle = {
-    scrollbarGutter: "stable both-edges",
+    scrollbarGutter: "stable",
     "--library-sidebar-width": isSidebarOpen ? `${liveSidebarWidth}px` : "0px",
   } as CSSProperties & Record<"--library-sidebar-width", string>;
+  const workspaceSurfaceStyle = {
+    "--library-workspace-width": `${workspaceWidthPercent}%`,
+  } as CSSProperties & Record<"--library-workspace-width", string>;
 
   return (
     <main
-      className="relative flex h-[100dvh] max-h-[100dvh] min-h-0 flex-col overflow-hidden bg-background text-foreground"
+      className="app-shell relative flex h-full max-h-full min-h-0 flex-col overflow-hidden text-foreground"
       onDragEnter={handleWindowDragEnter}
       onDragOver={handleWindowDragOver}
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
     >
-      <AppTitleBar isSidebarOpen={isSidebarOpen} overlayActive={isDetailOverlayOpen} onToggleSidebar={toggleSidebar} />
+      <AppTitleBar isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar} />
       {isDirectoryImportModeOpen ? (
         <DirectoryImportModeDialog
           isBusy={isBusy}
@@ -1924,13 +2203,15 @@ export function LibraryView() {
         />
       ) : null}
       {isImageDragOver ? <ImageDropOverlay /> : null}
-      <div className="flex min-h-0 flex-1">
+      <div className="library-content-frame relative flex min-h-0 flex-1">
+        <div aria-hidden="true" className="library-atmosphere" />
         {isSidebarOpen ? (
           <LibrarySidebar
             activeView={sidebarActiveView}
             isBusy={isBusy}
             isCompact={sidebarWidth <= compactSidebarBreakpoint}
             isImportMenuOpen={isImportMenuOpen}
+            sidebarEntryVisibility={sidebarEntryVisibility}
             importMenuContentRef={importMenuContentRef}
             importMenuRef={importMenuRef}
             sidebarRef={sidebarElementRef}
@@ -1960,11 +2241,13 @@ export function LibraryView() {
             onOpenCanvas={() => openMainView("canvas")}
             onOpenWebAssistant={() => openMainView("webAssistant")}
             onOpenNsfwSettings={openNsfwSettings}
-            onOpenSystemPreferences={() => openSystemPreferences()}
+            onOpenSystemPreferences={openSystemPreferences}
             onOpenCategoryLexicon={() => openMainView("categoryLexicon")}
             onOpenHome={openHomeView}
             onOpenLibraryRoots={() => setIsLibraryRootsOpen(true)}
             onOpenManager={() => openMainView("promptLibrary")}
+            onOpenTextPrompts={() => openMainView("textPrompts")}
+            onOpenTodo={() => openMainView("todo")}
             onOpenPromptSites={() => openMainView("promptSites")}
             onOpenTagLexicon={() => openMainView("tagLexicon")}
             onResizeBy={resizeSidebarBy}
@@ -1975,17 +2258,24 @@ export function LibraryView() {
         ) : null}
         <div
           ref={scrollContainerRef}
-          className="relative min-h-0 flex-1 overflow-y-auto"
+          className="relative z-10 min-h-0 flex-1 overflow-y-auto"
           style={scrollContainerStyle}
         >
-          <div
-            ref={homeScrollContainerRef}
-            aria-hidden={mainView !== "home"}
-            className={`absolute inset-0 overflow-y-auto ${
-              mainView === "home" ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none"
-            }`}
-            style={{ scrollbarGutter: "stable both-edges", willChange: "opacity" }}
-          >
+          <CanvasPageBackground className="library-background-layer min-h-full w-full bg-background" currentView={mainView}>
+            {mainView === "canvas" ? <CanvasPageAtmosphere /> : null}
+            <div
+              data-feature-guide-page={mainView}
+              className="library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm"
+              style={workspaceSurfaceStyle}
+            >
+              <div
+                ref={homeScrollContainerRef}
+                aria-hidden={mainView !== "home"}
+                className={`absolute inset-0 overflow-y-auto ${
+                  mainView === "home" ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none"
+                }`}
+                style={{ scrollbarGutter: "stable both-edges", willChange: "opacity" }}
+              >
               <section className={`py-4 min-[1024px]:py-5 ${pageGutterClassName}`}>
                 <div className={`${contentShellClassName} grid gap-4`}>
                   <SearchHeroPanel
@@ -1998,67 +2288,72 @@ export function LibraryView() {
 
               <section className={`pb-6 pt-3 ${pageGutterClassName}`}>
                 <div className={contentShellClassName} ref={cardsStartRef}>
-                  <GalleryToolbar
-                    collectionMode={collectionMode}
-                    galleryMode={galleryMode}
-                    isMasonrySizeControlOpen={isMasonrySizeControlOpen}
-                    masonryColumnCount={masonryColumnCount}
-                    resultCount={displayCount}
-                    sortDirection={sortDirection}
-                    sortMode={sortMode}
-                    onCollectionModeChange={handleCollectionModeChange}
-                    onGalleryModeChange={handleGalleryModeChange}
-                    onMasonrySizeControlOpenChange={setIsMasonrySizeControlOpen}
-                    onMasonryColumnCountChange={handleMasonryColumnCountChange}
-                    onMasonryColumnCountCommit={handleMasonryColumnCountCommit}
-                    onSortDirectionChange={handleSortDirectionChange}
-                    onSortModeChange={handleSortModeChange}
-                  />
-
-                  {!hasVisibleResults ? (
-                    <EmptyPromptList
-                      hasItems={items.length > 0}
-                      isBusy={isBusy}
-                      onImportClipboardImage={() => void importClipboardImage()}
-                      onImportImages={() => void importImages()}
-                      onResetFilters={resetFilters}
+                  <div data-feature-guide="gallery-toolbar">
+                    <GalleryToolbar
+                      collectionMode={collectionMode}
+                      galleryMode={galleryMode}
+                      isMasonrySizeControlOpen={isMasonrySizeControlOpen}
+                      masonryColumnCount={masonryColumnCount}
+                      resultCount={displayCount}
+                      sortDirection={sortDirection}
+                      sortMode={sortMode}
+                      onCollectionModeChange={handleCollectionModeChange}
+                      onGalleryModeChange={handleGalleryModeChange}
+                      onMasonrySizeControlOpenChange={setIsMasonrySizeControlOpen}
+                      onMasonryColumnCountChange={handleMasonryColumnCountChange}
+                      onMasonryColumnCountCommit={handleMasonryColumnCountCommit}
+                      onSortDirectionChange={handleSortDirectionChange}
+                      onSortModeChange={handleSortModeChange}
                     />
-                  ) : null}
+                  </div>
 
-                  {hasVisibleResults ? (
-                    galleryMode === "masonry" ? (
-                      <MasonryPromptGallery
-                        blurNsfwImages={blurNsfwImages}
-                        columnCount={masonryLayoutColumnCount}
-                        items={visibleMasonryItems}
-                        likedImageIds={likedImageIds}
-                        onViewDetail={openDetailItem}
-                        onPreviewMedia={openFullscreenMedia}
+                  <div data-feature-guide="gallery-results" className="min-h-[180px]">
+                    {!hasVisibleResults ? (
+                      <EmptyPromptList
+                        hasItems={items.length > 0}
+                        isBusy={isBusy}
+                        onImportClipboardImage={() => void importClipboardImage()}
+                        onImportImages={() => void importImages()}
+                        onResetFilters={resetFilters}
                       />
-                    ) : (
-                      <GridPromptGallery
-                        blurNsfwImages={blurNsfwImages}
-                        groups={visibleGridGroups}
-                        likedImageIds={likedImageIds}
-                        onCopyPrompt={handleCopyPromptItem}
-                        onViewDetail={openDetailItem}
-                        onPreviewMedia={openFullscreenMedia}
-                      />
-                    )
-                  ) : null}
+                    ) : null}
+
+                    {hasVisibleResults ? (
+                      galleryMode === "masonry" ? (
+                        <MasonryPromptGallery
+                          blurNsfwImages={blurNsfwImages}
+                          columnCount={masonryLayoutColumnCount}
+                          items={visibleMasonryItems}
+                          likedImageIds={likedImageIds}
+                          onViewDetail={openDetailItem}
+                          onPreviewMedia={openFullscreenMedia}
+                          shouldMeasureHeights={mainView === "home"}
+                        />
+                      ) : (
+                        <GridPromptGallery
+                          blurNsfwImages={blurNsfwImages}
+                          groups={visibleGridGroups}
+                          likedImageIds={likedImageIds}
+                          onCopyPrompt={handleCopyPromptItem}
+                          onViewDetail={openDetailItem}
+                          onPreviewMedia={openFullscreenMedia}
+                        />
+                      )
+                    ) : null}
+                  </div>
 
                 </div>
               </section>
               {!isDetailOverlayOpen ? (
                 <CardScrollTopButton
-                  className="fixed bottom-6 z-50 min-[1024px]:bottom-10 min-[1440px]:bottom-12"
+                  className="fixed bottom-[calc(1.5rem+var(--app-window-gutter))] z-50 min-[1024px]:bottom-[calc(2.5rem+var(--app-window-gutter))] min-[1440px]:bottom-[calc(3rem+var(--app-window-gutter))]"
                   contentMaxWidth={contentShellMaxWidth}
                   onClick={scrollHomeToTop}
                 />
               ) : null}
-          </div>
+              </div>
 
-          {mainView === "canvas" ? (
+              {mainView === "canvas" ? (
             <Suspense fallback={<DeferredViewFallback />}>
               <CanvasView
                 aiSettings={aiSettings}
@@ -2077,28 +2372,33 @@ export function LibraryView() {
                 onOpenAiSettings={openAiSettings}
                 onOptimizePrompt={optimizePromptWithAi}
                 onSaveAiActionModelPreference={saveAiActionModelPreference}
+                onFullscreenPreviewChange={handleCanvasResultPreviewChange}
                 onNotify={showStatusMessage}
               />
             </Suspense>
-          ) : null}
+              ) : null}
 
-          {mainView === "webAssistant" ? (
+              {mainView === "webAssistant" ? (
             <section className={`h-full min-h-0 py-4 min-[1024px]:py-5 ${pageGutterClassName}`}>
               <div className={webAssistantShellClassName}>
                 <Suspense fallback={<DeferredViewFallback />}>
-                  <WebAssistantView onNotify={showStatusMessage} />
+                  <WebAssistantView
+                    isFeatureGuideOpen={shouldShowFeatureGuide && activeFeatureGuideId === "webAssistant"}
+                    isImportMenuOpen={isImportMenuOpen}
+                    onNotify={showStatusMessage}
+                  />
                 </Suspense>
               </div>
             </section>
-          ) : null}
+              ) : null}
 
-          {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0 ? (
+              {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0 ? (
             <section
-              className={`py-4 min-[1024px]:py-5 ${pageGutterClassName} ${
+              className={`py-4 min-[1024px]:py-5 ${pageGutterClassName} ${mainView === "todo" ? "h-full min-h-0" : ""} ${
                 mainView === "home" || mainView === "canvas" || mainView === "webAssistant" ? "hidden" : ""
               }`}
             >
-              <div className={`${lexiconShellClassName} grid gap-4`}>
+              <div className={`${lexiconShellClassName} grid gap-4 ${mainView === "todo" ? "h-full min-h-0" : ""}`}>
                 {mainView === "promptLibrary" ? (
                   <Suspense fallback={<DeferredViewFallback />}>
                     <PromptLibraryManagerView
@@ -2106,9 +2406,9 @@ export function LibraryView() {
                       blurNsfwImages={blurNsfwImages}
                       hideScrollTopButton={isDetailOverlayOpen}
                       items={promptCards}
-                      onCopy={(item) => void copyText(buildPromptText(item), "已复制提示词。")}
+                      onCopy={(item) => void copyText(buildPromptText(item, t), t("已复制提示词。"))}
                       onDelete={(itemIds) => deleteItems(itemIds, true)}
-                      onExport={(itemIds) => exportZip(itemIds)}
+                      onExport={requestExportZip}
                       onImport={() => void importZip()}
                       onOpenDetail={openDetailItem}
                       onRefreshLibrary={load}
@@ -2116,12 +2416,28 @@ export function LibraryView() {
                   </Suspense>
                 ) : null}
 
+                {mainView === "textPrompts" ? (
+                  <PromptLibraryErrorBoundary>
+                    <Suspense fallback={<DeferredViewFallback />}>
+                      <TextPromptLibrary />
+                    </Suspense>
+                  </PromptLibraryErrorBoundary>
+                ) : null}
+
+                {mainView === "todo" ? (
+                  <PromptLibraryErrorBoundary>
+                    <Suspense fallback={<DeferredViewFallback />}>
+                      <TodoWorkspace />
+                    </Suspense>
+                  </PromptLibraryErrorBoundary>
+                ) : null}
+
                 {mainView === "promptSites" ? (
                   <PromptSiteRecommendationsView
                     sites={promptSiteRecommendations}
                     starredUrls={starredRecommendations}
                     onToggleStar={(url) => void toggleRecommendationStar(url)}
-                    onCopySiteUrl={(site) => void copyText(site.url, "已复制网址。")}
+                      onCopySiteUrl={(site) => void copyText(site.url, t("已复制网址。"))}
                     onOpenSite={(site) => void openExternalUrl(site.url, site.title)}
                   />
                 ) : null}
@@ -2187,7 +2503,9 @@ export function LibraryView() {
                 ) : null}
               </div>
             </section>
-          ) : null}
+              ) : null}
+            </div>
+          </CanvasPageBackground>
         </div>
       </div>
 
@@ -2229,7 +2547,7 @@ export function LibraryView() {
             onReverseImagePrompt={reverseImagePromptWithAi}
             onClose={() => setDetailItemId(null)}
             onCopyImage={() => void copyImage(detailItem.imageFileName)}
-            onCopyText={(text) => void copyText(text, "已复制提示词。")}
+            onCopyText={(text) => void copyText(text, t("已复制提示词。"))}
             onDelete={() => void handleDeleteDetailItem()}
             onExportImage={() => void exportImage(detailItem.imageFileName)}
             onImportImages={() => void handleImportImageFilesForDetail()}
@@ -2243,9 +2561,9 @@ export function LibraryView() {
                 return;
               }
 
-              void exportZip(detailGroupItems.map((groupItem) => groupItem.id));
+              void requestExportZip(detailGroupItems.map((groupItem) => groupItem.id));
             }}
-            onShareText={(text) => void copyText(text, "已复制分享文案。")}
+            onShareText={(text) => void copyText(text, t("已复制分享文案。"))}
             onSave={(patch) => saveItem(detailItem.id, patch, { background: true, silent: true })}
             onSaveGenerationModelPreferences={(patch) => void saveGenerationModelPreferences(patch)}
             onSaveAiActionModelPreference={saveAiActionModelPreference}
@@ -2289,6 +2607,7 @@ export function LibraryView() {
             autoNsfwGrading={autoNsfwGrading}
             blurNsfwImages={blurNsfwImages}
             nsfwGradingSpeed={nsfwGradingSpeed}
+            nsfwDetectionMode={nsfwDetectionMode}
             onClose={() => setIsNsfwSettingsOpen(false)}
             onGradeAllNsfw={(options) => void gradeAllImagesForNsfw(options)}
             onSaveAiSettings={saveAiSettings}
@@ -2302,19 +2621,73 @@ export function LibraryView() {
         <Suspense fallback={null}>
           <SystemPreferencesDialog
             isBusy={isBusy}
+            language={language}
             proxySettings={proxySettings}
+            themeMode={themeMode}
+            themePreset={themePreset}
+            themeAccent={themeAccent}
+            themeCustomAccent={themeCustomAccent}
+            themeOpacity={themeOpacity}
+            themeNavigationOpacity={themeNavigationOpacity}
+            themeBackgroundOpacity={themeBackgroundOpacity}
+            themeWorkspaceOpacity={themeWorkspaceOpacity}
+            themeAccentOpacity={themeAccentOpacity}
+            themeCustomAccents={themeCustomAccents}
+            customTheme={customTheme}
             section={systemPreferencesSection}
+            sidebarEntryVisibility={sidebarEntryVisibility}
+            workspaceWidthPercent={workspaceWidthPercent}
             onClose={() => setIsSystemPreferencesOpen(false)}
             onDetectProxy={detectProxySettings}
             onNotify={showStatusMessage}
             onSaveProxy={saveProxySettings}
+            onThemeModeChange={setThemeMode}
+            onThemePresetChange={setThemePreset}
+            onThemeAccentChange={setThemeAccent}
+            onThemeOpacityChange={setThemeOpacity}
+            onThemeNavigationOpacityChange={setThemeNavigationOpacity}
+            onThemeBackgroundOpacityChange={setThemeBackgroundOpacity}
+            onThemeWorkspaceOpacityChange={setThemeWorkspaceOpacity}
+            onThemeAccentOpacityChange={setThemeAccentOpacity}
+            onCustomThemeChange={setCustomTheme}
+            onSidebarEntryVisibilityChange={saveSidebarEntryVisibility}
+            onWorkspaceWidthChange={setWorkspaceWidthPercent}
             onSectionChange={setSystemPreferencesSection}
+            onLanguageChange={setLanguage}
             onTestProxy={testProxySettings}
           />
         </Suspense>
       ) : null}
 
-      {isAboutOpen ? <AboutDialog onClose={() => setIsAboutOpen(false)} /> : null}
+      {isAboutOpen ? (
+        <AboutDialog
+          onClose={() => setIsAboutOpen(false)}
+          onReplayFeatureGuides={() => {
+            setIsAboutOpen(false);
+            void resetFeatureGuides();
+          }}
+          onUpdateAvailable={(update) => {
+            setIsAboutOpen(false);
+            setAvailableUpdate(update);
+          }}
+        />
+      ) : null}
+
+      {availableUpdate ? (
+        <AppUpdateDialog
+          update={availableUpdate}
+          onClose={() => setAvailableUpdate(null)}
+        />
+      ) : null}
+
+      {exportAuthorPrompt ? (
+        <ArchiveAuthorChoiceDialog
+          data={exportAuthorPrompt.data}
+          isBusy={isBusy}
+          onCancel={() => setExportAuthorPrompt(null)}
+          onChoice={(choice) => void resolveExportAuthorPrompt(choice)}
+        />
+      ) : null}
 
       {isLogExportOpen ? (
         <LogExportDialog
@@ -2333,12 +2706,78 @@ export function LibraryView() {
         <MediaFullscreenOverlay item={fullscreenMedia} onClose={() => setFullscreenMedia(null)} />
       ) : null}
 
+      {shouldShowFeatureGuide ? (
+        <FeatureGuide
+          key={activeFeatureGuideId}
+          guideId={activeFeatureGuideId}
+          onComplete={completeFeatureGuide}
+          onStepChange={activeFeatureGuideId === "systemPreferences" ? handleFeatureGuideStepChange : undefined}
+        />
+      ) : null}
+
       {isStartupOverlayVisible ? (
-        <div className="absolute inset-0 z-50">
+        <div
+          className={`app-window-overlay-host absolute inset-x-0 bottom-0 top-[var(--app-titlebar-height)] z-50 transition-opacity duration-[420ms] ease-out ${
+            startupOverlayPhase === "exiting" ? "pointer-events-none opacity-0" : "opacity-100"
+          }`}
+        >
           <StartupLoadingScreen onSkip={skipStartupIntro} />
         </div>
       ) : null}
     </main>
+  );
+}
+
+function ArchiveAuthorChoiceDialog({
+  data,
+  isBusy,
+  onCancel,
+  onChoice,
+}: {
+  data: ExportZipData;
+  isBusy: boolean;
+  onCancel: () => void;
+  onChoice: (choice: "keep" | "associate") => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <AppDialog
+      overlayClassName="z-[220] px-4 py-8"
+      panelClassName="relative z-[221] flex w-full max-w-lg flex-col"
+      titleId="archive-author-choice-title"
+      onClose={() => {
+        if (!isBusy) onCancel();
+      }}
+    >
+      <header className="flex items-start gap-3 px-5 pb-4 pt-5">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-primary-soft text-primary">
+          <FileArchive size={19} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 id="archive-author-choice-title" className="text-base font-semibold text-foreground">
+            {t("导出作品归属")}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted">
+            {t("当前选择中有 {count} 张素材没有作者信息。是否在分享包中署名为「{author}」？", { count: data.unownedCount ?? 0, author: data.authorName ?? t("当前账户") })}
+          </p>
+        </div>
+        <DialogCloseButton ariaLabel={t("取消导出")} onClick={onCancel} />
+      </header>
+      <div className="mx-5 rounded-xl border border-primary/20 bg-primary-soft/45 px-3.5 py-3 text-xs leading-5 text-muted">
+        {t("只改变导出副本，本地素材和已有作者信息不会被修改。关联当前账户时，分享包接收者可以看到你的昵称和头像。")}
+      </div>
+      <footer className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+        <Button disabled={isBusy} variant="ghost" onClick={onCancel}>
+          {t("取消导出")}
+        </Button>
+        <Button disabled={isBusy} onClick={() => onChoice("keep")}>
+          {t("保留原信息")}
+        </Button>
+        <Button disabled={isBusy} variant="primary" onClick={() => onChoice("associate")}>
+          {t("关联当前账户")}
+        </Button>
+      </footer>
+    </AppDialog>
   );
 }
 
@@ -2349,6 +2788,7 @@ type LibrarySidebarProps = {
   isBusy: boolean;
   isCompact: boolean;
   isImportMenuOpen: boolean;
+  sidebarEntryVisibility: SidebarEntryVisibility;
   sidebarRef: React.RefObject<HTMLElement | null>;
   width: number;
   onImportClipboardImage: () => void;
@@ -2361,11 +2801,13 @@ type LibrarySidebarProps = {
   onOpenCanvas: () => void;
   onOpenWebAssistant: () => void;
   onOpenNsfwSettings: () => void;
-  onOpenSystemPreferences: () => void;
+  onOpenSystemPreferences: (section?: SystemPreferenceSection) => void;
   onOpenCategoryLexicon: () => void;
   onOpenHome: () => void;
   onOpenLibraryRoots: () => void;
   onOpenManager: () => void;
+  onOpenTextPrompts: () => void;
+  onOpenTodo: () => void;
   onOpenPromptSites: () => void;
   onOpenTagLexicon: () => void;
   onResizeBy: (delta: number) => void;
@@ -2381,6 +2823,7 @@ function LibrarySidebar({
   isBusy,
   isCompact,
   isImportMenuOpen,
+  sidebarEntryVisibility,
   sidebarRef,
   width,
   onImportClipboardImage,
@@ -2398,6 +2841,8 @@ function LibrarySidebar({
   onOpenHome,
   onOpenLibraryRoots,
   onOpenManager,
+  onOpenTextPrompts,
+  onOpenTodo,
   onOpenPromptSites,
   onOpenTagLexicon,
   onResizeBy,
@@ -2405,7 +2850,11 @@ function LibrarySidebar({
   onToggleImportMenu,
   onOpenLogExport,
 }: LibrarySidebarProps) {
+  const { t } = useLocale();
   const [importMenuStyle, setImportMenuStyle] = useState<CSSProperties | null>(null);
+  const isEntryVisible = (entryId: keyof SidebarEntryVisibility) => sidebarEntryVisibility[entryId];
+  const hasVisibleGroup = (groupId: string) =>
+    sidebarEntryGroups.find((group) => group.id === groupId)?.entries.some(isEntryVisible) ?? false;
 
   useEffect(() => {
     if (!isImportMenuOpen) {
@@ -2439,7 +2888,7 @@ function LibrarySidebar({
         left,
         position: "fixed",
         top,
-        zIndex: 120,
+        zIndex: 10000,
       });
     }
 
@@ -2456,162 +2905,226 @@ function LibrarySidebar({
   return (
     <aside
       ref={sidebarRef}
-      className="relative z-20 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-border bg-panel/95"
+      className="app-chrome-surface relative z-20 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r"
       style={{ width }}
     >
       {/*
         Scroll the menu list so short/low-resolution viewports can still reach
-        every item (e.g. 启动图库 / 日志导出). Keep 外观/关于 pinned below.
+        every item (e.g. 启动图库 / 日志导出). Keep 主题/关于 pinned below.
       */}
       <nav
-        aria-label="主导航"
+        aria-label={t("主导航")}
         className={`library-sidebar-nav flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden overscroll-contain pb-3 pt-4 [scrollbar-gutter:stable] ${
           isCompact ? "px-2" : "px-3"
         }`}
       >
+        {hasVisibleGroup("materials") ? (
         <div className="grid min-w-0 gap-1">
-          <SidebarSectionLabel isCompact={isCompact}>素材</SidebarSectionLabel>
-          <SidebarActionButton
-            active={activeView === "home"}
-            icon={<LayoutGrid size={17} />}
-            isCompact={isCompact}
-            label="素材浏览"
-            onClick={onOpenHome}
-          />
-          <SidebarActionButton
-            active={activeView === "canvas"}
-            icon={<Sparkles size={17} />}
-            isCompact={isCompact}
-            label={"\u521b\u4f5c\u753b\u5e03"}
-            onClick={onOpenCanvas}
-          />
-          <SidebarActionButton
-            active={activeView === "webAssistant"}
-            icon={<Compass size={17} />}
-            isCompact={isCompact}
-            label="网页助手"
-            onClick={onOpenWebAssistant}
-          />
-          <div className="relative min-w-0" ref={importMenuRef}>
+          <SidebarSectionLabel isCompact={isCompact}>{t("素材")}</SidebarSectionLabel>
+          {isEntryVisible("home") ? (
             <SidebarActionButton
-              ariaExpanded={isImportMenuOpen}
-              ariaHasPopup="menu"
-              disabled={isBusy}
-              icon={<Download size={17} />}
+              active={activeView === "home"}
+              icon={<LayoutGrid size={17} />}
               isCompact={isCompact}
-              label="导入素材"
-              onClick={onToggleImportMenu}
+              label={t("素材浏览")}
+              onClick={onOpenHome}
             />
-            {isImportMenuOpen && importMenuStyle
-              ? createPortal(
-                  <div
-                    className="w-fit min-w-40 overflow-hidden rounded-2xl border border-border bg-panel p-1.5 shadow-elevated"
-                    ref={importMenuContentRef}
-                    role="menu"
-                    style={importMenuStyle}
-                  >
-                    <ImportMenuItem icon={<ImagePlus size={16} />} label="导入图片" onClick={onImportImages} />
-                    <ImportMenuItem icon={<FolderTree size={16} />} label="添加目录" onClick={onAddLibraryDirectory} />
-                    <ImportMenuItem icon={<Clipboard size={16} />} label="粘贴导入" onClick={onImportClipboardImage} />
-                    <ImportMenuItem icon={<FileText size={16} />} label="导入文档" onClick={onImportWordDocument} />
-                    <ImportMenuItem icon={<Download size={16} />} label="导入分享" onClick={onImportZip} />
-                  </div>,
-                  document.body,
-                )
-              : null}
-          </div>
-          <SidebarActionButton
-            icon={<FolderTree size={17} />}
-            isCompact={isCompact}
-            label="素材目录"
-            onClick={onOpenLibraryRoots}
-          />
-          <SidebarActionButton
-            active={activeView === "promptLibrary"}
-            icon={<BookOpen size={17} />}
-            isCompact={isCompact}
-            label="批量管理"
-            onClick={onOpenManager}
-          />
+          ) : null}
+          {isEntryVisible("categoryLexicon") ? (
+            <SidebarActionButton
+              active={activeView === "categoryLexicon"}
+              icon={<FolderTree size={17} />}
+              isCompact={isCompact}
+              label={t("分类浏览")}
+              onClick={onOpenCategoryLexicon}
+            />
+          ) : null}
+          {isEntryVisible("tagLexicon") ? (
+            <SidebarActionButton
+              active={activeView === "tagLexicon"}
+              icon={<Tags size={17} />}
+              isCompact={isCompact}
+              label={t("标签浏览")}
+              onClick={onOpenTagLexicon}
+            />
+          ) : null}
+          {isEntryVisible("importMaterial") ? (
+          <div className="relative min-w-0" data-feature-guide="import-menu" ref={importMenuRef}>
+              <SidebarActionButton
+                ariaExpanded={isImportMenuOpen}
+                ariaHasPopup="menu"
+                disabled={isBusy}
+                icon={<Download size={17} />}
+                isCompact={isCompact}
+                label={t("导入素材")}
+                onClick={onToggleImportMenu}
+              />
+              {isImportMenuOpen && importMenuStyle
+                ? createPortal(
+                    <div
+                      className="w-fit min-w-40 overflow-hidden rounded-2xl border border-border bg-panel p-1.5 shadow-elevated"
+                      ref={importMenuContentRef}
+                      role="menu"
+                      style={importMenuStyle}
+                    >
+                      <ImportMenuItem guideId="import-image" icon={<ImagePlus size={16} />} label={t("导入图片")} onClick={onImportImages} />
+                      <ImportMenuItem guideId="import-directory" icon={<FolderTree size={16} />} label={t("添加目录")} onClick={onAddLibraryDirectory} />
+                      <ImportMenuItem guideId="import-clipboard" icon={<Clipboard size={16} />} label={t("粘贴导入")} onClick={onImportClipboardImage} />
+                      <ImportMenuItem guideId="import-document" icon={<FileText size={16} />} label={t("导入文档")} onClick={onImportWordDocument} />
+                      <ImportMenuItem guideId="import-share" icon={<Download size={16} />} label={t("导入分享")} onClick={onImportZip} />
+                    </div>,
+                    document.body,
+                  )
+                : null}
+            </div>
+          ) : null}
+          {isEntryVisible("libraryRoots") ? (
+            <SidebarActionButton
+              icon={<FolderTree size={17} />}
+              isCompact={isCompact}
+              label={t("素材目录")}
+              onClick={onOpenLibraryRoots}
+            />
+          ) : null}
+          {isEntryVisible("promptLibrary") ? (
+            <SidebarActionButton
+              active={activeView === "promptLibrary"}
+              icon={<BookOpen size={17} />}
+              isCompact={isCompact}
+              label={t("批量管理")}
+              onClick={onOpenManager}
+            />
+          ) : null}
         </div>
+        ) : null}
 
+        {hasVisibleGroup("inspiration") ? (
         <div className="grid min-w-0 gap-1 border-t border-border/80 pt-3">
-          <SidebarSectionLabel isCompact={isCompact}>组织</SidebarSectionLabel>
-          <SidebarActionButton
-            active={activeView === "categoryLexicon"}
-            icon={<FolderTree size={17} />}
-            isCompact={isCompact}
-            label="分类浏览"
-            onClick={onOpenCategoryLexicon}
-          />
-          <SidebarActionButton
-            active={activeView === "tagLexicon"}
-            icon={<Tags size={17} />}
-            isCompact={isCompact}
-            label="标签浏览"
-            onClick={onOpenTagLexicon}
-          />
+          <SidebarSectionLabel isCompact={isCompact}>{t("灵感")}</SidebarSectionLabel>
+          {isEntryVisible("textPrompts") ? (
+            <SidebarActionButton
+              active={activeView === "textPrompts"}
+              icon={<BookOpenText size={17} />}
+              isCompact={isCompact}
+              label={t("灵感创作")}
+              onClick={onOpenTextPrompts}
+            />
+          ) : null}
+          {isEntryVisible("todo") ? (
+            <SidebarActionButton
+              active={activeView === "todo"}
+              icon={<ListTodo size={17} />}
+              isCompact={isCompact}
+              label={t("待办事项")}
+              onClick={onOpenTodo}
+            />
+          ) : null}
+          {isEntryVisible("canvas") ? (
+            <SidebarActionButton
+              active={activeView === "canvas"}
+              icon={<Sparkles size={17} />}
+              isCompact={isCompact}
+              label={t("创作画布")}
+              onClick={onOpenCanvas}
+            />
+          ) : null}
+          {isEntryVisible("webAssistant") ? (
+            <SidebarActionButton
+              active={activeView === "webAssistant"}
+              icon={<Compass size={17} />}
+              isCompact={isCompact}
+              label={t("网页助手")}
+              onClick={onOpenWebAssistant}
+            />
+          ) : null}
         </div>
+        ) : null}
 
+        {hasVisibleGroup("resources") ? (
         <div className="grid min-w-0 gap-1 border-t border-border/80 pt-3">
-          <SidebarSectionLabel isCompact={isCompact}>资源</SidebarSectionLabel>
-          <SidebarActionButton
-            active={activeView === "promptSites"}
-            icon={<Globe2 size={17} />}
-            isCompact={isCompact}
-            label="资源推荐"
-            onClick={onOpenPromptSites}
-          />
+          <SidebarSectionLabel isCompact={isCompact}>{t("资源")}</SidebarSectionLabel>
+          {isEntryVisible("promptSites") ? (
+            <SidebarActionButton
+              active={activeView === "promptSites"}
+              icon={<Globe2 size={17} />}
+              isCompact={isCompact}
+              label={t("资源推荐")}
+              onClick={onOpenPromptSites}
+            />
+          ) : null}
         </div>
+        ) : null}
 
+        {hasVisibleGroup("system") ? (
         <div className="grid min-w-0 gap-1 border-t border-border/80 pt-3">
-          <SidebarSectionLabel isCompact={isCompact}>系统</SidebarSectionLabel>
-          <SidebarActionButton
-            active={activeView === "aiSettings"}
-            icon={<Settings size={17} />}
-            isCompact={isCompact}
-            label="模型配置"
-            onClick={onOpenAiSettings}
-          />
-          <SidebarActionButton
-            active={activeView === "nsfwSettings"}
-            icon={<Shield size={17} />}
-            isCompact={isCompact}
-            label="内容分级"
-            onClick={onOpenNsfwSettings}
-          />
-          <SidebarActionButton
-            active={activeView === "systemPreferences"}
-            icon={<SlidersHorizontal size={17} />}
-            isCompact={isCompact}
-            label="系统设置"
-            onClick={onOpenSystemPreferences}
-          />
-          <SidebarActionButton
-            icon={<ScrollText size={17} />}
-            isCompact={isCompact}
-            label="日志导出"
-            onClick={onOpenLogExport}
-          />
+          <SidebarSectionLabel isCompact={isCompact}>{t("系统")}</SidebarSectionLabel>
+          {isEntryVisible("aiSettings") ? (
+            <SidebarActionButton
+              active={activeView === "aiSettings"}
+              icon={<Settings size={17} />}
+              isCompact={isCompact}
+              label={t("模型配置")}
+              onClick={onOpenAiSettings}
+            />
+          ) : null}
+          {isEntryVisible("nsfwSettings") ? (
+            <SidebarActionButton
+              active={activeView === "nsfwSettings"}
+              icon={<Shield size={17} />}
+              isCompact={isCompact}
+              label={t("内容分级")}
+              onClick={onOpenNsfwSettings}
+            />
+          ) : null}
+          {isEntryVisible("systemPreferences") ? (
+            <SidebarActionButton
+              active={activeView === "systemPreferences"}
+              icon={<SlidersHorizontal size={17} />}
+              isCompact={isCompact}
+              label={t("系统设置")}
+              onClick={() => onOpenSystemPreferences()}
+            />
+          ) : null}
+          {isEntryVisible("logExport") ? (
+            <SidebarActionButton
+              icon={<ScrollText size={17} />}
+              isCompact={isCompact}
+              label={t("日志导出")}
+              onClick={onOpenLogExport}
+            />
+          ) : null}
         </div>
+        ) : null}
       </nav>
 
-      <div
-        className={`shrink-0 border-t border-border/80 bg-panel/95 pb-3 pt-3 ${isCompact ? "px-2" : "px-3"}`}
-      >
-        <div className={`grid gap-2 ${isCompact ? "grid-cols-1" : "grid-cols-2"}`}>
-          <SidebarThemeButton isBusy={isBusy} isCompact={isCompact} />
-          <SidebarActionButton
-            icon={<Info size={17} />}
-            isCompact={isCompact}
-            label="关于"
-            onClick={onOpenAbout}
-          />
+      {sidebarFooterEntryIds.some(isEntryVisible) ? (
+        <div className={`shrink-0 border-t border-chrome-border/70 pb-3 pt-3 ${isCompact ? "px-2" : "px-3"}`}>
+          <div className="grid gap-2">
+            {isEntryVisible("account") ? <AccountSidebarEntry isCompact={isCompact} /> : null}
+            {isEntryVisible("appearance") ? (
+              <SidebarActionButton
+                disabled={isBusy}
+                icon={<Palette size={17} />}
+                isCompact={isCompact}
+                label={t("主题")}
+                onClick={() => onOpenSystemPreferences("appearance")}
+              />
+            ) : null}
+            {isEntryVisible("about") ? (
+              <SidebarActionButton
+                icon={<Info size={17} />}
+                isCompact={isCompact}
+                label={t("关于")}
+                onClick={onOpenAbout}
+              />
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div
-        aria-label="调整边栏宽度"
+        data-feature-guide="sidebar-resize"
+        aria-label={t("调整边栏宽度")}
         aria-orientation="vertical"
         aria-valuemax={maxSidebarWidth}
         aria-valuemin={minSidebarWidth}
@@ -2646,7 +3159,7 @@ function SidebarSectionLabel({ children, isCompact }: SidebarSectionLabelProps) 
     return <span className="sr-only">{children}</span>;
   }
 
-  return <span className="px-3 pb-1 text-xs font-semibold tracking-wide text-muted">{children}</span>;
+  return <span className="px-3 pb-1 text-xs font-semibold tracking-wide text-chrome-muted">{children}</span>;
 }
 
 type SidebarActionButtonProps = {
@@ -2681,7 +3194,7 @@ function SidebarActionButton({
       } ${
         active
           ? "border-primary bg-primary text-primary-foreground shadow-sm"
-          : "border-transparent text-muted hover:border-border hover:bg-background hover:text-foreground"
+          : "border-transparent text-chrome-muted hover:border-chrome-border hover:bg-chrome-control/55 hover:text-chrome-foreground"
       }`}
       data-tooltip-align="start"
       data-tooltip-placement="right"
@@ -2691,7 +3204,7 @@ function SidebarActionButton({
     >
       <span
         className={`flex size-7 shrink-0 items-center justify-center rounded-xl border ${
-          active ? "border-primary-foreground/25 bg-primary-foreground/15" : "border-border/70 bg-panel"
+          active ? "border-primary-foreground/25 bg-primary-foreground/15" : "border-chrome-border/70 bg-chrome-control/55"
         }`}
       >
         {icon}
@@ -2706,28 +3219,6 @@ function SidebarActionButton({
   );
 }
 
-type SidebarThemeButtonProps = {
-  isBusy: boolean;
-  isCompact: boolean;
-};
-
-function SidebarThemeButton({ isBusy, isCompact }: SidebarThemeButtonProps) {
-  const value = useLibraryStore((state) => state.themeMode);
-  const setThemeMode = useLibraryStore((state) => state.setThemeMode);
-  const currentOption = themeModeOptions.find((option) => option.value === value) ?? themeModeOptions[0];
-  const label = "外观";
-
-  return (
-    <SidebarActionButton
-      disabled={isBusy}
-      icon={currentOption.icon}
-      isCompact={isCompact}
-      label={label}
-      onClick={() => void setThemeMode(getNextThemeMode(value))}
-    />
-  );
-}
-
 type SearchHeroPanelProps = {
   searchQuery: string;
   onSearchChange: (value: string) => void;
@@ -2739,6 +3230,7 @@ const SearchHeroPanel = memo(function SearchHeroPanel({
   onSearchChange,
   onSubmit,
 }: SearchHeroPanelProps) {
+  const { t } = useLocale();
   return (
     <form
       className="w-full rounded-2xl border border-border bg-panel p-3 shadow-elevated transition-all duration-200 focus-within:border-primary focus-within:shadow-image focus-within:ring-4 focus-within:ring-primary/10"
@@ -2751,19 +3243,19 @@ const SearchHeroPanel = memo(function SearchHeroPanel({
       <div className="grid gap-3">
         <div className="grid min-w-0 gap-2">
           <label className="sr-only" htmlFor="prompt-library-search">
-            全库搜索
+            {t("全库搜索")}
           </label>
           <div className="grid min-h-12 grid-cols-[1fr_auto] items-center rounded-xl border border-border bg-background px-3 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
             <input
-              aria-label="搜索提示词"
+              aria-label={t("搜索提示词")}
               className="min-w-0 bg-transparent text-base text-foreground outline-none placeholder:text-muted"
               id="prompt-library-search"
-              placeholder="搜索标题、文件名、内容或标签"
+              placeholder={t("搜索标题、文件名、内容或标签")}
               value={searchQuery}
               onChange={(event) => onSearchChange(event.target.value)}
             />
             <button
-              aria-label="执行搜索"
+              aria-label={t("执行搜索")}
               className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-elevated transition-colors hover:bg-primary-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
               type="submit"
             >
@@ -2775,13 +3267,6 @@ const SearchHeroPanel = memo(function SearchHeroPanel({
     </form>
   );
 });
-
-function getNextThemeMode(value: ThemeMode): ThemeMode {
-  const currentIndex = themeModeOptions.findIndex((option) => option.value === value);
-  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % themeModeOptions.length;
-
-  return themeModeOptions[nextIndex].value;
-}
 
 function clampMasonryColumnCount(count: number): number {
   if (!Number.isFinite(count)) {
@@ -2890,7 +3375,7 @@ type PromptLexiconWorkspaceProps = {
   onMovePromptGroupsToCategory: (
     itemIds: readonly string[],
     categoryId: string | null,
-    source?: "system" | "user" | "ai",
+    source?: "system" | "user" | "ai" | "local",
   ) => Promise<boolean>;
   onUpsertCustomCategory: (input: {
     id?: string | null;
@@ -2983,6 +3468,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
   onUpsertCustomCategory,
   onDeleteCustomCategory,
 }: PromptLexiconWorkspaceProps) {
+  const { t } = useLocale();
   const [categoryDrafts, setCategoryDrafts] = useState(() =>
     createPromptCategoryDrafts(promptLexicons, popularTags, kind === "categories", categoryTaxonomy),
   );
@@ -2993,6 +3479,9 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
   const [selectedTagMenuPath, setSelectedTagMenuPath] = useState(allTagGroupsValue);
   const [categoryQuery, setCategoryQuery] = useState("");
   const [tagImageQuery, setTagImageQuery] = useState("");
+  const [organizationOpen, setOrganizationOpen] = useState(false);
+  const [organizationChoice, setOrganizationChoice] = useState<{ id: string; label: string }>();
+  const organizationBusy = useLibraryStore(state => state.isBusy);
   const [selectedCategoryPromptGroups, setSelectedCategoryPromptGroups] = useState<Set<string>>(() => new Set());
   const [selectedTagPromptGroups, setSelectedTagPromptGroups] = useState<Set<string>>(() => new Set());
   const [isDirty, setIsDirty] = useState(false);
@@ -3228,27 +3717,6 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     }
   }, [isDirty, isTagWorkspace, popularTags, promptLexicons]);
 
-  // Repair legacy tag rows after opening the tag workspace. The current draft
-  // is normalized for display immediately; this flag lets the existing
-  // domain-scoped autosave persist corrected groups without touching the other
-  // lexicon domains.
-  useEffect(() => {
-    if (!isTagWorkspace || !promptLexicons) {
-      return;
-    }
-
-    const savedTags = promptLexicons.tags ?? [];
-    const normalizedTags = normalizeTagImageLexiconEntries(savedTags);
-    const savedByLabel = new Map(savedTags.map((entry) => [normalizeLexiconItemKey(entry.label), entry.group]));
-    const needsRepair =
-      normalizedTags.length !== savedTags.length ||
-      normalizedTags.some((entry) => savedByLabel.get(normalizeLexiconItemKey(entry.label)) !== entry.group);
-
-    if (needsRepair) {
-      setIsDirty(true);
-    }
-  }, [isTagWorkspace, promptLexicons]);
-
   useEffect(() => {
     if (!isDirty) {
       return;
@@ -3335,7 +3803,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       return;
     }
     if (!onClearLexiconDomain) {
-      showLexiconStatus({ type: "error", text: "清空接口不可用，请重启应用。" });
+      showLexiconStatus({ type: "error", text: t("清空接口不可用，请重启应用。") });
       return;
     }
 
@@ -3343,7 +3811,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 0,
       currentTitle: "",
       failed: 0,
-      message: "正在清空素材分类并同步词库…",
+       message: t("正在清空素材分类并同步词库…"),
       processed: 0,
       skipped: 0,
       status: "running",
@@ -3353,7 +3821,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     const ok = await onClearLexiconDomain("categories");
     if (!ok) {
       setCategoryAnalysisProgress((current) =>
-        current ? { ...current, status: "canceled", message: "清空失败，请重试。" } : current,
+         current ? { ...current, status: "failed", message: t("清空失败，请重试。") } : current,
       );
       return;
     }
@@ -3370,7 +3838,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 1,
       currentTitle: "",
       failed: 0,
-      message: "已清空素材分类。系统目录保留；需要时点「AI分类」。",
+       message: t("已清空素材分类。系统目录保留；需要时点「AI分类」。"),
       processed: 1,
       skipped: 0,
       status: "completed",
@@ -3378,7 +3846,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     });
     showLexiconStatus({
       type: "success",
-      text: "已清空素材分类并写入磁盘（未自动分析）。",
+       text: t("已清空素材分类并写入磁盘（未自动分析）。"),
     });
     logRendererStartupEvent("lexicon:clear-categories:done", { domain: "categories" });
   }
@@ -3388,7 +3856,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       return;
     }
     if (!onClearLexiconDomain) {
-      showLexiconStatus({ type: "error", text: "清空接口不可用，请重启应用。" });
+      showLexiconStatus({ type: "error", text: t("清空接口不可用，请重启应用。") });
       return;
     }
 
@@ -3396,7 +3864,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 0,
       currentTitle: "",
       failed: 0,
-      message: "正在清空素材标签与标签词库…",
+       message: t("正在清空素材标签与标签词库…"),
       processed: 0,
       skipped: 0,
       status: "running",
@@ -3406,7 +3874,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     const ok = await onClearLexiconDomain("tags");
     if (!ok) {
       setTagAnalysisProgress((current) =>
-        current ? { ...current, status: "canceled", message: "清空失败，请重试。" } : current,
+         current ? { ...current, status: "failed", message: t("清空失败，请重试。") } : current,
       );
       return;
     }
@@ -3419,7 +3887,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 1,
       currentTitle: "",
       failed: 0,
-      message: "已清空素材标签与标签词库。需要时点「AI标签」。",
+       message: t("已清空素材标签与标签词库。需要时点「AI标签」。"),
       processed: 1,
       skipped: 0,
       status: "completed",
@@ -3427,7 +3895,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     });
     showLexiconStatus({
       type: "success",
-      text: "已清空标签（素材 + 词库目录）并写入磁盘（未自动分析）。",
+       text: t("已清空标签（素材 + 词库目录）并写入磁盘（未自动分析）。"),
     });
     logRendererStartupEvent("lexicon:clear-tags:done", { domain: "tags" });
   }
@@ -3445,7 +3913,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 0,
       currentTitle: "",
       failed: 0,
-      message: `准备分析 ${groupsToAnalyze.length} 个提示词组。`,
+       message: t("准备分析 {count} 个提示词组。", { count: groupsToAnalyze.length }),
       processed: 0,
       skipped: 0,
       status: "running",
@@ -3465,7 +3933,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `已取消，处理 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+           message: t("已取消，处理 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
           processed,
           skipped,
           status: "canceled",
@@ -3477,9 +3945,9 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       const batch = groupsToAnalyze.slice(batchStart, batchStart + analysisBatchSize);
       setCategoryAnalysisProgress({
         analyzed,
-        currentTitle: batch[0]?.primaryItem.title || "未命名提示词",
+        currentTitle: batch[0]?.primaryItem.title || t("未命名提示词"),
         failed,
-        message: `正在并行分析 ${batch.length} 个提示词组...`,
+         message: t("正在并行分析 {count} 个提示词组...", { count: batch.length }),
         processed,
         skipped,
         status: "running",
@@ -3542,7 +4010,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: "AI 连续请求失败，已停止本轮批量分析。",
+           message: t("AI 连续请求失败，已停止本轮批量分析。"),
           processed,
           skipped,
           status: "completed",
@@ -3556,7 +4024,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `已取消，处理 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+           message: t("已取消，处理 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
           processed,
           skipped,
           status: "canceled",
@@ -3570,7 +4038,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `连续 ${consecutiveFailures} 组无有效分类，已停止。请检查或更换模型。`,
+           message: t("连续 {count} 组无有效分类，已停止。请检查或更换模型。", { count: consecutiveFailures }),
           processed,
           skipped,
           status: "completed",
@@ -3583,7 +4051,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
         analyzed,
         currentTitle: batch.at(-1)?.primaryItem.title || "未命名提示词",
         failed,
-        message: `已完成 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+         message: t("已完成 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
         processed,
         skipped,
         status: "running",
@@ -3596,7 +4064,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed,
       currentTitle: "",
       failed,
-      message: `分析完成：更新 ${analyzed} 个，跳过 ${skipped} 个，失败 ${failed} 个。`,
+       message: t("分析完成：更新 {analyzed} 个，跳过 {skipped} 个，失败 {failed} 个。", { analyzed, skipped, failed }),
       processed: groupsToAnalyze.length,
       skipped,
       status: "completed",
@@ -3619,7 +4087,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed: 0,
       currentTitle: "",
       failed: 0,
-      message: `准备分析 ${groupsToAnalyze.length} 个提示词组。`,
+       message: t("准备分析 {count} 个提示词组。", { count: groupsToAnalyze.length }),
       processed: 0,
       skipped: 0,
       status: "running",
@@ -3639,7 +4107,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `已取消，处理 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+           message: t("已取消，处理 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
           processed,
           skipped,
           status: "canceled",
@@ -3651,9 +4119,9 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       const batch = groupsToAnalyze.slice(batchStart, batchStart + analysisBatchSize);
       setTagAnalysisProgress({
         analyzed,
-        currentTitle: batch[0]?.primaryItem.title || "未命名提示词",
+        currentTitle: batch[0]?.primaryItem.title || t("未命名提示词"),
         failed,
-        message: `正在并行分析 ${batch.length} 个提示词组...`,
+         message: t("正在并行分析 {count} 个提示词组...", { count: batch.length }),
         processed,
         skipped,
         status: "running",
@@ -3708,7 +4176,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `已取消，处理 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+           message: t("已取消，处理 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
           processed,
           skipped,
           status: "canceled",
@@ -3722,7 +4190,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           analyzed,
           currentTitle: "",
           failed,
-          message: `连续 ${consecutiveFailures} 组无有效标签，已停止。请检查或更换模型。`,
+           message: t("连续 {count} 组无有效标签，已停止。请检查或更换模型。", { count: consecutiveFailures }),
           processed,
           skipped,
           status: "completed",
@@ -3735,7 +4203,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
         analyzed,
         currentTitle: batch.at(-1)?.primaryItem.title || "未命名提示词",
         failed,
-        message: `已完成 ${processed}/${groupsToAnalyze.length} 个提示词组。`,
+         message: t("已完成 {processed}/{total} 个提示词组。", { processed, total: groupsToAnalyze.length }),
         processed,
         skipped,
         status: "running",
@@ -3748,7 +4216,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       analyzed,
       currentTitle: "",
       failed,
-      message: `分析完成：更新 ${analyzed} 个，跳过 ${skipped} 个，失败 ${failed} 个。`,
+       message: t("分析完成：更新 {analyzed} 个，跳过 {skipped} 个，失败 {failed} 个。", { analyzed, skipped, failed }),
       processed: groupsToAnalyze.length,
       skipped,
       status: "completed",
@@ -3762,7 +4230,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       current?.status === "running"
         ? {
             ...current,
-            message: "正在取消，当前请求后停止...",
+             message: t("正在取消，当前请求后停止..."),
           }
         : current,
     );
@@ -3774,7 +4242,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       current?.status === "running"
         ? {
             ...current,
-            message: "正在取消，当前请求后停止...",
+             message: t("正在取消，当前请求后停止..."),
           }
         : current,
     );
@@ -3784,7 +4252,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     const items = collectSelectedPromptGroupItems(categoryPromptGroups, selectedCategoryPromptGroups);
     if (items.length === 0) {
       setSelectedCategoryPromptGroups(new Set());
-      showLexiconStatus({ type: "info", text: "请先勾选要移出的提示词组。" });
+      showLexiconStatus({ type: "info", text: t("请先勾选要移出的提示词组。") });
       logRendererStartupEvent("lexicon:remove-category:empty-selection");
       return;
     }
@@ -3809,7 +4277,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     // 「全部分类」无法指定要移出的分类：只提示，绝不删除素材。
     showLexiconStatus({
       type: "info",
-      text: "请先在左侧选择具体分类，再点「移出分类」。此操作不会删除素材。",
+       text: t("请先在左侧选择具体分类，再点「移出分类」。此操作不会删除素材。"),
     });
     logRendererStartupEvent("lexicon:remove-category:need-menu", {
       selectedCount: items.length,
@@ -3834,7 +4302,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     if (options.asChild && !parentEntry) {
       showLexiconStatus({
         type: "info",
-        text: "请先在左侧选择一个父分类，再新增子分类。",
+         text: t("请先在左侧选择一个父分类，再新增子分类。"),
       });
       return;
     }
@@ -3849,12 +4317,12 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       options.asChild && parentEntry
         ? {
             group: groupLabel,
-            label: "新子分类",
+             label: t("新子分类"),
             parentId: parentEntry.id,
           }
         : {
             group: groupLabel,
-            label: "新分类",
+             label: t("新分类"),
             parentId: null,
           },
     );
@@ -3872,8 +4340,8 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
       showLexiconStatus({
         type: "success",
         text: options.asChild
-          ? `已在「${parentEntry?.label || "父分类"}」下新增子分类，可直接改名。`
-          : "已新增自定义分类，可直接改名。",
+           ? t("已在「{label}」下新增子分类，可直接改名。", { label: parentEntry?.label || t("父分类") })
+           : t("已新增自定义分类，可直接改名。"),
       });
       logRendererStartupEvent("lexicon:create-category", {
         asChild: options.asChild,
@@ -3911,7 +4379,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
 
     if (items.length === 0) {
       setSelectedTagPromptGroups(new Set());
-      showLexiconStatus({ type: "info", text: "请先勾选要移出的提示词组。" });
+      showLexiconStatus({ type: "info", text: t("请先勾选要移出的提示词组。") });
       logRendererStartupEvent("lexicon:remove-tag:empty-selection");
       return;
     }
@@ -3920,7 +4388,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     if (labelKeys === null || labelKeys.size === 0) {
       showLexiconStatus({
         type: "info",
-        text: "请先在左侧选择具体标签，再点「移出标签」。此操作只去掉标签，不会删除素材。",
+         text: t("请先在左侧选择具体标签，再点「移出标签」。此操作只去掉标签，不会删除素材。"),
       });
       logRendererStartupEvent("lexicon:remove-tag:need-menu", {
         selectedCount: items.length,
@@ -3953,7 +4421,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     if (updatedCount > 0) {
       showLexiconStatus({
         type: "success",
-        text: `已从 ${updatedCount} 个提示词组移出标签（素材未删除）。`,
+         text: t("已从 {count} 个提示词组移出标签（素材未删除）。", { count: updatedCount }),
       });
       logRendererStartupEvent("lexicon:remove-tag:done", {
         count: updatedCount,
@@ -3962,7 +4430,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     } else {
       showLexiconStatus({
         type: "info",
-        text: "选中的提示词组不包含当前标签，无需移出。",
+       text: t("选中的提示词组不包含当前标签，无需移出。"),
       });
       logRendererStartupEvent("lexicon:remove-tag:noop", {
         selectedCount: items.length,
@@ -3974,7 +4442,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
   async function handleDeleteSelectedTag(): Promise<boolean> {
     const labelKeys = getSelectedTagLabelKeys(tagMenuEntries, selectedTagMenuPath);
     if (!labelKeys || labelKeys.size === 0) {
-      showLexiconStatus({ type: "info", text: "请先在左侧选择具体标签，再删除标签。" });
+      showLexiconStatus({ type: "info", text: t("请先在左侧选择具体标签，再删除标签。") });
       return false;
     }
 
@@ -4013,7 +4481,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
     setSelectedTagPromptGroups(new Set());
     showLexiconStatus({
       type: "success",
-      text: `已删除标签「${getTagPromptMenuDisplayLabel(selectedTagMenuPath, tagMenuEntries)}」，素材未删除。`,
+       text: t("已删除标签「{label}」，素材未删除。", { label: getTagPromptMenuDisplayLabel(selectedTagMenuPath, tagMenuEntries, t) }),
     });
     return true;
   }
@@ -4024,7 +4492,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
 
   const syncStatusBadge = (
     <span className="rounded-md border border-capsule-fog-border bg-capsule-fog px-2 py-1 text-xs text-capsule-fog-foreground">
-      {isDirty ? "正在自动同步" : "当前已同步"}
+      {isDirty ? t("有待保存的修改") : t("当前已保存")}
     </span>
   );
 
@@ -4034,19 +4502,20 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
         <LexiconSection
           bodyClassName="min-h-0 overflow-visible"
           count={categoryPromptGroups.length}
-          description={meta.description}
-          eyebrow={meta.eyebrow}
+          description={t(meta.description)}
+          eyebrow={t(meta.eyebrow)}
           statusBadge={syncStatusBadge}
           icon={meta.icon}
           isBusy={isBusy}
           hideScrollTopButton={hideScrollTopButton}
           layout="page"
           query={categoryQuery}
-          searchPlaceholder={meta.searchPlaceholder}
+          searchPlaceholder={t(meta.searchPlaceholder)}
           selectedCount={selectedCategoryPromptGroupCount}
           toolbarLeadingAction={
             <Button
-              icon={<Sparkles size={16} />}
+              className="min-h-8 px-2.5 py-1.5 text-xs"
+              icon={<Sparkles size={14} />}
               disabled={
                 isBusy ||
                 categoryAnalysisProgress?.status === "running" ||
@@ -4055,24 +4524,25 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
               }
               onClick={() => void handleAnalyzeVisibleCategoryPromptGroups()}
             >
-              {categoryAnalysisProgress?.status === "running" ? "分析中" : "AI分类"}
+              {categoryAnalysisProgress?.status === "running" ? t("分析中") : t("AI分类")}
             </Button>
           }
-          title={meta.title}
+          title={t(meta.title)}
           onAdd={() => {
             void handleCreateCustomCategory({ asChild: false });
           }}
           toolbarExtra={
             <Button
-              icon={<RefreshCw size={16} />}
+              className="min-h-8 px-2.5 py-1.5 text-xs"
+              icon={<RefreshCw size={14} />}
               disabled={isBusy || categoryAnalysisProgress?.status === "running" || categoryPromptGroups.length === 0}
-              title="清空全部分类（不会自动分析；需要时再点「AI分类」）"
+              title={t("清空全部分类（不会自动分析；需要时再点「AI分类」）")}
               onClick={() => void handleResetAndReanalyzeCategories()}
             >
-              清空分类
+              {t("清空分类")}
             </Button>
           }
-          deleteSelectedLabel="移出分类"
+          deleteSelectedLabel={t("移出分类")}
           showToolbarDelete={false}
           onDeleteSelected={() => void handleDeleteSelectedCategoryPromptGroups()}
           onExport={() => void onExportLexicon("categories", categoryDrafts)}
@@ -4135,19 +4605,20 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
         <LexiconSection
           bodyClassName="min-h-0 overflow-visible"
           count={tagPromptGroups.length}
-          description={meta.description}
-          eyebrow={meta.eyebrow}
+          description={t(meta.description)}
+          eyebrow={t(meta.eyebrow)}
           statusBadge={syncStatusBadge}
           icon={meta.icon}
           isBusy={isBusy}
           hideScrollTopButton={hideScrollTopButton}
           layout="page"
           query={tagImageQuery}
-          searchPlaceholder={meta.searchPlaceholder}
+          searchPlaceholder={t(meta.searchPlaceholder)}
           selectedCount={selectedTagPromptGroupCount}
           toolbarLeadingAction={
             <Button
-              icon={<Sparkles size={16} />}
+              className="min-h-8 px-2.5 py-1.5 text-xs"
+              icon={<Sparkles size={14} />}
               disabled={
                 isBusy ||
                 tagAnalysisProgress?.status === "running" ||
@@ -4155,27 +4626,38 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
               }
               onClick={() => void handleAnalyzeVisibleTagPromptGroups({ force: true })}
             >
-              {tagAnalysisProgress?.status === "running" ? "分析中" : "AI标签"}
+              {tagAnalysisProgress?.status === "running" ? t("分析中") : t("AI标签")}
             </Button>
           }
           toolbarExtra={
-            <Button
-              icon={<RefreshCw size={16} />}
-              disabled={isBusy || tagAnalysisProgress?.status === "running" || tagPromptGroups.length === 0}
-              title="清空全部标签（不会自动分析；需要时再点「AI标签」）"
-              onClick={() => void handleResetAndReanalyzeTags()}
-            >
-              清空标签
-            </Button>
+            <>
+              <Button
+                className="min-h-8 px-2.5 py-1.5 text-xs"
+                icon={<FolderTree size={14} />}
+                disabled={isDirty || isBusy || organizationBusy || tagAnalysisProgress?.status === "running"}
+                onClick={() => { setOrganizationChoice(undefined); setOrganizationOpen(true); }}
+              >
+                {t("归纳整理")}
+              </Button>
+              <Button
+                className="min-h-8 px-2.5 py-1.5 text-xs"
+                icon={<RefreshCw size={14} />}
+                disabled={isBusy || tagAnalysisProgress?.status === "running" || tagPromptGroups.length === 0}
+                title={t("清空全部标签（不会自动分析；需要时再点「AI标签」）")}
+                onClick={() => void handleResetAndReanalyzeTags()}
+              >
+                {t("清空标签")}
+              </Button>
+            </>
           }
-          title={meta.title}
+          title={t(meta.title)}
           onAdd={() =>
             updateTagImageDrafts((currentDrafts) => [
-              createBlankImageEntry("tag", getImageEntryDraft("tag", selectedTagMenuPath, currentDrafts)),
+              { ...createBlankImageEntry("tag", getImageEntryDraft("tag", selectedTagMenuPath, currentDrafts)), groupLocked: true, reviewStatus: "accepted" },
               ...currentDrafts,
             ])
           }
-          deleteSelectedLabel="移出标签"
+          deleteSelectedLabel={t("移出标签")}
           showToolbarDelete={false}
           onDeleteSelected={() => void handleDeleteSelectedTagPromptGroups()}
           onExport={() => void onExportLexicon("tags", tagImageDrafts)}
@@ -4183,6 +4665,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
           onQueryChange={setTagImageQuery}
         >
           <TagPromptGroupExplorer
+            onOrganizeTag={(choice) => { setOrganizationChoice(choice); setOrganizationOpen(true); }}
             blurNsfwImages={blurNsfwImages}
             entries={tagMenuEntries}
             isMenuReady={isTagLexiconMenuReady}
@@ -4200,7 +4683,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
             onRemoveSelectedPromptGroups={() => void handleDeleteSelectedTagPromptGroups()}
             onDeleteSelectedTag={handleDeleteSelectedTag}
             onRenameGroup={(oldPath, newLabel) =>
-              updateTagImageDrafts((currentDrafts) => renameImageGroupInDrafts(currentDrafts, oldPath, newLabel))
+              updateTagImageDrafts((currentDrafts) => renameImageGroupInDrafts(currentDrafts, oldPath, newLabel).map((entry, index) => entry.group !== currentDrafts[index]?.group ? { ...entry, groupLocked: true, reviewStatus: "accepted" } : entry))
             }
             onRenameItem={(groupPath, itemKey, newLabel) =>
               updateTagImageDrafts((currentDrafts) => renameImageItemInDrafts(currentDrafts, groupPath, itemKey, newLabel))
@@ -4215,6 +4698,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
               setSelectedTagPromptGroups((current) => toggleEntrySelection(current, groupId))
             }
           />
+          {organizationOpen && <TagOrganizationDialog initialChoice={organizationChoice} onClose={() => setOrganizationOpen(false)} />}
         </LexiconSection>
       ) : null}
     </section>
@@ -4312,6 +4796,7 @@ function LexiconSection({
   onImport,
   onQueryChange,
 }: LexiconSectionProps) {
+  const { t } = useLocale();
   const sectionRef = useRef<HTMLElement | null>(null);
   const isPageLayout = layout === "page";
   const sectionClassName = isPageLayout
@@ -4337,11 +4822,11 @@ function LexiconSection({
               <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 <h3 className="whitespace-nowrap text-base font-semibold text-foreground">{title}</h3>
                 <span className="shrink-0 rounded-lg border border-capsule-mist-border bg-capsule-mist px-2 py-1 text-xs text-capsule-mist-foreground">
-                  {count} 条
+                  {t("{count} 条", { count })}
                 </span>
                 {selectedCount > 0 ? (
                   <span className="shrink-0 rounded-lg border border-capsule-lavender-border bg-capsule-lavender px-2 py-1 text-xs text-capsule-lavender-foreground">
-                    已选 {selectedCount}
+                     {t("已选 {count}", { count: selectedCount })}
                   </span>
                 ) : null}
                 {statusBadge}
@@ -4352,29 +4837,30 @@ function LexiconSection({
 
           <div className="flex w-full flex-wrap items-center justify-end gap-1.5 min-[1100px]:w-auto min-[1100px]:max-w-[58%]">
             {(toolbarLeadingAction || toolbarExtra) && (
-              <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-panel/90 p-1 shadow-sm">
+              <div data-feature-guide="lexicon-analysis" className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-panel/90 p-1 shadow-sm">
                 {toolbarLeadingAction}
                 {toolbarExtra}
               </div>
             )}
 
-            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-panel/90 p-1 shadow-sm">
-              <Button icon={<Plus size={16} />} disabled={isBusy} onClick={onAdd}>
-                新增
+            <div data-feature-guide="lexicon-import-export" className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-panel/90 p-1 shadow-sm">
+              <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Plus size={14} />} disabled={isBusy} onClick={onAdd}>
+                {t("新增")}
               </Button>
-              <Button icon={<Download size={16} />} disabled={isBusy} onClick={onImport}>
-                导入
+              <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Download size={14} />} disabled={isBusy} onClick={onImport}>
+                {t("导入")}
               </Button>
-              <Button icon={<Upload size={16} />} disabled={isBusy || count === 0} onClick={onExport}>
-                导出
+              <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Upload size={14} />} disabled={isBusy || count === 0} onClick={onExport}>
+                {t("导出")}
               </Button>
               {onClearSelectedImages ? (
                 <Button
-                  icon={<ImageIcon size={16} />}
+                  className="min-h-8 px-2.5 py-1.5 text-xs"
+                  icon={<ImageIcon size={14} />}
                   disabled={isBusy || selectedCount === 0}
                   onClick={onClearSelectedImages}
                 >
-                  清除选中图像
+                  {t("清除选中图像")}
                 </Button>
               ) : null}
             </div>
@@ -4382,7 +4868,8 @@ function LexiconSection({
             {showToolbarDelete ? (
               <div className="inline-flex flex-wrap items-center gap-1 rounded-xl border border-border/60 bg-panel/90 p-1 shadow-sm">
                 <Button
-                  icon={<Trash2 size={16} />}
+                  className="min-h-8 px-2.5 py-1.5 text-xs"
+                  icon={<Trash2 size={14} />}
                   variant="danger"
                   disabled={isBusy || selectedCount === 0 || deleteSelectedDisabled}
                   onClick={onDeleteSelected}
@@ -4398,16 +4885,18 @@ function LexiconSection({
         <div className="mt-3 border-t border-border/50 pt-3">
           <label className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border border-border/70 bg-panel px-3.5 text-sm text-muted shadow-sm transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
             <Search className="shrink-0 opacity-70" size={15} />
-            <input
-              aria-label={`${title}搜索`}
-              className="min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted"
-              placeholder={searchPlaceholder}
-              value={query}
-              onChange={(event) => onQueryChange(event.target.value)}
-            />
+            <span data-feature-guide="lexicon-search" className="flex min-w-0 flex-1 items-center">
+              <input
+                 aria-label={`${title}${t("搜索")}`}
+                className="min-w-0 flex-1 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted"
+                placeholder={searchPlaceholder}
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+              />
+            </span>
             {query.trim() ? (
               <button
-                aria-label="清除搜索"
+                 aria-label={t("清除搜索")}
                 className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
                 type="button"
                 onClick={() => onQueryChange("")}
@@ -4422,7 +4911,7 @@ function LexiconSection({
       <div className={`${bodyLayoutClassName} ${bodyClassName}`}>{children}</div>
       {isPageLayout && !hideScrollTopButton ? (
         <CardScrollTopButton
-          className="fixed bottom-6 z-50 min-[1024px]:bottom-10 min-[1440px]:bottom-12"
+          className="fixed bottom-[calc(1.5rem+var(--app-window-gutter))] z-50 min-[1024px]:bottom-[calc(2.5rem+var(--app-window-gutter))] min-[1440px]:bottom-[calc(3rem+var(--app-window-gutter))]"
           contentMaxWidth={lexiconShellMaxWidth}
           onClick={handleScrollToTop}
         />
@@ -4453,6 +4942,7 @@ function LexiconBatchToolbar({
   removeLabel = "删除所选",
   removeDisabled = false,
 }: LexiconBatchToolbarProps) {
+  const { t } = useLocale();
   if (totalCount === 0) {
     return null;
   }
@@ -4460,7 +4950,7 @@ function LexiconBatchToolbar({
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-border/70 bg-background/40 px-3 py-2 text-xs">
       <span className="text-muted">
-        已选 <span className="font-semibold text-foreground">{selectedCount}</span> / {totalCount}
+         {t("已选 {selected} / {total}", { selected: selectedCount, total: totalCount })}
       </span>
       <div className="ml-auto flex flex-wrap items-center gap-1">
         <button
@@ -4468,14 +4958,14 @@ function LexiconBatchToolbar({
           onClick={onSelectAll}
           className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
-          全选
+           {t("全选")}
         </button>
         <button
           type="button"
           onClick={onSelectInvert}
           className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
-          反选
+           {t("反选")}
         </button>
         <button
           type="button"
@@ -4483,7 +4973,7 @@ function LexiconBatchToolbar({
           disabled={!hasSelection}
           className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-background px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
-          取消
+           {t("取消")}
         </button>
         <button
           type="button"
@@ -4506,7 +4996,7 @@ function getLexiconExplorerRootClassName(layout: LexiconLayout): string {
 
 function getLexiconExplorerAsideClassName(layout: LexiconLayout): string {
   return layout === "page"
-    ? "flex max-h-[min(42vh,360px)] min-h-[200px] flex-col border-b border-border/70 bg-background/60 p-3 min-[960px]:sticky min-[960px]:top-4 min-[960px]:max-h-[calc(100dvh-9rem)] min-[960px]:self-start min-[960px]:border-b-0 min-[960px]:border-r"
+    ? "flex max-h-[min(42vh,360px)] min-h-[200px] flex-col border-b border-border/70 bg-background/60 p-3 min-[960px]:sticky min-[960px]:top-4 min-[960px]:min-h-0 min-[960px]:max-h-[var(--lexicon-menu-available-height,calc(100dvh-9rem))] min-[960px]:self-start min-[960px]:border-b-0 min-[960px]:border-r"
     : "flex min-h-0 max-h-[min(42vh,360px)] flex-col border-b border-border/70 bg-background/60 p-3 min-[960px]:max-h-none min-[960px]:border-b-0 min-[960px]:border-r";
 }
 
@@ -4642,10 +5132,11 @@ function ImageLexiconExplorer({
   onSelectNone,
   onRemoveSelected,
 }: ImageLexiconExplorerProps) {
+  const { t } = useLocale();
   const allMenuValue = getImageLexiconAllValue(kind);
   const groupTree = useMemo(() => buildImageLexiconGroupTree(entries), [entries]);
   const categoryTree = useMemo(() => (kind === "category" ? buildImageCategoryTree(entries) : []), [entries, kind]);
-  const activeMenuLabel = getImageLexiconMenuDisplayLabel(kind, selectedMenuPath, entries);
+  const activeMenuLabel = getImageLexiconMenuDisplayLabel(kind, selectedMenuPath, entries, t);
   const isImageItemSelected = selectedMenuPath.startsWith(imageItemMenuPrefix);
   const imageCapsuleSections = useMemo(
     () => buildImageLexiconCapsuleSections(filteredEntries, kind),
@@ -4661,13 +5152,14 @@ function ImageLexiconExplorer({
   const asideClassName = getLexiconExplorerAsideClassName(layout);
   const columnClassName = getLexiconExplorerColumnClassName(layout);
   const contentClassName = getLexiconExplorerContentClassName(layout);
-  const menuTitle = kind === "category" ? "分类菜单" : "标签菜单";
-  const menuHint = kind === "category" ? "按分组、词条和父级管理" : "按分组和标签管理";
-  const groupHeading = kind === "category" ? "分组层级" : "标签层级";
-  const emptyMenuText = kind === "category" ? "暂无分类菜单" : "暂无标签菜单";
-  const itemLabel = kind === "category" ? "分类" : "标签图像";
+  const menuTitle = t(kind === "category" ? "分类菜单" : "标签菜单");
+  const asideViewportRef = useLexiconMenuViewport(layout === "page");
+  const menuHint = t(kind === "category" ? "按分组、词条和父级管理" : "按分组和标签管理");
+  const groupHeading = t(kind === "category" ? "分组层级" : "标签层级");
+  const emptyMenuText = t(kind === "category" ? "暂无分类菜单" : "暂无标签菜单");
+  const itemLabel = t(kind === "category" ? "分类" : "标签图像");
   const emptyContentText =
-    kind === "category" ? "没有匹配的分类记录" : "没有匹配的标签图像";
+    t(kind === "category" ? "没有匹配的分类记录" : "没有匹配的标签图像");
 
   useEffect(() => {
     const activeMenuItem = menuScrollRef.current?.querySelector('[data-lexicon-menu-active="true"]');
@@ -4680,7 +5172,7 @@ function ImageLexiconExplorer({
 
   return (
     <div className={rootClassName}>
-      <aside className={asideClassName}>
+      <aside ref={asideViewportRef} className={asideClassName}>
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
           <div>
             <p className="text-sm font-semibold text-foreground">{menuTitle}</p>
@@ -4696,7 +5188,7 @@ function ImageLexiconExplorer({
             active={selectedMenuPath === allMenuValue}
             count={entries.length}
             depth={0}
-            label={getImageLexiconAllLabel(kind)}
+             label={t(getImageLexiconAllLabel(kind))}
             onClick={() => onSelectMenu(allMenuValue)}
           />
 
@@ -4722,7 +5214,7 @@ function ImageLexiconExplorer({
 
           {kind === "category" && categoryTree.length > 0 ? (
             <>
-              <p className="px-3 pt-3 text-xs font-medium text-muted">分类层级</p>
+               <p className="px-3 pt-3 text-xs font-medium text-muted">{t("分类层级")}</p>
               {categoryTree.map((node) => (
                 <ImageCategoryNodeButton
                   key={node.entry.id}
@@ -4743,9 +5235,9 @@ function ImageLexiconExplorer({
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">{activeMenuLabel}</p>
             <p className="mt-1 text-xs text-muted">
-              {isImageItemSelected
-                ? `显示 ${filteredEntries.length} 条${itemLabel}`
-                : `${imageCapsuleSections.length} 个分组，${filteredEntries.length} 条${itemLabel}`}
+               {isImageItemSelected
+                 ? `${t("显示 {count} 条", { count: filteredEntries.length })}${itemLabel}`
+                 : t("{groups} 个分组，{count} 条", { groups: imageCapsuleSections.length, count: filteredEntries.length }) + itemLabel}
             </p>
           </div>
           {selectedMenuPath !== allMenuValue ? (
@@ -4754,7 +5246,7 @@ function ImageLexiconExplorer({
               type="button"
               onClick={() => onSelectMenu(allMenuValue)}
             >
-              查看全部
+               {t("查看全部")}
             </button>
           ) : null}
           </div>
@@ -4822,7 +5314,7 @@ type CategoryPromptGroupExplorerProps = {
   onCancelAnalysis: () => void;
   onChangeEntry: (entryId: string, patch: Partial<PromptImageLexiconEntry>) => void;
   onDeleteCustomCategory?: (categoryId: string) => Promise<boolean>;
-  onMovePromptGroupsToCategory: (itemIds: readonly string[], categoryId: string | null, source?: "system" | "user" | "ai") => Promise<boolean>;
+  onMovePromptGroupsToCategory: (itemIds: readonly string[], categoryId: string | null, source?: "system" | "user" | "ai" | "local") => Promise<boolean>;
   onOpenDetail: (itemId: string) => void;
   onRemoveSelectedPromptGroups: () => void;
   onSelectAllPromptGroups: (groupIds: readonly string[]) => void;
@@ -4869,6 +5361,7 @@ function CategoryPromptGroupExplorer({
   onUpsertCustomCategory,
   onAddCustomCategory,
 }: CategoryPromptGroupExplorerProps) {
+  const { t } = useLocale();
   const promptGroupCountByCategory = useMemo(() => buildPromptGroupCountByCategory(promptGroups, categoryLabelsCache), [categoryLabelsCache, promptGroups]);
   const deferredQuery = useDeferredValue(query);
   const deferredSelectedMenuPath = useDeferredValue(selectedMenuPath);
@@ -4910,7 +5403,7 @@ function CategoryPromptGroupExplorer({
     () => filterPromptGroupsForCategoryMenu(promptGroups, entries, deferredSelectedMenuPath, deferredQuery, categoryLabelsCache),
     [categoryLabelsCache, deferredQuery, deferredSelectedMenuPath, entries, promptGroups],
   );
-  const activeMenuLabel = getImageLexiconMenuDisplayLabel("category", selectedMenuPath, entries);
+  const activeMenuLabel = getImageLexiconMenuDisplayLabel("category", selectedMenuPath, entries, t);
   const selectedCategoryEntry = useMemo(
     () =>
       selectedMenuPath === allCategoryGroupsValue
@@ -4933,6 +5426,7 @@ function CategoryPromptGroupExplorer({
   const columnClassName = getLexiconExplorerColumnClassName(layout);
   const contentClassName = getLexiconExplorerContentClassName(layout, "bg-panel p-4");
   const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<PromptImageLexiconEntry | null>(null);
+  const asideViewportRef = useLexiconMenuViewport(layout === "page");
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
 
   useEffect(() => {
@@ -5094,13 +5588,10 @@ function CategoryPromptGroupExplorer({
 
   return (
     <div className={rootClassName}>
-      <aside className={asideClassName}>
+      <aside data-feature-guide="category-menu" ref={asideViewportRef} className={asideClassName}>
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-semibold text-foreground">素材目录</p>
-            <p className="mt-1 text-xs text-muted">
-              {isDraggingPromptGroup ? "拖到左侧分类即可归类" : "自定义优先 · 拖拽或菜单移动"}
-            </p>
+            <p className="text-sm font-semibold text-foreground">{t("素材目录")}</p>
           </div>
           <span className="rounded-md border border-capsule-mist-border bg-capsule-mist px-2 py-1 text-xs text-capsule-mist-foreground">
             {promptGroups.length}
@@ -5112,13 +5603,13 @@ function CategoryPromptGroupExplorer({
             active={selectedMenuPath === allCategoryGroupsValue}
             count={promptGroups.length}
             depth={0}
-            label="全部分类"
+            label={t("全部分类")}
             onClick={() => onSelectMenu(allCategoryGroupsValue)}
           />
 
           {visibleCategoryTree.length > 0 ? (
             <>
-              <p className="px-3 pt-3 text-xs font-medium text-muted">分类目录（自定义优先）</p>
+              <p className="px-3 pt-3 text-xs font-medium text-muted">{t("分类目录（自定义优先）")}</p>
               {visibleCategoryTree.map((node) => (
                 <PromptCategoryNodeButton
                   countByCategory={promptGroupCountByCategory}
@@ -5154,8 +5645,8 @@ function CategoryPromptGroupExplorer({
           ) : (
             <div className="rounded-md border border-border/70 bg-panel px-3 py-6 text-center text-xs text-muted">
               {entries.length === 0
-                ? "暂无分类目录，请检查 taxonomy 是否加载。"
-                : "当前素材未归入任何分类，归类后将显示对应目录。"}
+                ? t("暂无分类目录，请检查 taxonomy 是否加载。")
+                : t("当前素材未归入任何分类，归类后将显示对应目录。")}
             </div>
           )}
         </div>
@@ -5167,9 +5658,8 @@ function CategoryPromptGroupExplorer({
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">{activeMenuLabel}</p>
               <p className="mt-1 text-xs text-muted">
-                {filteredPromptGroups.length} 个提示词组 / {filteredImageCount} 张图片
-                {query.trim() ? "，已按搜索词过滤" : ""}
-                {" · 拖拽卡片到左侧分类，或点 ⋯ 菜单移动"}
+                {t("{groups} 个提示词组 / {images} 张图片", { groups: filteredPromptGroups.length, images: filteredImageCount })}
+                {query.trim() ? t("，已按搜索词过滤") : ""}
               </p>
             </div>
             {selectedMenuPath !== allCategoryGroupsValue ? (
@@ -5185,7 +5675,7 @@ function CategoryPromptGroupExplorer({
                     }}
                   >
                     <Trash2 size={14} />
-                    删除分类
+                    {t("删除分类")}
                   </button>
                 ) : null}
                 <button
@@ -5193,14 +5683,14 @@ function CategoryPromptGroupExplorer({
                   type="button"
                   onClick={() => onSelectMenu(allCategoryGroupsValue)}
                 >
-                  查看全部
+                  {t("查看全部")}
                 </button>
               </div>
             ) : null}
           </div>
         </div>
 
-        <div ref={contentScrollRef} className={contentClassName}>
+        <div data-feature-guide="category-results" ref={contentScrollRef} className={contentClassName}>
           {analysisProgress ? (
             <CategoryAnalysisProgressPanel progress={analysisProgress} onCancel={onCancelAnalysis} />
           ) : null}
@@ -5211,7 +5701,7 @@ function CategoryPromptGroupExplorer({
             onSelectInvert={() => onSelectInvertPromptGroups(filteredPromptGroups.map((group) => group.id))}
             onSelectNone={onSelectNoPromptGroups}
             onRemoveSelected={onRemoveSelectedPromptGroups}
-            removeLabel={selectedMenuPath === allCategoryGroupsValue ? "移出分类" : "移出该分类"}
+            removeLabel={selectedMenuPath === allCategoryGroupsValue ? t("移出分类") : t("移出该分类")}
           />
           {filteredPromptGroups.length > 0 ? (
             <GridPromptGallery
@@ -5232,7 +5722,7 @@ function CategoryPromptGroupExplorer({
               onViewDetail={onOpenDetail}
             />
           ) : (
-            <LexiconEmptyState text="当前分类暂无提示词组" />
+            <LexiconEmptyState text={t("当前分类暂无提示词组")} />
           )}
         </div>
       </div>
@@ -5248,7 +5738,7 @@ function CategoryPromptGroupExplorer({
               }}
             >
               <div className="border-b border-border/70 px-3 py-2 text-xs font-medium text-muted">
-                移动到分类（{moveMenu.itemIds.length} 组）
+                {t("移动到分类（{count} 组）", { count: moveMenu.itemIds.length })}
               </div>
               <div className="max-h-[min(360px,60vh)] overflow-y-auto p-1">
                 <button
@@ -5256,7 +5746,7 @@ function CategoryPromptGroupExplorer({
                   type="button"
                   onClick={() => void handleMoveMenuSelect(null)}
                 >
-                  移出分类 / 未分类
+                  {t("移出分类 / 未分类")}
                 </button>
                 {moveTargetLeaves.map((entry) => {
                   const categoryId = resolveCategoryIdForEntry(entry);
@@ -5272,7 +5762,7 @@ function CategoryPromptGroupExplorer({
                     >
                       <span className="min-w-0 truncate">{entry.label}</span>
                       <span className="shrink-0 text-[10px] text-muted">
-                        {isCustomCategoryEntry(entry) ? "自定义" : entry.group || "系统"}
+                        {isCustomCategoryEntry(entry) ? t("自定义") : entry.group || t("系统")}
                       </span>
                     </button>
                   );
@@ -5284,17 +5774,17 @@ function CategoryPromptGroupExplorer({
         : null}
 
       <ConfirmDialog
-        busyLabel="删除中…"
-        confirmLabel="删除分类"
+         busyLabel={t("删除中…")}
+         confirmLabel={t("删除分类")}
         description={
           <>
-            分类「{deleteCategoryTarget?.label || "未命名分类"}」中的素材、图片和提示词都会保留，只会移出该分类。
+             {t("分类「{label}」中的素材、图片和提示词都会保留，只会移出该分类。", { label: deleteCategoryTarget?.label || t("未命名分类") })}
           </>
         }
         icon={<Trash2 size={18} />}
         isBusy={isDeletingCategory}
         open={Boolean(deleteCategoryTarget)}
-        title="确定删除分类吗？"
+         title={t("确定删除分类吗？")}
         onCancel={() => {
           if (!isDeletingCategory) {
             setDeleteCategoryTarget(null);
@@ -5362,6 +5852,7 @@ function filterCategoryTreeKeepingCustomEmpty(
 }
 
 type TagPromptGroupExplorerProps = {
+  onOrganizeTag: (choice: { id: string; label: string }) => void;
   analysisProgress?: CategoryAnalysisProgress | null;
   blurNsfwImages: boolean;
   entries: PromptImageLexiconEntry[];
@@ -5388,6 +5879,7 @@ type TagPromptGroupExplorerProps = {
 };
 
 function TagPromptGroupExplorer({
+  onOrganizeTag,
   analysisProgress,
   blurNsfwImages,
   entries,
@@ -5412,6 +5904,7 @@ function TagPromptGroupExplorer({
   onSelectNoPromptGroups,
   onTogglePromptGroupSelection,
 }: TagPromptGroupExplorerProps) {
+  const { t } = useLocale();
   const tagGroupTree = useMemo(() => (isMenuReady ? buildImageLexiconGroupTree(entries) : []), [entries, isMenuReady]);
   const [expandedTagGroupPaths, setExpandedTagGroupPaths] = useState<Set<string>>(() => new Set());
   const hasInitializedTagGroupExpansion = useRef(false);
@@ -5430,7 +5923,7 @@ function TagPromptGroupExplorer({
     () => countPromptGroupsForTagMenu(promptGroups, entries, deferredSelectedMenuPath, tagLabelsCache),
     [deferredSelectedMenuPath, entries, promptGroups, tagLabelsCache],
   );
-  const activeMenuLabel = getTagPromptMenuDisplayLabel(selectedMenuPath, entries);
+  const activeMenuLabel = getTagPromptMenuDisplayLabel(selectedMenuPath, entries, t);
   const filteredImageCount = filteredPromptGroups.reduce((total, group) => total + group.items.length, 0);
   const filteredSelectedCount = countSelectedPromptGroups(selectedPromptGroupIds, filteredPromptGroups);
   const menuScrollRef = useRef<HTMLDivElement | null>(null);
@@ -5440,6 +5933,7 @@ function TagPromptGroupExplorer({
   const columnClassName = getLexiconExplorerColumnClassName(layout);
   const contentClassName = getLexiconExplorerContentClassName(layout, "bg-panel p-4");
   const [isDeleteTagConfirmOpen, setIsDeleteTagConfirmOpen] = useState(false);
+  const asideViewportRef = useLexiconMenuViewport(layout === "page");
   const [isDeletingTag, setIsDeletingTag] = useState(false);
 
   useEffect(() => {
@@ -5451,7 +5945,7 @@ function TagPromptGroupExplorer({
     setExpandedTagGroupPaths((current) => {
       if (!hasInitializedTagGroupExpansion.current) {
         hasInitializedTagGroupExpansion.current = true;
-        return new Set(knownPaths);
+        return new Set<string>();
       }
 
       const knownPathSet = new Set(knownPaths);
@@ -5473,9 +5967,22 @@ function TagPromptGroupExplorer({
   }
 
   useEffect(() => {
+    const item = parseImageItemMenuValue(selectedMenuPath);
+    const path = item?.groupPath ?? (selectedMenuPath.startsWith(imageGroupMenuPrefix) ? selectedMenuPath.slice(imageGroupMenuPrefix.length) : "");
+    const parts = splitParameterGroupPath(path);
+    const ancestorCount = item ? parts.length : parts.length - 1;
+    if (ancestorCount <= 0) return;
+    setExpandedTagGroupPaths(current => {
+      const next = new Set(current);
+      for (let depth = 1; depth <= ancestorCount; depth++) next.add(parts.slice(0, depth).join(" / "));
+      return next.size === current.size ? current : next;
+    });
+  }, [selectedMenuPath]);
+
+  useEffect(() => {
     const activeMenuItem = menuScrollRef.current?.querySelector('[data-lexicon-menu-active="true"]');
     activeMenuItem?.scrollIntoView({ block: "center" });
-  }, [selectedMenuPath]);
+  }, [selectedMenuPath, expandedTagGroupPaths]);
 
   useEffect(() => {
     contentScrollRef.current?.scrollTo({ top: 0 });
@@ -5489,12 +5996,9 @@ function TagPromptGroupExplorer({
 
   return (
     <div className={rootClassName}>
-      <aside className={asideClassName}>
+      <aside data-feature-guide="tag-menu" ref={asideViewportRef} className={asideClassName}>
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold text-foreground">标签菜单</p>
-          <p className="mt-1 text-xs text-muted">按主体、环境、构图、材质等语义自动归类</p>
-          </div>
+          <p className="text-sm font-semibold text-foreground">{t("标签菜单")}</p>
           <span className="rounded-md border border-capsule-mist-border bg-capsule-mist px-2 py-1 text-xs text-capsule-mist-foreground">
             {promptGroups.length}
           </span>
@@ -5505,24 +6009,28 @@ function TagPromptGroupExplorer({
             active={selectedMenuPath === allTagGroupsValue}
             count={promptGroups.length}
             depth={0}
-            label="全部标签"
+            label={t("全部标签")}
             onClick={() => onSelectMenu(allTagGroupsValue)}
           />
 
           {!isMenuReady ? (
             <div className="rounded-md border border-border/70 bg-panel px-3 py-6 text-center text-xs text-muted">
-              正在整理标签菜单...
+              {t("正在整理标签菜单...")}
             </div>
           ) : visibleTagGroupTree.length > 0 ? (
             <>
-              <p className="px-3 pt-3 text-xs font-medium text-muted">标签层级</p>
+              <p className="px-3 pt-3 text-xs font-medium text-muted">{t("标签层级")}</p>
               {visibleTagGroupTree.map((node) => (
                 <PromptTagGroupNodeButton
                   countByTag={promptGroupCountByTag}
                   key={node.path}
                   node={node}
                   onRenameGroup={onRenameGroup}
-                  onRenameItem={onRenameItem}
+                  onRenameItem={(groupPath, itemKey, newLabel) => {
+                    const entry = entries.find(e => normalizeLexiconItemKey(e.label) === itemKey);
+                    if (!entry) { onRenameItem(groupPath, itemKey, newLabel); return; }
+                    onOrganizeTag({ id: entry.id, label: newLabel });
+                  }}
                   promptGroups={promptGroups}
                   expandedGroupPaths={expandedTagGroupPaths}
                   selectedMenuPath={selectedMenuPath}
@@ -5533,7 +6041,7 @@ function TagPromptGroupExplorer({
             </>
           ) : (
             <div className="rounded-md border border-border/70 bg-panel px-3 py-6 text-center text-xs text-muted">
-              暂无已归纳提示词组的标签。
+              {t("暂无已归纳提示词组的标签。")}
             </div>
           )}
         </div>
@@ -5545,8 +6053,8 @@ function TagPromptGroupExplorer({
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">{activeMenuLabel}</p>
               <p className="mt-1 text-xs text-muted">
-                {filteredPromptGroups.length} 个提示词组 / {filteredImageCount} 张图片
-                {query.trim() ? "，已按搜索词过滤" : ""}
+                {t("{groups} 个提示词组 / {images} 张图片", { groups: filteredPromptGroups.length, images: filteredImageCount })}
+                {query.trim() ? t("，已按搜索词过滤") : ""}
               </p>
             </div>
             {selectedMenuPath !== allTagGroupsValue ? (
@@ -5557,25 +6065,25 @@ function TagPromptGroupExplorer({
                   onClick={() => setIsDeleteTagConfirmOpen(true)}
                 >
                   <Trash2 size={14} />
-                  删除标签
+                  {t("删除标签")}
                 </button>
                 <button
                   className="inline-flex min-h-8 items-center gap-2 rounded-md border border-border/70 bg-background px-3 text-xs font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground"
                   type="button"
                   onClick={() => onSelectMenu(allTagGroupsValue)}
                 >
-                  查看全部
+                  {t("查看全部")}
                 </button>
               </div>
             ) : null}
           </div>
         </div>
 
-        <div ref={contentScrollRef} className={contentClassName}>
+        <div data-feature-guide="tag-results" ref={contentScrollRef} className={contentClassName}>
           {analysisProgress ? (
             <CategoryAnalysisProgressPanel
               progress={analysisProgress}
-              title="AI 标签分析"
+               title={t("AI 标签分析")}
               onCancel={onCancelAnalysis}
             />
           ) : null}
@@ -5586,7 +6094,7 @@ function TagPromptGroupExplorer({
             onSelectInvert={() => onSelectInvertPromptGroups(filteredPromptGroups.map((group) => group.id))}
             onSelectNone={onSelectNoPromptGroups}
             onRemoveSelected={onRemoveSelectedPromptGroups}
-            removeLabel={selectedMenuPath === allTagGroupsValue ? "移出标签" : "移出该标签"}
+             removeLabel={selectedMenuPath === allTagGroupsValue ? t("移出标签") : t("移出该标签")}
           />
           {filteredPromptGroups.length > 0 ? (
             <GridPromptGallery
@@ -5600,23 +6108,23 @@ function TagPromptGroupExplorer({
               onViewDetail={onOpenDetail}
             />
           ) : (
-            <LexiconEmptyState text="当前标签暂无提示词组" />
+            <LexiconEmptyState text={t("当前标签暂无提示词组")} />
           )}
         </div>
       </div>
 
       <ConfirmDialog
-        busyLabel="删除中…"
-        confirmLabel="删除标签"
+         busyLabel={t("删除中…")}
+         confirmLabel={t("删除标签")}
         description={
           <>
-            「{activeMenuLabel}」对应的标签会从素材和标签目录中移除，素材、图片和提示词本身不会删除。
+             {t("「{label}」对应的标签会从素材和标签目录中移除，素材、图片和提示词本身不会删除。", { label: activeMenuLabel })}
           </>
         }
         icon={<Trash2 size={18} />}
         isBusy={isDeletingTag}
         open={isDeleteTagConfirmOpen}
-        title="确定删除标签吗？"
+         title={t("确定删除标签吗？")}
         onCancel={() => {
           if (!isDeletingTag) {
             setIsDeleteTagConfirmOpen(false);
@@ -5653,10 +6161,11 @@ function CategoryAnalysisProgressPanel({
   title?: string;
   onCancel: () => void;
 }) {
+  const { t } = useLocale();
   const progressRatio = progress.total > 0 ? Math.min(100, Math.round((progress.processed / progress.total) * 100)) : 0;
   const isRunning = progress.status === "running";
   const statusText =
-    progress.status === "running" ? "正在分析" : progress.status === "canceled" ? "已取消" : "已完成";
+    progress.status === "running" ? t("处理中") : progress.status === "canceled" ? t("已取消") : progress.status === "failed" ? t("操作失败") : progress.failed > 0 ? t("处理结束，存在失败项") : t("已完成");
   const poolStyle = {
     "--analysis-progress": `${progressRatio}%`,
     "--analysis-progress-ratio": progressRatio / 100,
@@ -5665,7 +6174,7 @@ function CategoryAnalysisProgressPanel({
 
   return (
     <section
-      aria-label={`${title}进度 ${progressRatio}%`}
+      aria-label={`${t(title)} ${t("进度")} ${progressRatio}%`}
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={progressRatio}
@@ -5703,13 +6212,13 @@ function CategoryAnalysisProgressPanel({
             </div>
             <p className="mt-2 text-xs leading-5 text-muted">
               {progress.message}
-              {progress.currentTitle ? ` 当前：${progress.currentTitle}` : ""}
+              {progress.currentTitle ? ` ${t("当前：{title}", { title: progress.currentTitle })}` : ""}
             </p>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted min-[760px]:grid-cols-4">
-              <span>进度 {progress.processed}/{progress.total}</span>
-              <span>更新 {progress.analyzed}</span>
-              <span>跳过 {progress.skipped}</span>
-              <span>失败 {progress.failed}</span>
+              <span>{t("进度")} {progress.processed}/{progress.total}</span>
+              <span>{t("更新")} {progress.analyzed}</span>
+              <span>{t("跳过")} {progress.skipped}</span>
+              <span>{t("失败")} {progress.failed}</span>
             </div>
           </div>
         </div>
@@ -5719,7 +6228,7 @@ function CategoryAnalysisProgressPanel({
             type="button"
             onClick={onCancel}
           >
-            取消分析
+              {t("取消分析")}
           </button>
         ) : null}
       </div>
@@ -5822,6 +6331,7 @@ function PromptCategoryNodeButton({
   selectedMenuPath,
   onSelectMenu,
 }: PromptCategoryNodeButtonProps) {
+  const { t } = useLocale();
   const isGroupHeader = node.entry.id.startsWith("group:");
   const menuPath = createImageCategoryMenuValue(node.entry.id);
   // Includes this node + nested children labels (parentId tree).
@@ -5840,7 +6350,7 @@ function PromptCategoryNodeButton({
       (!isGroupHeader && isCustomCategoryEntry(node.entry) && selectedMenuPath === menuPath));
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const categoryLabel = node.entry.label || "未命名分类";
+  const categoryLabel = node.entry.label || t("未命名分类");
 
   return (
     <>
@@ -5953,17 +6463,17 @@ function PromptCategoryNodeButton({
           ))
         : null}
       <ConfirmDialog
-        busyLabel="删除中…"
-        confirmLabel="删除分类"
+         busyLabel={t("删除中…")}
+         confirmLabel={t("删除分类")}
         description={
           <>
-            将删除自定义分类「{categoryLabel}」。其下提示词会变为未分类，素材本身不会被删除。
+             {t("将删除自定义分类「{label}」。其下提示词会变为未分类，素材本身不会被删除。", { label: categoryLabel })}
           </>
         }
         icon={<Trash2 size={18} />}
         isBusy={isDeleting}
         open={isDeleteConfirmOpen}
-        title="删除自定义分类？"
+         title={t("删除自定义分类？")}
         onCancel={() => {
           if (!isDeleting) {
             setIsDeleteConfirmOpen(false);
@@ -6178,6 +6688,7 @@ type ImageCategoryNodeButtonProps = {
 };
 
 function ImageCategoryNodeButton({ node, selectedMenuPath, onSelectMenu, onChangeEntry }: ImageCategoryNodeButtonProps) {
+  const { t } = useLocale();
   const menuPath = createImageCategoryMenuValue(node.entry.id);
 
   return (
@@ -6186,7 +6697,7 @@ function ImageCategoryNodeButton({ node, selectedMenuPath, onSelectMenu, onChang
         active={selectedMenuPath === menuPath}
         count={node.count}
         depth={node.depth}
-        label={node.entry.label || "未命名分类"}
+         label={node.entry.label || t("未命名分类")}
         onClick={() => onSelectMenu(menuPath)}
         onRename={(newLabel) => onChangeEntry(node.entry.id, { label: newLabel })}
       />
@@ -6230,6 +6741,7 @@ function ImageLexiconMenuButton({
   onDelete,
   onAdd,
 }: ImageLexiconMenuButtonProps) {
+  const { t } = useLocale();
   const [isEditing, setIsEditing] = useState(false);
 
   if (isEditing && onRename) {
@@ -6278,8 +6790,8 @@ function ImageLexiconMenuButton({
           <span
             role="button"
             tabIndex={0}
-            aria-label="新增分类"
-            title="新增分类"
+            aria-label={t("新增分类")}
+            title={t("新增分类")}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-primary-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
@@ -6301,7 +6813,7 @@ function ImageLexiconMenuButton({
           <span
             role="button"
             tabIndex={0}
-            aria-label="重命名"
+            aria-label={t("重命名")}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100 group-focus-within:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
@@ -6323,8 +6835,8 @@ function ImageLexiconMenuButton({
           <span
             role="button"
             tabIndex={0}
-            aria-label="删除自定义分类"
-            title="删除自定义分类"
+            aria-label={t("删除自定义分类")}
+            title={t("删除自定义分类")}
             className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-danger-soft hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/35 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
             onClick={(event) => {
               event.stopPropagation();
@@ -6423,6 +6935,7 @@ function ImageLexiconCapsuleSectionGrid({
   onSelectEntry,
   onUploadImage,
 }: ImageLexiconCapsuleSectionGridProps) {
+  const { t } = useLocale();
   return (
     <div className="min-h-[320px] bg-panel p-4">
       <div className="grid gap-3">
@@ -6436,7 +6949,7 @@ function ImageLexiconCapsuleSectionGrid({
                     {section.entries.length}
                   </span>
                 </div>
-                <p className="mt-1 truncate text-xs text-muted">{section.subtitle}</p>
+                <p className="mt-1 truncate text-xs text-muted">{t(section.subtitle)}</p>
               </div>
             </div>
             <div className="flex flex-wrap content-start gap-2">
@@ -6485,11 +6998,12 @@ function ImageLexiconCapsule({
   onSelectedChange,
   onUploadImage,
 }: ImageLexiconCapsuleProps) {
+  const { t } = useLocale();
   const [isEditing, setIsEditing] = useState(false);
   const [draftLabel, setDraftLabel] = useState(entry.label);
-  const fallbackLabel = kind === "category" ? "未命名分类" : "未命名标签";
-  const uploadImageLabel = kind === "category" ? "上传分类图像" : "上传标签图像";
-  const clearImageLabel = kind === "category" ? "清除分类图像" : "清除标签图像";
+  const fallbackLabel = t(kind === "category" ? "未命名分类" : "未命名标签");
+  const uploadImageLabel = t(kind === "category" ? "上传分类图像" : "上传标签图像");
+  const clearImageLabel = t(kind === "category" ? "清除分类图像" : "清除标签图像");
 
   useEffect(() => {
     if (!isEditing) {
@@ -6541,7 +7055,7 @@ function ImageLexiconCapsule({
       >
         {entry.imageFileName ? (
           <img
-            alt={`${entry.label || fallbackLabel}图像`}
+            alt={`${entry.label || fallbackLabel} ${t("图片")}`}
             className="size-full object-cover"
             src={getImageSrc(entry.imageFileName)}
           />
@@ -6551,7 +7065,7 @@ function ImageLexiconCapsule({
       </button>
       {isEditing ? (
         <input
-          aria-label={kind === "category" ? "编辑分类名称" : "编辑标签名称"}
+          aria-label={t(kind === "category" ? "编辑分类名称" : "编辑标签名称")}
           autoFocus
           className="h-8 w-32 min-w-0 bg-transparent px-2 text-sm text-foreground outline-none placeholder:text-muted"
           disabled={isBusy}
@@ -6563,7 +7077,7 @@ function ImageLexiconCapsule({
         />
       ) : (
         <button
-          aria-label={kind === "category" ? "选择分类，双击可编辑" : "选择标签，双击可编辑"}
+          aria-label={t(kind === "category" ? "选择分类，双击可编辑" : "选择标签，双击可编辑")}
           className="min-w-0 px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
           disabled={isBusy}
           type="button"
@@ -6593,7 +7107,7 @@ function ImageLexiconCapsule({
         </button>
       ) : null}
       <button
-        aria-label={kind === "category" ? "删除分类" : "删除标签"}
+        aria-label={t(kind === "category" ? "删除分类" : "删除标签")}
         className="flex size-8 shrink-0 items-center justify-center border-l border-border/70 text-muted outline-none transition-colors hover:bg-danger-soft hover:text-danger focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-not-allowed disabled:opacity-40"
         disabled={isBusy}
         type="button"
@@ -6631,6 +7145,7 @@ function ImageLexiconRow({
   onSelectedChange,
   onUploadImage,
 }: ImageLexiconRowProps) {
+  const { t } = useLocale();
   const gridClassName = showParentSelect
     ? "min-[980px]:grid-cols-[32px_84px_minmax(14rem,1.15fr)_minmax(10rem,0.8fr)_minmax(10rem,0.8fr)_88px_40px]"
     : "min-[980px]:grid-cols-[32px_84px_minmax(16rem,1.4fr)_minmax(10rem,0.75fr)_88px_40px]";
@@ -6639,11 +7154,11 @@ function ImageLexiconRow({
     <div
       className={`grid gap-3 border-b border-border/70 bg-panel px-3 py-3 transition-colors last:border-b-0 hover:bg-background min-[980px]:items-center ${gridClassName}`}
     >
-      <SelectionButton selected={selected} ariaLabel="选择图像词库记录" disabled={isBusy} onClick={onSelectedChange} />
+      <SelectionButton selected={selected} ariaLabel={t("选择图像词库记录")} disabled={isBusy} onClick={onSelectedChange} />
       <div className="flex size-20 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-background shadow-sm">
         {entry.imageFileName ? (
           <img
-            alt={`${entry.label}图像预览`}
+            alt={`${entry.label} ${t("图像预览")}`}
             className="size-full object-cover"
             src={getImageSrc(entry.imageFileName)}
           />
@@ -6653,32 +7168,32 @@ function ImageLexiconRow({
       </div>
       <div className="grid gap-2">
         <LexiconTextInput
-          ariaLabel="名称"
-          placeholder="名称"
+          ariaLabel={t("名称")}
+          placeholder={t("名称")}
           value={entry.label}
           onChange={(value) => onChange({ label: value })}
         />
         <LexiconTextInput
-          ariaLabel="说明"
-          placeholder="说明"
+          ariaLabel={t("说明")}
+          placeholder={t("说明")}
           value={entry.description}
           onChange={(value) => onChange({ description: value })}
         />
       </div>
       <LexiconTextInput
-        ariaLabel="分组"
-        placeholder="分组"
+        ariaLabel={t("分组")}
+        placeholder={t("分组")}
         value={entry.group}
         onChange={(value) => onChange({ group: value })}
       />
       {showParentSelect ? (
         <select
-          aria-label="父级分类"
+          aria-label={t("父级分类")}
           className="h-9 min-w-0 rounded-md border border-border/70 bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
           value={entry.parentId ?? ""}
           onChange={(event) => onChange({ parentId: event.target.value || null })}
         >
-          <option value="">顶级分类</option>
+          <option value="">{t("顶级分类")}</option>
           {parentOptions.map((option) => (
             <option key={option.id} value={option.id}>
               {option.label}
@@ -6688,19 +7203,19 @@ function ImageLexiconRow({
       ) : null}
       <div className="flex items-center gap-1">
         <IconButton
-          ariaLabel="上传图像"
+          ariaLabel={t("上传图像")}
           disabled={isBusy}
           icon={<ImagePlus size={15} />}
           onClick={onUploadImage}
         />
         <IconButton
-          ariaLabel="清除图像"
+          ariaLabel={t("清除图像")}
           disabled={isBusy || !entry.imageFileName}
           icon={<X size={15} />}
           onClick={onClearImage}
         />
       </div>
-      <IconButton ariaLabel="删除记录" disabled={isBusy} icon={<Trash2 size={15} />} onClick={onRemove} />
+      <IconButton ariaLabel={t("删除记录")} disabled={isBusy} icon={<Trash2 size={15} />} onClick={onRemove} />
     </div>
   );
 }
@@ -6895,6 +7410,7 @@ function normalizeImageLexiconEntries(entries: readonly PromptImageLexiconEntry[
       description: entry.description.trim(),
       parentId: entry.parentId?.trim() || null,
       imageFileName: entry.imageFileName?.trim() || null,
+      ...normalizeTagKnowledge(entry),
     });
   }
 
@@ -6914,7 +7430,7 @@ function normalizeTagImageLexiconEntries(entries: readonly PromptImageLexiconEnt
     const labelKey = normalizeLexiconItemKey(entry.label);
     const normalizedEntry: PromptImageLexiconEntry = {
       ...entry,
-      group: getPromptTagGroup(entry.label, entry.group),
+      group: entry.group,
       parentId: null,
     };
     const existingEntry = entriesByLabel.get(labelKey);
@@ -6927,6 +7443,14 @@ function normalizeTagImageLexiconEntries(entries: readonly PromptImageLexiconEnt
       if (!existingEntry.imageFileName && normalizedEntry.imageFileName) {
         existingEntry.imageFileName = normalizedEntry.imageFileName;
       }
+
+      existingEntry.aliases = [...new Set([...(existingEntry.aliases ?? []), ...(normalizedEntry.aliases ?? [])])];
+      if (!existingEntry.groupLocked && normalizedEntry.groupLocked) {
+        existingEntry.group = normalizedEntry.group;
+        existingEntry.groupLocked = true;
+        existingEntry.reviewStatus = normalizedEntry.reviewStatus;
+      }
+      if (!existingEntry.analysis) existingEntry.analysis = normalizedEntry.analysis;
 
       continue;
     }
@@ -6957,8 +7481,20 @@ function getUniqueLexiconId(id: string, usedIds: Set<string>, prefix: string): s
   return nextId;
 }
 
+// toLocaleLowerCase 走 ICU，单次开销远高于普通 toLowerCase。计数逻辑会按
+// 标签节点 × 提示词组 × 每组标签反复归一化同一批字符串，因此缓存结果。
+const lexiconItemKeyCache = new Map<string, string>();
+
 function normalizeLexiconItemKey(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-Hans-CN");
+  const cached = lexiconItemKeyCache.get(value);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-Hans-CN");
+  lexiconItemKeyCache.set(value, normalized);
+  return normalized;
 }
 
 
@@ -7155,14 +7691,15 @@ function getImageLexiconMenuDisplayLabel(
   kind: ImageLexiconKind,
   selectedMenuPath: string,
   entries: readonly PromptImageLexiconEntry[],
+  translate: (text: string) => string = (text) => text,
 ): string {
   if (selectedMenuPath === getImageLexiconAllValue(kind)) {
-    return getImageLexiconAllLabel(kind);
+    return translate(getImageLexiconAllLabel(kind));
   }
 
   if (selectedMenuPath.startsWith(imageGroupMenuPrefix)) {
     const segments = splitParameterGroupPath(selectedMenuPath.slice(imageGroupMenuPrefix.length));
-    return `分组：${segments.length > 0 ? segments.join(" / ") : ungroupedImageGroupLabel}`;
+    return `${translate("分组：")}${segments.length > 0 ? segments.join(" / ") : translate(ungroupedImageGroupLabel)}`;
   }
 
   const parsedItem = parseImageItemMenuValue(selectedMenuPath);
@@ -7173,17 +7710,17 @@ function getImageLexiconMenuDisplayLabel(
     );
     const groupSegments = splitParameterGroupPath(parsedItem.groupPath);
     const groupLabel = groupSegments.length > 0 ? groupSegments.join(" / ") : ungroupedImageGroupLabel;
-    const itemLabel = matchedEntry?.label || parsedItem.itemKey || "未命名词条";
+    const itemLabel = matchedEntry?.label || parsedItem.itemKey || translate("未命名词条");
     return `${groupLabel} / ${itemLabel}`;
   }
 
   if (kind === "category" && selectedMenuPath.startsWith(imageCategoryMenuPrefix)) {
     const entryId = selectedMenuPath.slice(imageCategoryMenuPrefix.length);
     const entry = entries.find((item) => item.id === entryId);
-    return `分类：${entry?.label || "未命名分类"}`;
+    return `${translate("分类：")}${entry?.label || translate("未命名分类")}`;
   }
 
-  return getImageLexiconAllLabel(kind);
+  return translate(getImageLexiconAllLabel(kind));
 }
 
 function buildImageLexiconCapsuleSections(
@@ -8036,7 +8573,7 @@ function filterPromptGroupsForTagMenu(
         tagKeys.has(normalizeLexiconItemKey(label)),
       );
 
-    return matchesTag && matchesPromptGroupQuery(group, query);
+    return matchesTag && (matchesPromptGroupQuery(group, query) || matchesTagAliasQuery(labelsCache?.get(group.id) ?? getPromptGroupTagLabels(group), query, entries));
   });
 }
 
@@ -8109,14 +8646,15 @@ function getTagGroupNodeLabelKeys(node: ImageGroupNode): Set<string> {
 function getTagPromptMenuDisplayLabel(
   selectedMenuPath: string,
   entries: readonly PromptImageLexiconEntry[],
+  translate: (text: string) => string = (text) => text,
 ): string {
   if (selectedMenuPath === allTagGroupsValue) {
-    return "全部标签";
+    return translate("全部标签");
   }
 
   if (selectedMenuPath.startsWith(imageGroupMenuPrefix)) {
     const segments = splitParameterGroupPath(selectedMenuPath.slice(imageGroupMenuPrefix.length));
-    return `标签分组：${segments.length > 0 ? segments.join(" / ") : ungroupedImageGroupLabel}`;
+    return `${translate("标签分组：")}${segments.length > 0 ? segments.join(" / ") : translate(ungroupedImageGroupLabel)}`;
   }
 
   const parsedItem = parseImageItemMenuValue(selectedMenuPath);
@@ -8125,10 +8663,10 @@ function getTagPromptMenuDisplayLabel(
     const matchedEntry = entries.find(
       (entry) => isExactImageGroupMatch(entry, parsedItem.groupPath) && getImageItemKey(entry) === parsedItem.itemKey,
     );
-    return `标签：${matchedEntry?.label || parsedItem.itemKey || "未命名标签"}`;
+    return `${translate("标签：")}${matchedEntry?.label || parsedItem.itemKey || translate("未命名标签")}`;
   }
 
-  return "全部标签";
+  return translate("全部标签");
 }
 
 function matchesPromptGroupQuery(group: PromptImageGroup, query: string): boolean {
@@ -8302,6 +8840,7 @@ const GalleryToolbar = memo(function GalleryToolbar({
   onSortDirectionChange,
   onSortModeChange,
 }: GalleryToolbarProps) {
+  const { t } = useLocale();
   const masonrySizeControlRef = useRef<HTMLDivElement | null>(null);
   const masonrySizeAutoCloseTimerRef = useRef<number | null>(null);
   const sortControlRef = useRef<HTMLDivElement | null>(null);
@@ -8418,17 +8957,17 @@ const GalleryToolbar = memo(function GalleryToolbar({
       className="relative z-20 mb-4 flex flex-col gap-3 rounded-2xl border border-border bg-panel p-3 shadow-elevated min-[900px]:flex-row min-[900px]:items-center min-[900px]:justify-between"
       id="filter-bar"
     >
-      <div className="inline-flex w-fit items-center rounded-xl border border-border bg-background p-1">
+      <div data-feature-guide="gallery-collection" className="inline-flex w-fit items-center rounded-xl border border-border bg-background p-1">
         <SegmentButton
           active={collectionMode === "all"}
           icon={<Grid2X2 size={15} />}
-          label="全部"
+          label={t("全部")}
           onClick={() => onCollectionModeChange("all")}
         />
         <SegmentButton
           active={collectionMode === "featured"}
           icon={<Star size={15} />}
-          label="精选"
+          label={t("精选")}
           onClick={() => onCollectionModeChange("featured")}
         />
       </div>
@@ -8436,16 +8975,16 @@ const GalleryToolbar = memo(function GalleryToolbar({
       <div className="flex flex-wrap items-center gap-2 min-[900px]:justify-end">
         <span className="inline-flex min-h-10 items-center rounded-xl border border-border bg-background px-3 text-sm text-muted">
           <span className="mr-1 font-semibold text-warning">{resultCount}</span>
-          个结果
+          {t("个结果")}
         </span>
 
-        <div className="inline-flex items-center rounded-xl border border-border bg-background p-1">
+        <div data-feature-guide="gallery-display" className="inline-flex items-center rounded-xl border border-border bg-background p-1">
           <div className="relative" ref={masonrySizeControlRef}>
             <IconModeButton
               active={galleryMode === "masonry"}
               ariaExpanded={isMasonrySizeControlOpen}
               ariaHasPopup="dialog"
-              ariaLabel="瀑布流展示"
+              ariaLabel={t("瀑布流展示")}
               icon={<Columns4 size={16} />}
               onClick={handleMasonryModeClick}
             />
@@ -8459,30 +8998,30 @@ const GalleryToolbar = memo(function GalleryToolbar({
           </div>
           <IconModeButton
             active={galleryMode === "grid"}
-            ariaLabel="网格视图"
+            ariaLabel={t("网格视图")}
             icon={<LayoutGrid size={16} />}
             onClick={() => onGalleryModeChange("grid")}
           />
         </div>
 
-        <div className="relative z-30" ref={sortControlRef}>
+        <div data-feature-guide="gallery-sort" className="relative z-30" ref={sortControlRef}>
           <button
             aria-expanded={isSortControlOpen}
             aria-haspopup="dialog"
-            aria-label="打开排序设置"
+            aria-label={t("打开排序设置")}
             className={`relative z-30 inline-flex h-10 items-center gap-2 rounded-xl border px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
               isSortControlOpen
                 ? "border-primary bg-primary-soft text-primary shadow-sm"
                 : "border-border bg-background text-muted hover:border-primary/40 hover:bg-panel hover:text-foreground"
             }`}
-            title="排序"
+            title={t("排序")}
             type="button"
             onClick={() => setIsSortControlOpen((isOpen) => !isOpen)}
           >
             <span className="flex size-6 items-center justify-center rounded-lg border border-border/70 bg-panel">
               <SlidersHorizontal size={14} />
             </span>
-            <span>排序</span>
+            <span>{t("排序")}</span>
           </button>
 
           {isSortControlOpen ? (
@@ -8507,81 +9046,28 @@ type SortControlPanelProps = {
   onSortModeChange: (mode: PromptSortMode) => void;
 };
 
-type RadialSortOption =
-  | {
-      id: string;
-      angle: number;
-      kind: "mode";
-      label: string;
-      value: PromptSortMode;
-      colorClassName: string;
-      shortLabel: string;
-    }
-  | {
-      id: string;
-      angle: number;
-      kind: "direction";
-      label: string;
-      value: PromptSortDirection;
-      colorClassName: string;
-      shortLabel: string;
-    };
+type SortModeOption = {
+  label: string;
+  value: PromptSortMode;
+  icon: ReactNode;
+};
 
-const radialSortOptions: RadialSortOption[] = [
-  {
-    id: "sort-imported-at",
-    angle: 210,
-    kind: "mode",
-    label: "导入时间",
-    shortLabel: "导入",
-    value: "importedAt",
-    colorClassName: CAPSULE_TONES.sage.solid,
-  },
-  {
-    id: "sort-updated-at",
-    angle: -90,
-    kind: "mode",
-    label: "修改时间",
-    shortLabel: "修改",
-    value: "updatedAt",
-    colorClassName: CAPSULE_TONES.mist.solid,
-  },
-  {
-    id: "sort-image-size",
-    angle: -30,
-    kind: "mode",
-    label: "尺寸大小",
-    shortLabel: "尺寸",
-    value: "imageSize",
-    colorClassName: CAPSULE_TONES.mist.solid,
-  },
-  {
-    id: "sort-random",
-    angle: 90,
-    kind: "mode",
-    label: "随机排列",
-    shortLabel: "随机",
-    value: "random",
-    colorClassName: CAPSULE_TONES.lavender.solid,
-  },
-  {
-    id: "sort-asc",
-    angle: 30,
-    kind: "direction",
-    label: "升序",
-    shortLabel: "升序",
-    value: "asc",
-    colorClassName: CAPSULE_TONES.sage.solid,
-  },
-  {
-    id: "sort-desc",
-    angle: 150,
-    kind: "direction",
-    label: "降序",
-    shortLabel: "降序",
-    value: "desc",
-    colorClassName: CAPSULE_TONES.mist.solid,
-  },
+type SortDirectionOption = {
+  label: string;
+  value: PromptSortDirection;
+  icon: ReactNode;
+};
+
+const sortModeOptions: SortModeOption[] = [
+  { label: "导入时间", value: "importedAt", icon: <Download size={15} /> },
+  { label: "修改时间", value: "updatedAt", icon: <Pencil size={15} /> },
+  { label: "图片尺寸", value: "imageSize", icon: <ImageIcon size={15} /> },
+  { label: "随机排列", value: "random", icon: <RefreshCw size={15} /> },
+];
+
+const sortDirectionOptions: SortDirectionOption[] = [
+  { label: "升序", value: "asc", icon: <ArrowUp size={15} /> },
+  { label: "降序", value: "desc", icon: <ArrowDown size={15} /> },
 ];
 
 function SortControlPanel({
@@ -8590,112 +9076,109 @@ function SortControlPanel({
   onSortDirectionChange,
   onSortModeChange,
 }: SortControlPanelProps) {
-  const [isRingPaused, setIsRingPaused] = useState(false);
-
-  function handleSelect(option: RadialSortOption) {
-    setIsRingPaused(false);
-
-    if (option.kind === "mode") {
-      onSortModeChange(option.value);
-      return;
-    }
-
-    onSortDirectionChange(option.value);
-  }
+  const { t } = useLocale();
+  const activeSortModeLabel = t(sortModeOptions.find((option) => option.value === sortMode)?.label ?? "导入时间");
+  const activeSortDirectionLabel =
+    t(sortDirectionOptions.find((option) => option.value === sortDirection)?.label ?? "降序");
 
   return (
     <div
-      aria-label="排序设置"
-      className="pointer-events-none absolute left-1/2 top-1/2 z-30 size-48 -translate-x-1/2 -translate-y-1/2"
+      aria-label={t("排序设置")}
+      className="sort-control-panel absolute right-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-border bg-panel shadow-elevated"
       role="dialog"
+      onPointerDown={(event) => event.stopPropagation()}
     >
-      <div
-        aria-hidden="true"
-        className={`sort-radial-menu__plate absolute inset-2 rounded-full border border-border shadow-elevated ${
-          isRingPaused ? "sort-radial-menu__plate--paused" : ""
-        }`}
-      />
-      <div aria-hidden="true" className="absolute inset-[3.35rem] rounded-full border border-dashed border-primary/35" />
-      <div className="absolute inset-0">
-        {radialSortOptions.map((option) => {
-          const active = option.kind === "mode" ? option.value === sortMode : option.value === sortDirection;
+      <div className="flex items-center justify-between gap-3 border-b border-border/70 px-3.5 py-3">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-foreground">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
+            <SlidersHorizontal aria-hidden="true" size={15} />
+          </span>
+          <span>{t("排序设置")}</span>
+        </div>
+        <span className="min-w-0 truncate text-right text-[11px] text-muted" title={`${activeSortModeLabel} · ${activeSortDirectionLabel}`}>
+          {activeSortModeLabel} · {activeSortDirectionLabel}
+        </span>
+      </div>
 
-          return (
-            <RadialSortButton
-              key={option.id}
-              active={active}
-              colorClassName={option.colorClassName}
-              label={option.label}
-              positionStyle={getRadialSortButtonPosition(option.angle)}
-              shortLabel={option.shortLabel}
-              onRingPauseChange={setIsRingPaused}
-              onSelect={() => handleSelect(option)}
+      <div className="p-2">
+        <SortOptionGroup heading={t("排序方式")}>
+          {sortModeOptions.map((option) => (
+            <SortOptionButton
+              key={option.value}
+              active={option.value === sortMode}
+              icon={option.icon}
+              label={t(option.label)}
+              onClick={() => onSortModeChange(option.value)}
             />
-          );
-        })}
+          ))}
+        </SortOptionGroup>
+
+        <div className="my-2 border-t border-border/70" />
+
+        <SortOptionGroup heading={t("排列顺序")}>
+          {sortDirectionOptions.map((option) => (
+            <SortOptionButton
+              key={option.value}
+              active={option.value === sortDirection}
+              icon={option.icon}
+              label={t(option.label)}
+              onClick={() => onSortDirectionChange(option.value)}
+            />
+          ))}
+        </SortOptionGroup>
       </div>
     </div>
   );
 }
 
-type RadialSortButtonProps = {
-  active: boolean;
-  colorClassName: string;
-  label: string;
-  positionStyle: CSSProperties;
-  shortLabel: string;
-  onRingPauseChange: (isPaused: boolean) => void;
-  onSelect: () => void;
+type SortOptionGroupProps = {
+  children: ReactNode;
+  heading: string;
 };
 
-function RadialSortButton({
-  active,
-  colorClassName,
-  label,
-  positionStyle,
-  shortLabel,
-  onRingPauseChange,
-  onSelect,
-}: RadialSortButtonProps) {
-  function handleClick() {
-    onRingPauseChange(false);
-    onSelect();
-  }
-
+function SortOptionGroup({ children, heading }: SortOptionGroupProps) {
   return (
-    <div className="sort-radial-menu__item absolute" style={positionStyle}>
-      <button
-        aria-label={label}
-        aria-pressed={active}
-        className={`sort-radial-menu__button pointer-events-auto relative z-20 flex items-center justify-center rounded-full border text-center font-semibold shadow-elevated outline-none transition-all duration-200 hover:z-30 hover:scale-110 hover:shadow-image focus-visible:z-30 focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-primary/25 ${colorClassName} ${
-          active ? "scale-110 ring-2 ring-primary/35" : ""
-        }`}
-        title={label}
-        type="button"
-        onClick={handleClick}
-        onPointerEnter={() => onRingPauseChange(true)}
-        onPointerLeave={() => onRingPauseChange(false)}
-      >
-        <span className="sort-radial-menu__label">{shortLabel}</span>
-        <Check
-          aria-hidden="true"
-          className={`sort-radial-menu__active-mark transition-opacity ${active ? "opacity-100" : "opacity-0"}`}
-          size={9}
-        />
-      </button>
-    </div>
+    <section aria-label={heading}>
+      <h3 className="px-2 pb-1.5 pt-1 text-[11px] font-semibold tracking-wide text-muted">{heading}</h3>
+      <div className="grid gap-1">{children}</div>
+    </section>
   );
 }
 
-function getRadialSortButtonPosition(angle: number): CSSProperties {
-  const angleInRadians = (angle * Math.PI) / 180;
-  const center = 96;
-  const radius = 68;
+type SortOptionButtonProps = {
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+};
 
-  return {
-    left: `${center + Math.cos(angleInRadians) * radius}px`,
-    top: `${center + Math.sin(angleInRadians) * radius}px`,
-  };
+function SortOptionButton({ active, icon, label, onClick }: SortOptionButtonProps) {
+  return (
+    <button
+      aria-pressed={active}
+      className={`group flex min-h-10 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+        active
+          ? "border-primary/30 bg-primary-soft text-primary"
+          : "border-transparent text-foreground hover:border-border/70 hover:bg-background"
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      <span
+        className={`flex size-7 shrink-0 items-center justify-center rounded-lg transition-colors ${
+          active
+            ? "bg-primary text-primary-foreground"
+            : "border border-border/70 bg-background text-muted group-hover:border-primary/30 group-hover:text-primary"
+        }`}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="flex size-5 shrink-0 items-center justify-center text-primary">
+        {active ? <Check aria-hidden="true" size={15} /> : null}
+      </span>
+    </button>
+  );
 }
 
 type MasonrySizeControlProps = {
@@ -8705,6 +9188,7 @@ type MasonrySizeControlProps = {
 };
 
 function MasonrySizeControl({ value, onChange, onCommit }: MasonrySizeControlProps) {
+  const { t } = useLocale();
   const clampedValue = clampMasonryColumnCount(value);
   const span = maxMasonryColumnCount - minMasonryColumnCount;
   const progress = span <= 0 ? 0 : ((clampedValue - minMasonryColumnCount) / span) * 100;
@@ -8722,24 +9206,24 @@ function MasonrySizeControl({ value, onChange, onCommit }: MasonrySizeControlPro
 
   return (
     <div
-      aria-label="调整瀑布流每行列数"
+      aria-label={t("调整瀑布流每行列数")}
       className="absolute left-1/2 top-full z-30 mt-3 w-56 -translate-x-1/2 rounded-2xl border border-border bg-panel px-3 pb-2.5 pt-3 shadow-elevated"
       role="dialog"
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-muted">
-        <span>{minMasonryColumnCount} 列</span>
+        <span>{t("{count} 列", { count: minMasonryColumnCount })}</span>
         <span className="rounded-md bg-primary-soft px-2 py-0.5 text-xs font-semibold text-primary">
-          {clampedValue} 列
+          {t("{count} 列", { count: clampedValue })}
         </span>
-        <span>{maxMasonryColumnCount} 列</span>
+        <span>{t("{count} 列", { count: maxMasonryColumnCount })}</span>
       </div>
       <input
-        aria-label="瀑布流每行列数"
+        aria-label={t("瀑布流每行列数")}
         aria-valuemax={maxMasonryColumnCount}
         aria-valuemin={minMasonryColumnCount}
         aria-valuenow={clampedValue}
-        aria-valuetext={`${clampedValue}列`}
+        aria-valuetext={t("{count}列", { count: clampedValue })}
         className="masonry-column-slider h-5 w-full cursor-ew-resize accent-primary"
         max={maxMasonryColumnCount}
         min={minMasonryColumnCount}
@@ -8861,6 +9345,7 @@ type PromptGalleryProps = {
   likedImageIds: string[];
   blurNsfwImages: boolean;
   columnCount: number;
+  shouldMeasureHeights: boolean;
   onViewDetail: (itemId: string) => void;
   onPreviewMedia?: (item: PromptCardData) => void;
 };
@@ -8872,16 +9357,27 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
   likedImageIds,
   onViewDetail,
   onPreviewMedia,
+  shouldMeasureHeights,
 }: PromptGalleryProps) {
   const likedImageIdSet = useMemo(() => new Set(likedImageIds), [likedImageIds]);
   const moduleState = useLibraryStore((state) => state.moduleState);
   const canUseVideoPromptCards = hasBuiltinModuleCapability("video-prompt-card", moduleState);
   const safeColumnCount = Math.max(1, columnCount);
+  const itemHeightWeights = useMasonryItemHeightWeights(items, shouldMeasureHeights);
   const columns = useMemo(
-    () => distributeItemsByTopEdge(items, safeColumnCount),
-    [items, safeColumnCount],
+    () =>
+      distributeItemsByTopEdge(
+        items,
+        safeColumnCount,
+        (item) => itemHeightWeights.get(getMasonryItemMeasurementKey(item)) ?? getDefaultMasonryItemHeightWeight(item),
+      ),
+    [itemHeightWeights, items, safeColumnCount],
   );
-  const activeColumnCount = safeColumnCount;
+  const activeColumnCount = Math.max(1, columns.length);
+  const itemIndexById = useMemo(
+    () => new Map(items.map((item, index) => [item.item.id, index])),
+    [items],
+  );
 
   return (
     <div
@@ -8894,8 +9390,8 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
     >
       {columns.map((column, columnIndex) => (
         <div className="grid min-w-0 content-start gap-4" key={`masonry-column-${columnIndex}`}>
-          {column.map((item, rowIndex) => {
-            const priorityIndex = rowIndex * activeColumnCount + columnIndex;
+          {column.map((item) => {
+            const priorityIndex = itemIndexById.get(item.item.id) ?? Number.MAX_SAFE_INTEGER;
             const isPriorityImage = priorityIndex < Math.max(6, safeColumnCount * 2);
 
             if (canUseVideoPromptCards && item.item.promptType === "video") {
@@ -8929,6 +9425,97 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
   );
 });
 
+const defaultMasonryImageHeightWeight = 1;
+const defaultMasonryVideoHeightWeight = 9 / 16;
+// Measuring image ratios creates an extra decode request per card. Keep the
+// first batch small so opening a large library does not monopolize the renderer;
+// later batches are filled as those images settle.
+const maxMasonryMeasurementBatchSize = 8;
+
+function useMasonryItemHeightWeights(items: MasonryPromptItem[], shouldMeasure: boolean): ReadonlyMap<string, number> {
+  const [itemHeightWeights, setItemHeightWeights] = useState<ReadonlyMap<string, number>>(() => new Map());
+  const pendingMeasurementKeysRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!shouldMeasure) {
+      return;
+    }
+
+    const itemsToMeasure = items
+      .filter((item) => {
+        const measurementKey = getMasonryItemMeasurementKey(item);
+
+        return !itemHeightWeights.has(measurementKey) && !pendingMeasurementKeysRef.current.has(measurementKey);
+      })
+      .slice(0, maxMasonryMeasurementBatchSize);
+
+    if (itemsToMeasure.length === 0) {
+      return;
+    }
+
+    for (const item of itemsToMeasure) {
+      pendingMeasurementKeysRef.current.add(getMasonryItemMeasurementKey(item));
+    }
+
+    void Promise.all(itemsToMeasure.map(loadMasonryItemHeightWeight)).then((measurements) => {
+      for (const measurement of measurements) {
+        pendingMeasurementKeysRef.current.delete(measurement.key);
+      }
+
+      setItemHeightWeights((currentWeights) => {
+        const nextWeights = new Map(currentWeights);
+
+        for (const measurement of measurements) {
+          nextWeights.set(measurement.key, measurement.heightWeight);
+        }
+
+        return nextWeights;
+      });
+    });
+  }, [itemHeightWeights, items, shouldMeasure]);
+
+  return itemHeightWeights;
+}
+
+function loadMasonryItemHeightWeight(item: MasonryPromptItem): Promise<{ heightWeight: number; key: string }> {
+  const key = getMasonryItemMeasurementKey(item);
+  const imageFileName = getMasonryItemImageFileName(item);
+
+  if (!imageFileName) {
+    return Promise.resolve({ heightWeight: getDefaultMasonryItemHeightWeight(item), key });
+  }
+
+  return new Promise((resolve) => {
+    const image = new window.Image();
+
+    image.decoding = "async";
+    image.onload = () => {
+      const heightWeight = image.naturalWidth > 0 && image.naturalHeight > 0
+        ? image.naturalHeight / image.naturalWidth
+        : getDefaultMasonryItemHeightWeight(item);
+      resolve({ heightWeight, key });
+    };
+    image.onerror = () => resolve({ heightWeight: getDefaultMasonryItemHeightWeight(item), key });
+    image.src = getImageThumbnailSrc(imageFileName, item.item.updatedAt);
+  });
+}
+
+function getMasonryItemImageFileName(item: MasonryPromptItem): string | null {
+  if (item.item.promptType === "video") {
+    return item.item.videoPosterFileName || null;
+  }
+
+  return item.item.imageFileName || null;
+}
+
+function getMasonryItemMeasurementKey(item: MasonryPromptItem): string {
+  return `${item.item.id}:${getMasonryItemImageFileName(item) ?? ""}:${item.item.updatedAt}`;
+}
+
+function getDefaultMasonryItemHeightWeight(item: MasonryPromptItem): number {
+  return item.item.promptType === "video" ? defaultMasonryVideoHeightWeight : defaultMasonryImageHeightWeight;
+}
+
 const MasonryPromptTile = memo(function MasonryPromptTile({
   blurNsfwImages,
   imageCount,
@@ -8946,6 +9533,7 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
   onViewDetail: (itemId: string) => void;
   onPreviewMedia?: (item: PromptCardData) => void;
 }) {
+  const { t } = useLocale();
   const handleViewDetail = useCallback(() => onViewDetail(item.id), [onViewDetail, item.id]);
   const handlePreviewMedia = useMemo(
     () => (onPreviewMedia ? () => onPreviewMedia(item) : undefined),
@@ -8954,17 +9542,19 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
 
   return (
     <article
+      data-feature-guide="prompt-card-masonry-card"
       className="group/tile block min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-panel shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-image"
       style={{
         contain: "layout paint style",
       }}
     >
       <div
+        data-feature-guide="prompt-card-masonry-media"
         className="group relative block w-full overflow-hidden text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
       >
         <NsfwImage
-          activateLabel={`查看 ${item.title || "未命名提示词"} 的详情`}
-          alt={item.title || "提示词效果图"}
+          activateLabel={`${t("查看详情")}: ${item.title || t("未命名提示词")}`}
+          alt={item.title || t("提示词效果图")}
           blurNsfwImages={blurNsfwImages}
           className="w-full"
           fetchPriority={isPriorityImage ? "high" : "auto"}
@@ -8978,12 +9568,12 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
           source="thumbnail"
         />
         {isLiked ? (
-          <span className="absolute left-2 top-2 inline-flex size-8 items-center justify-center rounded-full bg-panel/85 text-danger opacity-90 shadow-elevated transition-opacity group-hover/tile:opacity-100">
+          <span data-feature-guide="prompt-card-masonry-status" className="absolute left-2 top-2 inline-flex size-8 items-center justify-center rounded-full bg-panel/85 text-danger opacity-90 shadow-elevated transition-opacity group-hover/tile:opacity-100">
             <Heart size={15} fill="currentColor" />
           </span>
         ) : null}
         {imageCount > 1 ? (
-          <span className="absolute bottom-2 right-2 inline-flex min-h-7 items-center gap-1 rounded-xl bg-background/80 px-2 text-xs font-medium text-foreground backdrop-blur">
+          <span data-feature-guide="prompt-card-masonry-status" className="absolute bottom-2 right-2 inline-flex min-h-7 items-center gap-1 rounded-xl bg-background/80 px-2 text-xs font-medium text-foreground backdrop-blur">
             <ImageIcon size={13} />
             {imageCount}
           </span>
@@ -9214,13 +9804,14 @@ const GridPromptTile = memo(function GridPromptTile({
   variant: "full" | "compact";
   onViewDetail: (itemId: string) => void;
 }) {
+  const { t } = useLocale();
   const item = group.primaryItem;
   const isCompact = variant === "compact";
   const visibleTags = isCompact ? [] : item.tags.slice(0, gridVisibleTagCount);
   const hiddenTagCount = isCompact ? 0 : Math.max(0, item.tags.length - visibleTags.length);
   const hasLikedImage = !isCompact && group.items.some((groupItem) => likedImageIdSet.has(groupItem.id));
-  const promptPreview = isCompact ? "" : buildPromptText(item);
-  const sourceText = isCompact ? "" : getPromptSourceText(item);
+  const promptPreview = isCompact ? "" : buildPromptText(item, t);
+  const sourceText = isCompact ? "" : getPromptSourceText(item, t);
   const handleViewDetail = useCallback(() => onViewDetail(item.id), [item.id, onViewDetail]);
   const handleCopyPrompt = useCallback(() => onCopyPrompt(item), [item, onCopyPrompt]);
   const handlePreviewMedia = useMemo(
@@ -9263,15 +9854,15 @@ const GridPromptTile = memo(function GridPromptTile({
         onDragPromptGroupsStart?.();
       }}
     >
-      <header className={`flex min-h-12 items-center gap-2 border-b px-3 py-2 ${tone.header}`}>
+      <header data-feature-guide="prompt-card-title" className={`flex min-h-12 items-center gap-2 border-b px-3 py-2 ${tone.header}`}>
         <h2 className="line-clamp-2 min-w-0 flex-1 text-sm font-semibold leading-5 text-current">
-          {item.title || "未命名提示词"}
+          {item.title || t("未命名提示词")}
         </h2>
         {enableCategoryDnD && onOpenMoveMenu ? (
           <button
-            aria-label="移动到分类"
+            aria-label={t("移动到分类")}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/60 bg-background/70 text-muted opacity-80 transition-opacity hover:opacity-100 hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
-            title="移动到分类"
+            title={t("移动到分类")}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
@@ -9285,6 +9876,7 @@ const GridPromptTile = memo(function GridPromptTile({
       </header>
 
       <div
+        data-feature-guide="prompt-card-media"
         className="group relative block aspect-[4/3] w-full overflow-hidden bg-background outline-none focus-visible:ring-2 focus-visible:ring-primary/35 min-[1100px]:aspect-square"
       >
         <GridPromptMosaic
@@ -9293,18 +9885,18 @@ const GridPromptTile = memo(function GridPromptTile({
           onActivate={handleViewDetail}
           onPreview={handlePreviewMedia}
           priorityImages={priorityImages}
-          title={item.title || "提示词效果图"}
+           title={item.title || t("提示词效果图")}
         />
         {handleToggleSelection ? (
           <button
-            aria-label={isSelected ? "取消选择提示词组" : "选择提示词组"}
+             aria-label={isSelected ? t("取消选择提示词组") : t("选择提示词组")}
             aria-pressed={isSelected}
             className={`absolute left-2 top-2 z-10 inline-flex size-8 items-center justify-center rounded-md border shadow-elevated backdrop-blur transition-colors focus-visible:ring-2 focus-visible:ring-primary/35 ${
               isSelected
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border/70 bg-panel/85 text-muted hover:bg-primary-soft hover:text-foreground"
             }`}
-            title={isSelected ? "取消选择提示词组" : "选择提示词组"}
+             title={isSelected ? t("取消选择提示词组") : t("选择提示词组")}
             type="button"
             onClick={(event) => {
               event.stopPropagation();
@@ -9316,7 +9908,7 @@ const GridPromptTile = memo(function GridPromptTile({
         ) : null}
         {!isCompact && group.items.length > 1 ? (
           <span className="absolute bottom-2 right-2 rounded-xl bg-background/80 px-2 py-1 text-xs font-medium text-foreground backdrop-blur">
-            {group.items.length} 个
+             {t("{count} 个", { count: group.items.length })}
           </span>
         ) : null}
         {hasLikedImage ? (
@@ -9332,9 +9924,11 @@ const GridPromptTile = memo(function GridPromptTile({
 
       {isCompact ? null : (
         <div className="grid gap-2 px-3 py-3">
-          <p className="line-clamp-1 text-xs text-muted">{sourceText}</p>
-          <p className="line-clamp-2 text-xs leading-5 text-muted">{promptPreview}</p>
-          <div className="flex min-h-7 max-h-14 flex-wrap gap-1.5 overflow-hidden">
+          <div data-feature-guide="prompt-card-content" className="grid gap-2">
+            <p className="line-clamp-1 text-xs text-muted">{sourceText}</p>
+            <p className="line-clamp-2 text-xs leading-5 text-muted">{promptPreview}</p>
+          </div>
+          <div data-feature-guide="prompt-card-tags" className="flex min-h-7 max-h-14 flex-wrap gap-1.5 overflow-hidden">
             {visibleTags.length > 0 ? (
               <>
                 {visibleTags.map((tag) => (
@@ -9354,9 +9948,9 @@ const GridPromptTile = memo(function GridPromptTile({
               </span>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <TileActionButton icon={<Eye size={14} />} label="查看详情" onClick={handleViewDetail} />
-            <TileActionButton icon={<Copy size={14} />} label="复制提示词" primary onClick={handleCopyPrompt} />
+          <div data-feature-guide="prompt-card-actions" className="grid grid-cols-2 gap-2 pt-1">
+             <TileActionButton icon={<Eye size={14} />} label={t("查看详情")} onClick={handleViewDetail} />
+             <TileActionButton icon={<Copy size={14} />} label={t("复制")} primary onClick={handleCopyPrompt} />
           </div>
         </div>
       )}
@@ -9379,12 +9973,13 @@ function GridPromptMosaic({
   priorityImages: boolean;
   title: string;
 }) {
+  const { t } = useLocale();
   if (images.length <= 1) {
     const image = images[0];
 
     return image ? (
       <NsfwImage
-        activateLabel={`查看 ${title} 的详情`}
+         activateLabel={`${t("查看详情")}: ${title}`}
         alt={title}
         blurNsfwImages={blurNsfwImages}
         className="h-full w-full"
@@ -9404,14 +9999,20 @@ function GridPromptMosaic({
     );
   }
 
+  const mosaicImages = images.slice(0, 4);
+
   return (
-    <div className="grid h-full w-full grid-cols-2 gap-1 bg-border p-1 transition-transform duration-300 group-hover:scale-[1.03]">
-      {images.slice(0, 4).map((image) => (
+    <div className="grid h-full w-full auto-rows-fr grid-cols-2 gap-1 bg-border p-1 transition-transform duration-300 group-hover:scale-[1.03]">
+      {mosaicImages.map((image, index) => (
         <NsfwImage
-          activateLabel={`查看 ${title} 的详情`}
+           activateLabel={`${t("查看详情")}: ${title}`}
           alt={title}
           blurNsfwImages={blurNsfwImages}
-          className="h-full w-full rounded-xl"
+          className={
+            mosaicImages.length === 3 && index === 0
+              ? "col-span-2 h-full w-full rounded-xl"
+              : "h-full w-full rounded-xl"
+          }
           fetchPriority={priorityImages ? "high" : "auto"}
           image={image}
           imageClassName="h-full w-full object-cover"
@@ -9422,9 +10023,6 @@ function GridPromptMosaic({
           showRevealControl={false}
           source="thumbnail"
         />
-      ))}
-      {Array.from({ length: Math.max(0, 4 - images.length) }).map((_, index) => (
-        <div className="rounded-xl bg-panel" key={index} />
       ))}
     </div>
   );
@@ -9438,6 +10036,7 @@ type DirectoryImportModeDialogProps = {
 };
 
 function DirectoryImportModeDialog({ isBusy, onClose, onCopy, onIndex }: DirectoryImportModeDialogProps) {
+  const { t } = useLocale();
   return (
     <AppDialog
       overlayClassName="z-[140] px-4 py-8"
@@ -9446,8 +10045,7 @@ function DirectoryImportModeDialog({ isBusy, onClose, onCopy, onIndex }: Directo
     >
       <header className="flex items-start justify-between gap-3 border-b border-border px-6 py-5">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">添加素材目录</h2>
-          <p className="mt-1 text-sm text-muted">请选择目录的使用方式。大目录推荐仅建立索引。</p>
+          <h2 className="text-lg font-semibold">{t("添加素材目录")}</h2>
         </div>
         <DialogCloseButton onClick={onClose} />
       </header>
@@ -9462,16 +10060,13 @@ function DirectoryImportModeDialog({ isBusy, onClose, onCopy, onIndex }: Directo
             <span className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <FolderTree size={21} />
             </span>
-            <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">推荐大目录</span>
+            <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">{t("推荐大目录")}</span>
           </span>
-          <strong className="mt-4 text-base text-foreground">仅建立索引</strong>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            不复制、不修改源文件。软件保存文件名、相对路径、分类、标签、标题、提示词等索引数据，并生成缩略图缓存。
-          </p>
+          <strong className="mt-4 text-base text-foreground">{t("仅建立索引")}</strong>
           <ul className="mt-4 grid gap-2 text-xs leading-5 text-muted">
-            <li>• 导入快，避免软件目录占用大量空间</li>
-            <li>• 源文件移动、改名或删除后会显示缺失</li>
-            <li>• 整体迁移目录后可通过“重新定位”恢复</li>
+            <li>• {t("导入快，避免软件目录占用大量空间")}</li>
+            <li>• {t("源文件移动、改名或删除后会显示缺失")}</li>
+            <li>• {t("整体迁移目录后可通过“重新定位”恢复")}</li>
           </ul>
         </button>
         <button
@@ -9484,26 +10079,17 @@ function DirectoryImportModeDialog({ isBusy, onClose, onCopy, onIndex }: Directo
             <span className="flex size-11 items-center justify-center rounded-xl bg-panel text-foreground">
               <Copy size={21} />
             </span>
-            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted">独立保存</span>
+            <span className="rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted">{t("独立保存")}</span>
           </span>
-          <strong className="mt-4 text-base text-foreground">复制到软件目录</strong>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            将支持的图片和视频复制到软件管理目录。复制完成后，原目录移动或删除不会影响软件中的素材。
-          </p>
+          <strong className="mt-4 text-base text-foreground">{t("复制到软件目录")}</strong>
           <ul className="mt-4 grid gap-2 text-xs leading-5 text-muted">
-            <li>• 适合数量较少或需要集中备份的素材</li>
-            <li>• 大目录导入耗时，并占用额外磁盘空间</li>
-            <li>• 会增加软件数据目录的备份与迁移体积</li>
+            <li>• {t("适合数量较少或需要集中备份的素材")}</li>
+            <li>• {t("大目录导入耗时，并占用额外磁盘空间")}</li>
+            <li>• {t("会增加软件数据目录的备份与迁移体积")}</li>
           </ul>
         </button>
       </div>
-      <div className="mx-6 mb-5 flex items-start gap-3 rounded-xl border border-warning/35 bg-warning/10 px-4 py-3 text-xs leading-5 text-muted">
-        <Info className="mt-0.5 shrink-0 text-warning" size={16} />
-        <p>
-          仅索引模式不会把原图写入软件目录；请保留源目录和软件的 <code>data</code> 索引数据。复制模式不会删除或修改源文件。
-        </p>
-      </div>
-    </AppDialog>
+          </AppDialog>
   );
 }
 
@@ -9534,6 +10120,7 @@ function LibraryRootsDialog({
   onWatchChange,
   onValidate,
 }: LibraryRootsDialogProps) {
+  const { t } = useLocale();
   const [orderedRoots, setOrderedRoots] = useState<LibraryRoot[]>(() => [...roots]);
   const [draggedRootId, setDraggedRootId] = useState<string | null>(null);
   const [dragOverRootId, setDragOverRootId] = useState<string | null>(null);
@@ -9563,15 +10150,15 @@ function LibraryRootsDialog({
   }
 
   return (
-    <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" onClose={onClose}>
+    <AppDialog overlayClassName="z-[130] px-4 py-8" panelClassName="flex max-h-full w-full max-w-xl flex-col" titleId="library-roots-title" onClose={onClose}>
       <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">素材目录</h2>
-          <p className="mt-1 text-sm text-muted">{roots.length} 个已挂载目录</p>
+           <h2 className="text-lg font-semibold" id="library-roots-title">{t("素材目录")}</h2>
+           <p className="mt-1 text-sm text-muted">{roots.length} {t("个已挂载目录")}</p>
         </div>
         <DialogCloseButton onClick={onClose} />
       </header>
-      <div className="grid min-h-0 gap-3 overflow-y-auto p-5">
+      <div data-feature-guide="library-roots-list" className="grid min-h-0 gap-3 overflow-y-auto p-5">
         {orderedRoots.length > 0 ? (
           orderedRoots.map((root) => {
             const isDragging = draggedRootId === root.id;
@@ -9629,18 +10216,18 @@ function LibraryRootsDialog({
                   <GripVertical aria-hidden="true" className="shrink-0 text-muted/60" size={15} />
                   <span className={`size-2 shrink-0 rounded-full ${root.status === "missing" ? "bg-danger" : "bg-primary"}`} />
                   <p className="truncate text-sm font-medium text-foreground">{root.label}</p>
-                  {root.status === "missing" ? <span className="shrink-0 text-xs font-medium text-danger">目录不可用</span> : null}
+                   {root.status === "missing" ? <span className="shrink-0 text-xs font-medium text-danger">{t("目录不可用")}</span> : null}
                 </div>
                 <p className="mt-1 truncate text-xs text-muted" title={root.absolutePath}>
                   {root.absolutePath}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  {root.lastScanAt ? `上次扫描：${new Date(root.lastScanAt).toLocaleString()}` : "尚未扫描"}
+                   {root.lastScanAt ? `${t("上次扫描：")}${new Date(root.lastScanAt).toLocaleString()}` : t("尚未扫描")}
                 </p>
                 <div className="mt-2 flex min-h-6 items-center gap-2">
                   <button
                     aria-checked={root.watchEnabled === true}
-                    aria-label={`监视 ${root.label}`}
+                     aria-label={`${t("监视此目录")} ${root.label}`}
                     className={`relative h-5 w-9 shrink-0 rounded-full outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                       root.watchEnabled ? "bg-primary" : "bg-border"
                     } disabled:cursor-not-allowed disabled:opacity-50`}
@@ -9656,22 +10243,22 @@ function LibraryRootsDialog({
                       }`}
                     />
                   </button>
-                  <span className="text-xs text-muted">监视此目录</span>
+                   <span className="text-xs text-muted">{t("监视此目录")}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1">
-                <Button aria-label="重新扫描" className="size-10 px-0" icon={<RefreshCw size={15} />} title="重新扫描" disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
-                <Button aria-label="重新定位" className="size-10 px-0" icon={<FolderTree size={15} />} title="重新定位" disabled={isBusy} onClick={() => onRemap(root.id)} />
+              <div data-feature-guide="library-roots-actions" className="flex items-center gap-1">
+                 <Button aria-label={t("重新扫描")} className="size-10 px-0" icon={<RefreshCw size={15} />} title={t("重新扫描")} disabled={isBusy || root.status === "missing"} onClick={() => onScan(root.id)} />
+                 <Button aria-label={t("重新定位")} className="size-10 px-0" icon={<FolderTree size={15} />} title={t("重新定位")} disabled={isBusy} onClick={() => onRemap(root.id)} />
                 <Button
-                  aria-label="清理该目录下已删除文件的提示词缓存"
+                   aria-label={t("清理该目录下已删除文件的提示词缓存")}
                   className="size-10 px-0"
                   icon={<Eraser size={15} />}
-                  title="清理该目录下已删除文件的提示词缓存"
+                   title={t("清理该目录下已删除文件的提示词缓存")}
                   disabled={isBusy}
                   onClick={() => {
                     if (
                       window.confirm(
-                        `清理“${root.label}”下已删除文件的提示词索引？仅删除库内缺失索引与缩略图缓存，不会删除磁盘上仍存在的原文件。`,
+                         t("清理“{label}”下已删除文件的提示词索引？仅删除库内缺失索引与缩略图缓存，不会删除磁盘上仍存在的原文件。", { label: root.label }),
                       )
                     ) {
                       onPurgeMissing(root.id);
@@ -9679,14 +10266,14 @@ function LibraryRootsDialog({
                   }}
                 />
                 <Button
-                  aria-label="移除挂载"
+                   aria-label={t("移除挂载")}
                   className="size-10 px-0"
                   icon={<Trash2 size={15} />}
-                  title="移除挂载"
+                   title={t("移除挂载")}
                   variant="ghost"
                   disabled={isBusy}
                   onClick={() => {
-                    if (window.confirm(`移除“${root.label}”挂载及其索引？原文件不会删除。`)) {
+                    if (window.confirm(t("移除“{label}”挂载及其索引？原文件不会删除。", { label: root.label }))) {
                       onRemove(root.id);
                     }
                   }}
@@ -9696,15 +10283,23 @@ function LibraryRootsDialog({
             );
           })
         ) : (
-          <p className="py-8 text-center text-sm text-muted">还没有已挂载目录。</p>
+          <p data-feature-guide="library-roots-actions" className="py-8 text-center text-sm text-muted">
+             {t("还没有已挂载目录。添加目录后，这里会显示重新扫描、重新定位和索引清理操作。")}
+          </p>
         )}
       </div>
-      <footer className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
-        <Button icon={<Shield size={16} />} disabled={isBusy || roots.length === 0} onClick={onValidate}>
-          校验全部
+      <footer data-feature-guide="library-roots-add" className="flex flex-wrap justify-end gap-2 border-t border-border px-5 py-4">
+        <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Shield size={14} />} disabled={isBusy || roots.length === 0} onClick={onValidate}>
+           {t("校验全部")}
         </Button>
-        <Button icon={<FolderTree size={16} />} disabled={isBusy} variant="primary" onClick={onAdd}>
-          添加目录
+        <Button
+          className="min-h-8 px-2.5 py-1.5 text-xs"
+          icon={<FolderTree size={14} />}
+          disabled={isBusy}
+          variant="primary"
+          onClick={onAdd}
+        >
+           {t("添加目录")}
         </Button>
       </footer>
     </AppDialog>
@@ -9712,15 +10307,17 @@ function LibraryRootsDialog({
 }
 
 type ImportMenuItemProps = {
+  guideId: string;
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
 };
 
-function ImportMenuItem({ icon, label, onClick }: ImportMenuItemProps) {
+function ImportMenuItem({ guideId, icon, label, onClick }: ImportMenuItemProps) {
   return (
     <button
       className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-left text-sm text-foreground outline-none transition-colors hover:bg-primary-soft focus-visible:ring-2 focus-visible:ring-primary/25"
+      data-feature-guide={guideId}
       role="menuitem"
       type="button"
       onClick={onClick}
@@ -9746,27 +10343,25 @@ function EmptyPromptList({
   onImportImages,
   onResetFilters,
 }: EmptyPromptListProps) {
+  const { t } = useLocale();
   return (
     <div className="flex min-h-[420px] items-center justify-center rounded-2xl border border-border bg-panel px-6 text-center shadow-sm">
       <div className="max-w-md">
         <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-border bg-background text-muted">
           {hasItems ? <Tags size={26} /> : <ImageIcon size={26} />}
         </div>
-        <h2 className="mt-5 text-lg font-semibold">{hasItems ? "没有匹配的提示词" : "还没有提示词素材"}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">
-          {hasItems ? "当前筛选无结果。" : "导入图片或视频后补充信息。"}
-        </p>
+        <h2 className="mt-5 text-lg font-semibold">{hasItems ? t("没有匹配的提示词") : t("还没有提示词素材")}</h2>
         {hasItems ? (
           <div className="mt-5 flex justify-center">
-            <Button onClick={onResetFilters}>重置筛选</Button>
+            <Button className="min-h-8 px-2.5 py-1.5 text-xs" onClick={onResetFilters}>{t("重置筛选")}</Button>
           </div>
         ) : (
           <div className="mt-5 flex justify-center gap-2">
-            <Button icon={<ImagePlus size={16} />} disabled={isBusy} onClick={onImportImages}>
-              导入素材
+            <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<ImagePlus size={14} />} disabled={isBusy} onClick={onImportImages}>
+              {t("导入素材")}
             </Button>
-            <Button icon={<Clipboard size={16} />} disabled={isBusy} onClick={onImportClipboardImage}>
-              粘贴导入
+            <Button className="min-h-8 px-2.5 py-1.5 text-xs" icon={<Clipboard size={14} />} disabled={isBusy} onClick={onImportClipboardImage}>
+              {t("粘贴导入")}
             </Button>
           </div>
         )}
@@ -9775,12 +10370,12 @@ function EmptyPromptList({
   );
 }
 
-function buildPromptText(item: PromptCardData): string {
+function buildPromptText(item: PromptCardData, translate: (text: string) => string = (text) => text): string {
   const prompt = resolvePromptTemplateText(normalizePromptText(item.prompt));
   const negativePrompt = resolvePromptTemplateText(normalizePromptText(item.negativePrompt));
-  const parts = [prompt, negativePrompt ? `负向提示词：${negativePrompt}` : ""].filter(Boolean);
+  const parts = [prompt, negativePrompt ? `${translate("负向提示词：")}${negativePrompt}` : ""].filter(Boolean);
 
-  return parts.join("\n") || "暂无提示词详情。";
+  return parts.join("\n") || translate("暂无提示词详情。");
 }
 
 const promptSourceHostLabels: Array<{ hosts: string[]; label: string }> = [
@@ -9801,12 +10396,12 @@ const promptSourceHostLabels: Array<{ hosts: string[]; label: string }> = [
   { hosts: ["x.com", "twitter.com"], label: "X" },
 ];
 
-function getPromptSourceText(item: PromptCardData): string {
+function getPromptSourceText(item: PromptCardData, translate: (text: string) => string = (text) => text): string {
   if (!item.sourceUrl) {
-    return "本地来源";
+    return translate("本地来源");
   }
 
-  return `来源：${resolvePromptSourceName(item.sourceUrl)}`;
+  return `${translate("来源：")}${translate(resolvePromptSourceName(item.sourceUrl))}`;
 }
 
 function resolvePromptSourceName(sourceUrl: string): string {

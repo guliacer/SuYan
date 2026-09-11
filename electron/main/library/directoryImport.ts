@@ -1,4 +1,4 @@
-import { dialog } from "electron";
+import { dialog } from "../app/fileDialogs";
 import type { BrowserWindow } from "electron";
 import path from "node:path";
 import type { LibraryFile, LibraryItem } from "../../../src/features/library/types/library";

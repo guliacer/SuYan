@@ -1,5 +1,6 @@
 import { type CSSProperties } from "react";
 import { Check, Info, X } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 
 export type ToastStatusMessage = {
   autoDismissMs: number | null;
@@ -13,6 +14,7 @@ type StatusToastProps = {
 };
 
 export function StatusToast({ message, onClose }: StatusToastProps) {
+  const { t } = useLocale();
   const toneClassName = getStatusToastToneClassName(message.type);
   const title = getStatusToastTitle(message);
   const isPending = message.autoDismissMs === null;
@@ -26,11 +28,11 @@ export function StatusToast({ message, onClose }: StatusToastProps) {
     <div
       aria-atomic="true"
       aria-live={message.type === "error" ? "assertive" : "polite"}
-      className="pointer-events-none fixed left-1/2 top-5 z-[100] flex w-[calc(100vw-2rem)] -translate-x-1/2 justify-center"
+      className="pointer-events-none fixed left-1/2 top-[calc(var(--app-window-content-top)+0.75rem)] z-[9990] flex w-[calc(100vw-2rem)] -translate-x-1/2 justify-center"
       role={message.type === "error" ? "alert" : "status"}
     >
       <button
-        aria-label="关闭消息提示"
+        aria-label={t("关闭消息提示")}
         className="status-toast pointer-events-auto relative flex min-h-[58px] w-fit min-w-64 max-w-[calc(100vw-2rem)] items-center justify-center gap-2.5 overflow-hidden rounded-[13px] border border-border bg-panel px-5 text-center shadow-image outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-primary/25 sm:max-w-96"
         style={durationStyle}
         type="button"
@@ -46,8 +48,8 @@ export function StatusToast({ message, onClose }: StatusToastProps) {
           )}
         </span>
         <span className="grid min-w-0 max-w-[17rem] flex-none gap-0.5 text-center">
-          <span className="truncate text-[13px] font-bold leading-[18px] text-foreground">{title}</span>
-          <span className="truncate text-xs leading-[17px] text-muted">{message.text}</span>
+          <span className="truncate text-[13px] font-bold leading-[18px] text-foreground">{t(title)}</span>
+          <span className="truncate text-xs leading-[17px] text-muted">{t(message.text)}</span>
         </span>
         <span
           className={`absolute bottom-0 left-0 h-0.5 ${toneClassName.progress} ${

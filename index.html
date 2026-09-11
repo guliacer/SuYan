@@ -1,35 +1,64 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme-preset="raycast">
   <head>
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app-image: app-thumbnail: app-startup: data: https:; media-src 'self' app-image: app-thumbnail: blob: data:; connect-src 'self' app-image: app-thumbnail:;"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' app-image: app-thumbnail: app-startup: app-theme: app-account-avatar: data: https:; media-src 'self' app-image: app-thumbnail: app-theme: blob: data: https:; connect-src 'self' app-image: app-thumbnail: app-theme:;"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>素言</title>
     <style>
       :root {
         color-scheme: light;
-        --app-loading-background: #f6f5f1;
-        --app-loading-foreground: #202521;
-        --app-loading-panel: #fbfaf7;
-        --app-loading-muted: #7e8580;
-        --app-loading-border: #dddcd4;
-        --app-loading-primary: #6f867e;
-        --app-loading-progress: #d96a3a;
+        --app-titlebar-height: 44px;
+        /*
+         * 与 src/styles/tokens.css 的窗口留边 / 圆角 / 投影保持一致，
+         * 否则 bootstrap 外壳交给 React 时窗体轮廓会跳一下。
+         * 默认「最大化」形态（0 留边 0 圆角），悬浮形态由 src/main.tsx 写在
+         * <html data-window-floating="true"> 上打开。
+         */
+        --app-window-gutter: 0px;
+        --app-window-radius: 0px;
+        --app-window-shadow:
+          0 1px 6px rgb(13 13 13 / 10%),
+          0 2px 12px rgb(13 13 13 / 11%),
+          0 4px 20px rgb(13 13 13 / 12%),
+          0 6px 30px rgb(13 13 13 / 10%),
+          0 4px 40px rgb(13 13 13 / 6%);
+        --app-loading-background: #f6f6f7;
+        --app-loading-foreground: #1a1c1f;
+        --app-loading-panel: #ffffff;
+        --app-loading-muted: rgb(26 28 31 / 49.4%);
+        --app-loading-border: rgb(26 28 31 / 8%);
+        --app-loading-primary: #ff6363;
+        --app-loading-progress: #ff6363;
+        --app-loading-chrome-start: #f3f3f4;
+        --app-loading-chrome-mid: #ffffff;
+        --app-loading-chrome-end: #f0f0f1;
+        --app-loading-chrome-border: rgb(26 28 31 / 10%);
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
           color-scheme: dark;
-          --app-loading-background: #111417;
-          --app-loading-foreground: #e8edf2;
-          --app-loading-panel: #191d22;
-          --app-loading-muted: #98a2ad;
-          --app-loading-border: #2b323a;
-          --app-loading-primary: #c7d8d2;
-          --app-loading-progress: #e07a4d;
+          --app-window-shadow:
+            0 1px 6px rgb(0 0 0 / 18%),
+            0 2px 12px rgb(0 0 0 / 22%),
+            0 4px 20px rgb(0 0 0 / 24%),
+            0 6px 30px rgb(0 0 0 / 20%),
+            0 4px 40px rgb(0 0 0 / 12%);
+          --app-loading-background: #181818;
+          --app-loading-foreground: #ffffff;
+          --app-loading-panel: #242424;
+          --app-loading-muted: rgb(255 255 255 / 65%);
+          --app-loading-border: rgb(255 255 255 / 8%);
+          --app-loading-primary: #ff7a7a;
+          --app-loading-progress: #ff7a7a;
+          --app-loading-chrome-start: #1c1c1c;
+          --app-loading-chrome-mid: #242424;
+          --app-loading-chrome-end: #181818;
+          --app-loading-chrome-border: rgb(255 255 255 / 10%);
         }
       }
 
@@ -39,10 +68,26 @@
         height: 100%;
       }
 
+      html[data-window-floating="true"] {
+        --app-window-gutter: 36px;
+        --app-window-radius: 18px;
+      }
+
+      html[data-window-material="acrylic"] {
+        --app-window-gutter: 0px;
+        --app-window-radius: 0px;
+        --app-window-shadow: none;
+      }
+
+      #root {
+        box-sizing: border-box;
+        padding: var(--app-window-gutter);
+      }
+
       body {
         margin: 0;
         overflow: hidden;
-        background: var(--app-loading-background);
+        background: transparent;
         color: var(--app-loading-foreground);
         font-family:
           Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif;
@@ -51,16 +96,63 @@
       .app-loading-shell {
         display: grid;
         min-height: 100%;
-        grid-template-rows: 36px minmax(0, 1fr);
+        grid-template-rows: var(--app-titlebar-height) minmax(0, 1fr);
+        border-radius: var(--app-window-radius);
+        overflow: hidden;
+        box-shadow: var(--app-window-shadow);
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--app-loading-panel) 68%, transparent), transparent 34%),
           var(--app-loading-background);
       }
 
       .app-loading-titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 8px;
         -webkit-app-region: drag;
-        border-bottom: 1px solid color-mix(in srgb, var(--app-loading-border) 62%, transparent);
-        background: color-mix(in srgb, var(--app-loading-background) 88%, transparent);
+        border-bottom: 1px solid color-mix(in srgb, var(--app-loading-chrome-border) 78%, transparent);
+        background: linear-gradient(
+          120deg,
+          color-mix(in srgb, var(--app-loading-chrome-start) 84%, transparent) 0%,
+          color-mix(in srgb, var(--app-loading-chrome-mid) 80%, transparent) 48%,
+          color-mix(in srgb, var(--app-loading-chrome-end) 84%, transparent) 100%
+        );
+        -webkit-backdrop-filter: blur(12px);
+        backdrop-filter: blur(12px);
+      }
+
+      .app-loading-window-controls {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        -webkit-app-region: no-drag;
+      }
+
+      .app-loading-window-control {
+        display: inline-flex;
+        width: 32px;
+        height: 32px;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 12px;
+        background: transparent;
+        color: var(--app-loading-muted);
+        cursor: pointer;
+        font: inherit;
+        line-height: 1;
+        -webkit-app-region: no-drag;
+      }
+
+      .app-loading-window-control:hover {
+        background: color-mix(in srgb, var(--app-loading-border) 64%, transparent);
+        color: var(--app-loading-foreground);
+      }
+
+      .app-loading-window-control--close:hover {
+        background: var(--app-loading-progress);
+        color: var(--app-loading-panel);
       }
 
       .app-loading-stage {
@@ -671,7 +763,13 @@
           <span class="app-loading-particle"></span>
           <span class="app-loading-particle"></span>
         </div>
-        <div class="app-loading-titlebar"></div>
+        <div class="app-loading-titlebar">
+          <div class="app-loading-window-controls" aria-label="窗口控制">
+            <button class="app-loading-window-control" data-window-control="minimize" aria-label="最小化" title="最小化" type="button">&#8722;</button>
+            <button class="app-loading-window-control" data-window-control="maximize" aria-label="最大化" title="最大化" type="button">&#9633;</button>
+            <button class="app-loading-window-control app-loading-window-control--close" data-window-control="close" aria-label="关闭" title="关闭" type="button">&#215;</button>
+          </div>
+        </div>
         <section class="app-loading-stage">
           <div class="app-loading-panel">
             <div class="app-loading-brand">

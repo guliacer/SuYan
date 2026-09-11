@@ -10,16 +10,18 @@ vi.mock("../../electron/main/appLogger", () => ({ logger: appLoggerSpies }));
 
 import {
   buildImageGenerationRequestBody,
+  buildAgnesVideoRequestBody,
   buildPromptCategoryAnalysisUserText,
   buildPromptTagsAnalysisUserText,
   buildImageAnalysisUserText,
   buildRemoteNetworkFailureMessage,
   buildRemoteRequestFailureMessage,
   buildSystemAnalysisContent,
-  generateImagesWithOpenAiCompatible,
-  normalizeOpenAiCompatibleEndpoint,
-  normalizeOpenAiCompatibleModelsEndpoint,
-  parseOpenAiCompatibleModels,
+  generateImagesWithRemoteApi,
+  generateVideosWithRemoteApi,
+  normalizeChatEndpoint,
+  normalizeModelsEndpoint,
+  parseRemoteModels,
   parseRemoteOptimizedPromptContent,
   parseRemoteReversedImagePromptContent,
   parseRemotePromptAnalysisV2Content,
@@ -82,27 +84,127 @@ describe("remoteAiClient", () => {
     }
   });
 
-  it("normalizes OpenAI-compatible chat completion endpoints", () => {
-    expect(normalizeOpenAiCompatibleEndpoint("https://api.openai.com/v1")).toBe(
-      "https://api.openai.com/v1/chat/completions",
-    );
-    expect(normalizeOpenAiCompatibleEndpoint("https://api.example.com/v1/chat/completions")).toBe(
+  it("appends /chat/completions to the normalized base URL", () => {
+    expect(normalizeChatEndpoint("https://api.openai.com/v1")).toBe("https://api.openai.com/v1/chat/completions");
+    expect(normalizeChatEndpoint("https://api.example.com/v1")).toBe(
       "https://api.example.com/v1/chat/completions",
     );
   });
 
-  it("normalizes OpenAI-compatible model list endpoints", () => {
-    expect(normalizeOpenAiCompatibleModelsEndpoint("https://api.openai.com/v1")).toBe(
-      "https://api.openai.com/v1/models",
-    );
-    expect(normalizeOpenAiCompatibleModelsEndpoint("https://api.example.com/v1/chat/completions")).toBe(
+  it("appends /models to the normalized base URL", () => {
+    expect(normalizeModelsEndpoint("https://api.openai.com/v1")).toBe("https://api.openai.com/v1/models");
+    expect(normalizeModelsEndpoint("https://api.example.com/v1")).toBe(
       "https://api.example.com/v1/models",
     );
   });
 
-  it("parses OpenAI-compatible model lists with guessed capabilities", () => {
+  it("builds Agnes Video 2.5 keyframe requests with the documented fields", () => {
+    const references = [
+      { bytes: Buffer.from("first"), fileName: "first.png", mime: "image/png" as const },
+      { bytes: Buffer.from("last"), fileName: "last.png", mime: "image/png" as const },
+    ];
+    const body = buildAgnesVideoRequestBody(
+      "agnes-video-2.5",
+      { prompt: "人物向镜头走来", negativePrompt: "模糊", mediaType: "video" },
+      references,
+      { customInstructions: "保持电影感", ratio: "16:9", seconds: 5, size: "960P" },
+    );
+
+    expect(body).toMatchObject({
+      model: "agnes-video-2.5",
+      n: 1,
+      seconds: "5",
+      mode: "keyframe",
+      size: "960P",
+      aspect_ratio: "16:9",
+    });
+    expect(body.first_frame).toMatch(/^data:image\/png;base64,/);
+    expect(body.last_frame).toMatch(/^data:image\/png;base64,/);
+    expect(body.prompt).toContain("避免：模糊");
+  });
+
+  it("normalizes image-only canvas ratios and labels multi-image references", () => {
+    const references = [1, 2, 3].map((index) => ({
+      bytes: Buffer.from(`reference-${index}`),
+      fileName: `reference-${index}.png`,
+      mime: "image/png" as const,
+    }));
+    const body = buildAgnesVideoRequestBody(
+      "agnes-video-2.5-flash",
+      { prompt: "让主体自然移动", mediaType: "video" },
+      references,
+      { customInstructions: "", ratio: "2:3", seconds: 5, size: "720P" },
+    );
+
+    expect(body).toMatchObject({ n: 1, mode: "reference", aspect_ratio: "3:4", size: "720P" });
+    expect(body.prompt).toContain("<Picture 1>");
+    expect(body.prompt).toContain("<Picture 3>");
+  });
+
+  it("keeps more than five references for Agnes Video 2.5 regular", () => {
+    const references = Array.from({ length: 6 }, (_, index) => ({
+      bytes: Buffer.from(`reference-${index}`),
+      fileName: `reference-${index}.png`,
+      mime: "image/png" as const,
+    }));
+    const body = buildAgnesVideoRequestBody(
+      "agnes-video-2.5",
+      { prompt: "保持六张参考图中的主体关系", mediaType: "video" },
+      references,
+      { customInstructions: "", ratio: "16:9", seconds: 5, size: "720P" },
+    );
+
+    expect((body.images as string[]).length).toBe(6);
+    expect(body.prompt).toContain("<Picture 6>");
+  });
+
+  it("uses v2.0 frame parameters and keyframe extra_body", () => {
+    const references = [
+      { bytes: Buffer.from("first"), fileName: "first.png", mime: "image/png" as const },
+      { bytes: Buffer.from("last"), fileName: "last.png", mime: "image/png" as const },
+    ];
+    const body = buildAgnesVideoRequestBody(
+      "agnes-video-v2.0",
+      { prompt: "镜头平滑推进", mediaType: "video" },
+      references,
+      { customInstructions: "", ratio: "16:9", seconds: 5, size: "720P" },
+    );
+
+    expect(body).toMatchObject({ width: 1280, height: 720, num_frames: 121, frame_rate: 24 });
+    expect(body.extra_body).toMatchObject({ mode: "keyframes" });
+    expect((body.extra_body as { image: string[] }).image).toHaveLength(2);
+  });
+
+  it("creates, polls, and downloads an Agnes video task", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ video_id: "video-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: "completed",
+        metadata: { url: "https://cdn.example/video.mp4" },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(Buffer.from("mp4-bytes"), {
+        status: 200,
+        headers: { "content-type": "video/mp4" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const result = await generateVideosWithRemoteApi(
+        { ...imageProviderSettings, baseUrl: "https://apihub.agnes-ai.com/v1", model: "agnes-video-2.5" },
+        { prompt: "雨夜城市", mediaType: "video", ratio: "16:9", videoSeconds: 4, videoSize: "720P" },
+      );
+      expect(result).toMatchObject({ model: "agnes-video-2.5", mediaType: "video" });
+      expect(result.images[0]).toMatchObject({ mediaType: "video", dataUrl: expect.stringContaining("data:video/mp4;base64,") });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("https://apihub.agnes-ai.com/v1/videos");
+      expect(fetchMock.mock.calls[1]?.[0]).toContain("/agnesapi?video_id=video-1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("parses remote model lists with guessed capabilities", () => {
     expect(
-      parseOpenAiCompatibleModels({
+      parseRemoteModels({
         data: [{ id: "DeepSeek-V4-Flash" }, { id: "Qwen/Qwen3.6-35B-A3B-FP8" }, { id: "gpt-4o-mini" }],
       }),
     ).toEqual([
@@ -114,7 +216,7 @@ describe("remoteAiClient", () => {
 
   it("prefers platform modality fields over name-based guessing", () => {
     expect(
-      parseOpenAiCompatibleModels({
+      parseRemoteModels({
         data: [
           // 名称正则判 text，但平台声明支持图片输入 → 以平台为准
           { id: "DeepSeek-V4", input_modalities: ["text", "image"], output_modalities: ["text"] },
@@ -136,7 +238,7 @@ describe("remoteAiClient", () => {
 
   it("falls back to name-based guessing when platform fields are absent", () => {
     expect(
-      parseOpenAiCompatibleModels({
+      parseRemoteModels({
         data: [{ id: "gpt-4o" }, { id: "dall-e-3" }, { id: "deepseek-v4-pro" }],
       }),
     ).toEqual([
@@ -148,7 +250,7 @@ describe("remoteAiClient", () => {
 
   it("treats unknown modality fields as text-only", () => {
     expect(
-      parseOpenAiCompatibleModels({
+      parseRemoteModels({
         data: [{ id: "some-model", input_modalities: ["text"] }, { id: "another-model", modalities: [] }],
       }),
     ).toEqual([
@@ -238,7 +340,7 @@ describe("remoteAiClient", () => {
   });
 
   it("rejects invalid endpoint protocols", () => {
-    expect(() => normalizeOpenAiCompatibleEndpoint("ftp://api.example.com/v1")).toThrow(
+    expect(() => normalizeChatEndpoint("ftp://api.example.com/v1")).toThrow(
       "AI 接口地址必须以 http 或 https 开头。",
     );
   });
@@ -405,7 +507,7 @@ describe("remoteAiClient", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     try {
-      const result = await generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const result = await generateImagesWithRemoteApi(imageProviderSettings, {
         background: "transparent",
         customInstructions: "Keep composition.",
         n: 3,
@@ -452,12 +554,12 @@ describe("remoteAiClient", () => {
     }));
 
     try {
-      const result = await generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const result = await generateImagesWithRemoteApi(imageProviderSettings, {
         n: 2,
         outputFormat: "png",
         prompt: "preserve the composition",
-        referenceImageDataUrl: `data:image/png;base64,${transparentPngBase64}`,
-        referenceImageFileName: "reference.jpg",
+        referenceImageDataUrls: [`data:image/png;base64,${transparentPngBase64}`],
+        referenceImageFileNames: ["reference.jpg"],
         size: "auto",
       });
 
@@ -466,6 +568,8 @@ describe("remoteAiClient", () => {
       expect(forms[0]).not.toBe(forms[1]);
       expect(forms.map((form) => form.get("n"))).toEqual(["2", "1"]);
       expect(forms.every((form) => form.get("image") instanceof Blob)).toBe(true);
+      expect((forms[0]?.get("image") as File).type).toBe("image/jpeg");
+      expect((forms[0]?.get("image") as File).name).toBe("reference.jpg");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -484,7 +588,7 @@ describe("remoteAiClient", () => {
     }));
 
     try {
-      const result = await generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const result = await generateImagesWithRemoteApi(imageProviderSettings, {
         outputFormat: "png",
         prompt: "a red square",
         size: "auto",
@@ -496,23 +600,41 @@ describe("remoteAiClient", () => {
     }
   });
 
-  it("rejects output settings that the provider ignored", async () => {
+  it("keeps provider output even when format / size settings were ignored", async () => {
+    // 服务商（如 gpt-image-2）会吸附尺寸桶或忽略部分字段；只要图能解码就保留展示，
+    // 只写 warning 日志，不再丢弃成片。格式校验逻辑本身由 validateGeneratedImageSettings 单测覆盖。
+    appLoggerSpies.warn.mockClear();
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ b64_json: transparentPngBase64 }] }), { status: 200 }),
     ));
 
     try {
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const formatResult = await generateImagesWithRemoteApi(imageProviderSettings, {
         outputFormat: "jpeg",
         prompt: "a red square",
         size: "auto",
-      })).rejects.toMatchObject({ code: "AI_IMAGE_OUTPUT_FORMAT_MISMATCH" });
+      });
+      expect(formatResult.images).toHaveLength(1);
+      expect(formatResult.images[0]?.dataUrl).toContain("data:image/png;base64,");
 
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const sizeResult = await generateImagesWithRemoteApi(imageProviderSettings, {
         outputFormat: "png",
         prompt: "a red square",
         size: "1024x1024",
-      })).rejects.toMatchObject({ code: "AI_IMAGE_OUTPUT_SIZE_MISMATCH" });
+      });
+      expect(sizeResult.images).toHaveLength(1);
+
+      await vi.waitFor(() => {
+        expect(appLoggerSpies.warn).toHaveBeenCalledWith(
+          "ai",
+          "image-generation:settings-accepted-with-warning",
+          expect.objectContaining({
+            actualFormat: "png",
+            actualSize: "1x1",
+            code: expect.stringMatching(/AI_IMAGE_OUTPUT_(?:FORMAT|SIZE)_MISMATCH/),
+          }),
+        );
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -540,45 +662,41 @@ describe("remoteAiClient", () => {
     )).toThrowError(/未应用尺寸设置/);
   });
 
-  it("rejects transparent-background output without an alpha channel", async () => {
+  it("keeps alpha/opacity mismatched output with a warning instead of rejecting", async () => {
+    appLoggerSpies.warn.mockClear();
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ b64_json: opaquePngBase64 }] }), { status: 200 }),
     ));
 
     try {
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const result = await generateImagesWithRemoteApi(imageProviderSettings, {
         background: "transparent",
         outputFormat: "png",
         prompt: "a transparent product cutout",
         size: "auto",
-      })).rejects.toMatchObject({ code: "AI_IMAGE_OUTPUT_ALPHA_MISMATCH" });
+      });
+      expect(result.images).toHaveLength(1);
 
       vi.stubGlobal("fetch", vi.fn(async () =>
         new Response(JSON.stringify({ data: [{ b64_json: transparentPngBase64 }] }), { status: 200 }),
       ));
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      const result2 = await generateImagesWithRemoteApi(imageProviderSettings, {
         background: "opaque",
         outputFormat: "png",
         prompt: "an opaque product photo",
         size: "auto",
-      })).rejects.toMatchObject({ code: "AI_IMAGE_OUTPUT_OPACITY_MISMATCH" });
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+      });
+      expect(result2.images).toHaveLength(1);
 
-  it("rejects opaque-background output that still contains transparent pixels", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () =>
-      new Response(JSON.stringify({ data: [{ b64_json: transparentPngBase64 }] }), { status: 200 }),
-    ));
-
-    try {
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
-        background: "opaque",
-        outputFormat: "png",
-        prompt: "an opaque product backdrop",
-        size: "auto",
-      })).rejects.toMatchObject({ code: "AI_IMAGE_OUTPUT_OPACITY_MISMATCH" });
+      await vi.waitFor(() => {
+        expect(appLoggerSpies.warn).toHaveBeenCalledWith(
+          "ai",
+          "image-generation:settings-accepted-with-warning",
+          expect.objectContaining({
+            code: expect.stringMatching(/AI_IMAGE_OUTPUT_ALPHA_MISMATCH|AI_IMAGE_OUTPUT_OPACITY_MISMATCH/),
+          }),
+        );
+      });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -594,7 +712,7 @@ describe("remoteAiClient", () => {
     }));
 
     try {
-      await expect(generateImagesWithOpenAiCompatible(imageProviderSettings, {
+      await expect(generateImagesWithRemoteApi(imageProviderSettings, {
         n: 2,
         outputFormat: "png",
         prompt: "two variations",

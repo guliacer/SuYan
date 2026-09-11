@@ -212,10 +212,6 @@ export type PromptSplitResult = {
   suggestedTags: string[];
 };
 
-export type PromptTemplateSegment =
-  | { type: "text"; text: string }
-  | { type: "parameter"; source: string; variable: string; value: string };
-
 type SectionDefinition = {
   key: PromptSplitSectionKey;
   priority: number;
@@ -2237,96 +2233,6 @@ export function normalizePromptSectionValue(sectionKey: PromptSplitSectionKey, i
   return normalizeContextualReplaceableValue(extractContextualSectionPhrase(sectionKey, replaceableValue) || replaceableValue);
 }
 
-export function parsePromptTemplateSegments(input: string): PromptTemplateSegment[] {
-  const segments: PromptTemplateSegment[] = [];
-  const pattern =
-    /\{\{\s*([^}:]+?)\s*(?::\s*([^}]+?))?\s*\}\}|【([^】]+?)】|（([^）]+?)）|［([^］]+?)］|\[([^\]]+?)\]|\(([^)]+?)\)|「([^」]+?)」|『([^』]+?)』|《([^》]+?)》|〈([^〉]+?)〉|〔([^〕]+?)〕|〖([^〗]+?)〗|〘([^〙]+?)〙|〚([^〛]+?)〛|﹁([^﹂]+?)﹂|﹃([^﹄]+?)﹄|｢([^｣]+?)｣|“([^”]+?)”|‘([^’]+?)’|｛([^｝]+?)｝|｟([^｠]+?)｠|＜([^＞]+?)＞/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(input)) !== null) {
-    const startIndex = match.index;
-    const source = match[0];
-    const isTemplateParameter = source.startsWith("{{");
-    const variable = isTemplateParameter ? (match[1] ?? "").trim() : "";
-    const value = isTemplateParameter
-      ? (match[2] ?? match[1] ?? "").trim()
-      : (match.slice(3).find((matchedValue) => matchedValue !== undefined) ?? "").trim();
-
-    if (startIndex > cursor) {
-      segments.push({ type: "text", text: input.slice(cursor, startIndex) });
-    }
-
-    if (isTemplateParameter && variable && value) {
-      segments.push({ type: "parameter", source, variable, value });
-    } else if (!isTemplateParameter) {
-      const explicitParameter = buildExplicitPromptParameterSegment(source, value);
-
-      if (explicitParameter) {
-        segments.push(explicitParameter);
-      } else {
-        segments.push({ type: "text", text: source });
-      }
-    } else {
-      segments.push({ type: "text", text: source });
-    }
-
-    cursor = startIndex + source.length;
-  }
-
-  if (cursor < input.length) {
-    segments.push({ type: "text", text: input.slice(cursor) });
-  }
-
-  return segments;
-}
-
-function buildExplicitPromptParameterSegment(source: string, value: string): PromptTemplateSegment | null {
-  const normalizedValue = value.trim();
-
-  if (!normalizedValue || isPromptMetaInstructionValue(normalizedValue)) {
-    return null;
-  }
-
-  const inferredSectionKey = inferExplicitPromptParameterSectionKey(normalizedValue);
-  const inferredValue = normalizePromptSectionValue(inferredSectionKey, normalizedValue);
-
-  if (!inferredValue) {
-    return null;
-  }
-
-  return {
-    type: "parameter",
-    source,
-    variable: promptSectionMeta[inferredSectionKey].variable,
-    value: inferredValue,
-  };
-}
-
-function inferExplicitPromptParameterSectionKey(value: string): PromptSplitSectionKey {
-  if (/\b(?:1:1|3:3|16:9|9:16|4:3|3:4|2:3|3:2|21:9)\b|横屏|竖屏|横版|竖版|方图/u.test(value)) {
-    return "aspect_ratio";
-  }
-
-  if (/海报|广告|商业视觉|电商|商品展示|poster|advertising|commercial/i.test(value)) {
-    return "commercial_visual_style";
-  }
-
-  if (/荔枝|水梨|雪梨|苹果|香蕉|橙子|柠檬|草莓|葡萄|桃子|芒果|水果|蔬果/u.test(value)) {
-    return "food_main_ingredient";
-  }
-
-  const inferredSection = splitPromptToTemplate(value).sections.find(
-    (section) => section.key !== "negative" && section.key !== "other",
-  );
-
-  if (inferredSection) {
-    return inferredSection.key;
-  }
-
-  return "other";
-}
-
 function splitPromptFragments(input: string): string[] {
   return uniqueValues(
     input
@@ -3679,8 +3585,9 @@ function stripContextualValuePrefix(sectionKey: PromptSplitSectionKey, input: st
   return withoutGenericAffixes;
 }
 
-function stripSectionLabelPrefix(sectionKey: PromptSplitSectionKey, input: string): string {
-  const prefixPatterns: Record<PromptSplitSectionKey, RegExp[]> = {
+// 该表有近 200 条正则，且全部无 /g（无 lastIndex 状态），因此提到模块级常量共享。
+// 原先每次调用都重建整张表并只用其中一项，在 1000+ 素材的启动阶段成为最大热点。
+const sectionLabelPrefixPatterns: Record<PromptSplitSectionKey, RegExp[]> = {
     lens_equipment: [/^(?:镜头器材|镜头|lens equipment|lens)\s*[:：]\s*/iu],
     image_style: [/^(?:图像风格|画风|风格|style)\s*[:：]\s*/iu],
     style_classification: [
@@ -3961,9 +3868,12 @@ function stripSectionLabelPrefix(sectionKey: PromptSplitSectionKey, input: strin
     text_content: [/^(?:文本内容|文字内容|文案|文字|text content|copy)\s*[:：]\s*/iu],
     negative: [/^(?:避免内容|反向提示词|负向提示词|负面提示词|negative prompt|negative|avoid)\s*[:：]\s*/iu],
     other: [/^(?:补充信息|其他|details)\s*[:：]\s*/iu],
-  };
+};
 
-  return prefixPatterns[sectionKey].reduce((value, pattern) => value.replace(pattern, ""), input).trim();
+function stripSectionLabelPrefix(sectionKey: PromptSplitSectionKey, input: string): string {
+  return sectionLabelPrefixPatterns[sectionKey]
+    .reduce((value, pattern) => value.replace(pattern, ""), input)
+    .trim();
 }
 
 function normalizeVariableKey(value: string): string {

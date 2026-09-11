@@ -20,16 +20,28 @@ describe("thumbnail fallback contract", () => {
     expect(imageSource).toContain("setThumbnailFallbackToOriginal(true)");
     expect(imageSource).toContain("!thumbnailFallbackToOriginal");
   });
+
+  it("does not start lazy thumbnail timeout until the image nears the viewport", () => {
+    const imageSource = readSource("src/features/library/components/NsfwImage.tsx");
+
+    expect(imageSource).toContain("const startFallbackTimer = () =>");
+    expect(imageSource).toContain("let isDisposed = false;");
+    expect(imageSource).toContain('imageLoading !== "lazy" || typeof IntersectionObserver === "undefined"');
+    expect(imageSource).toContain("new IntersectionObserver(");
+    expect(imageSource).toContain("{ rootMargin: THUMBNAIL_FALLBACK_ROOT_MARGIN }");
+    expect(imageSource).toContain('imageElement.loading = "eager"');
+    expect(imageSource).toContain("observer.observe(imageElement);");
+    expect(imageSource).toContain("currentImage?.complete && currentImage.naturalWidth > 0");
+  });
 });
 
 describe("clipboard image decode contract", () => {
   it("decodes by file content and normalizes the copied image to PNG", () => {
     const imageSource = readSource("electron/main/library/imageFiles.ts");
 
-    expect(imageSource).toContain("imageBuffer = await fs.readFile(mediaPath)");
-    expect(imageSource).toContain("nativeImage.createFromBuffer(imageBuffer)");
-    expect(imageSource).toContain("nativeImage.createFromBuffer(image.toPNG())");
-    expect(imageSource).toContain('logger.warn("media-clipboard", "copy:decode-failed"');
+    expect(imageSource).toContain("copyImageFileToClipboard(mediaPath, imageFileName)");
+    expect(imageSource).toContain("await resolveMediaPathByImageFileName(imageFileName)");
+    // Actual WebP/mismatched-extension decoding is covered by copyImageFile.test.ts.
   });
 });
 
@@ -73,5 +85,3 @@ describe("material browser thumbnail performance contract", () => {
     expect(mainSource).not.toContain('logger.info("main", "gpu:status",');
   });
 });
-
-

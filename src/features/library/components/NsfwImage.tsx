@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Eye, ImageIcon, ImageOff, Play } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
 import { getImageSrc, getImageThumbnailSrc } from "../utils/getImageSrc";
 import { isVideoMediaFile } from "../utils/mediaFileTypes";
 import { isNsfwItem } from "../utils/nsfwRating";
@@ -12,6 +13,41 @@ import {
 } from "../utils/thumbnailImageCache";
 import type { PromptCardData } from "../utils/promptFilters";
 
+const THUMBNAIL_MAX_RETRIES = 1;
+const THUMBNAIL_RETRY_DELAY_MS = 180;
+const THUMBNAIL_FALLBACK_TIMEOUT_MS = 1400;
+const THUMBNAIL_FALLBACK_ROOT_MARGIN = "400px";
+const MAX_THUMBNAIL_TIMEOUT_EVENTS_PER_WINDOW = 8;
+const THUMBNAIL_TIMEOUT_EVENT_WINDOW_MS = 10_000;
+let thumbnailTimeoutWindowStartedAt = 0;
+let thumbnailTimeoutEventCount = 0;
+
+function logRendererStartupEvent(event: string, details: Record<string, unknown>): void {
+  try {
+    window.suyanApi.logStartupEvent(event, details);
+  } catch {
+    // Image fallback telemetry must never block rendering.
+  }
+}
+
+function logThumbnailTimeout(imageFileName: string): void {
+  const now = performance.now();
+  if (now - thumbnailTimeoutWindowStartedAt >= THUMBNAIL_TIMEOUT_EVENT_WINDOW_MS) {
+    thumbnailTimeoutWindowStartedAt = now;
+    thumbnailTimeoutEventCount = 0;
+  }
+
+  if (thumbnailTimeoutEventCount >= MAX_THUMBNAIL_TIMEOUT_EVENTS_PER_WINDOW) {
+    return;
+  }
+
+  thumbnailTimeoutEventCount += 1;
+  logRendererStartupEvent("media-image:thumbnail-timeout", {
+    file: imageFileName,
+    timeoutMs: THUMBNAIL_FALLBACK_TIMEOUT_MS,
+    sampled: true,
+  });
+}
 
 type NsfwImageProps = {
   image: Pick<PromptCardData, "imageFileName" | "nsfwRating" | "title"> & {
@@ -53,6 +89,7 @@ export function NsfwImage({
   source = "original",
   style,
 }: NsfwImageProps) {
+  const { t } = useLocale();
   const isMissing = image.mediaStatus === "missing";
   const hasImage = Boolean(image.imageFileName) && !isMissing;
   const mediaVersion = image.updatedAt ?? "";
@@ -92,6 +129,7 @@ export function NsfwImage({
   const [baseSrc, setBaseSrc] = useState(() => (imageSrc && isImageSrcLoaded(imageSrc) ? imageSrc : ""));
   const imageRef = useRef<HTMLImageElement | null>(null);
   const retryTimerRef = useRef<number | null>(null);
+  const thumbnailFallbackTimerRef = useRef<number | null>(null);
   const clickTimerRef = useRef<number | null>(null);
   const prevFileNameRef = useRef(image.imageFileName);
   const imageLoading = loading;
@@ -99,6 +137,7 @@ export function NsfwImage({
   const shouldBlur = blurNsfwImages && isNsfwItem(image) && !isRevealed;
   const shouldDisplayImage = isImageLoaded && !isMissing;
   const hasVisibleBase = !isMissing && !isVideoMedia && Boolean(baseSrc) && baseSrc !== imageSrc;
+  const isImagePending = hasImage && !hasImageFailed && !shouldDisplayImage && !hasVisibleBase;
   const shouldShowPlaceholder = isMissing || !hasImage || hasImageFailed || (!shouldDisplayImage && !hasVisibleBase);
 
   useEffect(() => {
@@ -138,9 +177,94 @@ export function NsfwImage({
   }, [directThumbnailSrc, hasImage, image.imageFileName, isMissing, renderAsVideo, originalImageSrc, source]);
 
   useEffect(() => {
+    if (
+      source !== "thumbnail" ||
+      !hasImage ||
+      isMissing ||
+      renderAsVideo ||
+      thumbnailFallbackToOriginal ||
+      isImageLoaded ||
+      !imageSrc
+    ) {
+      return;
+    }
+
+    let isDisposed = false;
+    const startFallbackTimer = () => {
+      if (isDisposed || thumbnailFallbackTimerRef.current !== null) {
+        return;
+      }
+
+      // A thumbnail request can wait on first-run generation. Do not leave the
+      // card blank while that work runs: the original image is a useful, visible
+      // fallback and the request can finish in the background.
+      thumbnailFallbackTimerRef.current = window.setTimeout(() => {
+        thumbnailFallbackTimerRef.current = null;
+        if (isDisposed) {
+          return;
+        }
+
+        const currentImage = imageRef.current;
+        if (currentImage?.complete && currentImage.naturalWidth > 0) {
+          handleImageLoad();
+          return;
+        }
+
+        if (!isImageLoaded) {
+          logThumbnailTimeout(image.imageFileName);
+          setThumbnailFallbackToOriginal(true);
+          setThumbnailRetryIndex(0);
+        }
+      }, THUMBNAIL_FALLBACK_TIMEOUT_MS);
+    };
+
+    let observer: IntersectionObserver | null = null;
+
+    if (imageLoading !== "lazy" || typeof IntersectionObserver === "undefined") {
+      startFallbackTimer();
+    } else {
+      const imageElement = imageRef.current;
+
+      if (!imageElement) {
+        return;
+      }
+
+      observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry?.isIntersecting) {
+            return;
+          }
+
+          // Chromium may keep a lazy image queued even after the observer
+          // reports it is nearby. Promote this element before timing so the
+          // fallback covers an actual thumbnail request, not browser deferral.
+          imageElement.loading = "eager";
+          observer?.disconnect();
+          observer = null;
+          startFallbackTimer();
+        },
+        { rootMargin: THUMBNAIL_FALLBACK_ROOT_MARGIN },
+      );
+      observer.observe(imageElement);
+    }
+
+    return () => {
+      isDisposed = true;
+      observer?.disconnect();
+      if (thumbnailFallbackTimerRef.current !== null) {
+        window.clearTimeout(thumbnailFallbackTimerRef.current);
+        thumbnailFallbackTimerRef.current = null;
+      }
+    };
+  }, [hasImage, image.imageFileName, imageLoading, imageSrc, isImageLoaded, isMissing, renderAsVideo, source, thumbnailFallbackToOriginal]);
+
+  useEffect(() => {
     return () => {
       if (retryTimerRef.current !== null) {
         window.clearTimeout(retryTimerRef.current);
+      }
+      if (thumbnailFallbackTimerRef.current !== null) {
+        window.clearTimeout(thumbnailFallbackTimerRef.current);
       }
       if (clickTimerRef.current !== null) {
         window.clearTimeout(clickTimerRef.current);
@@ -171,6 +295,10 @@ export function NsfwImage({
   }, [imageSrc]);
 
   function handleImageLoad() {
+    if (thumbnailFallbackTimerRef.current !== null) {
+      window.clearTimeout(thumbnailFallbackTimerRef.current);
+      thumbnailFallbackTimerRef.current = null;
+    }
     if (imageSrc) {
       rememberLoadedImageSrc(imageSrc);
     }
@@ -190,13 +318,11 @@ export function NsfwImage({
         window.clearTimeout(retryTimerRef.current);
       }
 
-      if (thumbnailRetryIndex < 3) {
-        const retryDelayMs = Math.min(800 + thumbnailRetryIndex * 700, 2800);
-
+      if (thumbnailRetryIndex < THUMBNAIL_MAX_RETRIES) {
         retryTimerRef.current = window.setTimeout(() => {
           retryTimerRef.current = null;
           setThumbnailRetryIndex((currentIndex) => currentIndex + 1);
-        }, retryDelayMs);
+        }, THUMBNAIL_RETRY_DELAY_MS);
         setHasImageFailed(false);
         setIsImageLoaded(false);
         return;
@@ -209,6 +335,10 @@ export function NsfwImage({
       return;
     }
 
+    logRendererStartupEvent("media-image:load-failed", {
+      file: image.imageFileName,
+      source: source === "thumbnail" && thumbnailFallbackToOriginal ? "original-fallback" : source,
+    });
     setHasImageFailed(true);
   }
 
@@ -279,12 +409,16 @@ export function NsfwImage({
       ) : null}
       {shouldShowPlaceholder ? (
         <div
-          className={`${isMissing ? "relative min-h-44 w-full" : "absolute inset-0 h-full w-full"} flex items-center justify-center bg-background text-muted ${placeholderClassName}`}
+          className={`${isMissing ? "relative min-h-44 w-full" : "absolute inset-0 h-full w-full"} ${
+            isImagePending ? "media-image-placeholder" : "flex items-center justify-center bg-background text-muted"
+          } ${placeholderClassName}`}
         >
-          {isMissing ? (
+          {isImagePending ? (
+            <span className="media-image-placeholder__shimmer" aria-hidden="true" />
+          ) : isMissing ? (
             <span className="flex flex-col items-center gap-2 px-3 py-6 text-center">
               <ImageOff className="text-danger/80" size={36} />
-              <span className="text-xs font-semibold text-danger">源文件缺失</span>
+              <span className="text-xs font-semibold text-danger">{t("源文件缺失")}</span>
             </span>
           ) : isVideoMedia ? (
             <Play size={42} />
@@ -320,7 +454,7 @@ export function NsfwImage({
                 setLocalIsRevealed(true);
               }}
             >
-              {isVideoMedia ? "显示视频" : "显示图像"}
+              {isVideoMedia ? t("显示视频") : t("显示图像")}
             </Button>
           </div>
         </div>

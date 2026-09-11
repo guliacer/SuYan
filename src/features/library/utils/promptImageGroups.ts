@@ -123,10 +123,10 @@ export function getPromptImageGroupKey(card: PromptCardData): string {
   const category = normalizeGroupText(card.category);
 
   if (!title && !prompt && !negativePrompt && !tags && (!category || category === "未分类")) {
-    return `blank:${card.createdAt}`;
+    return `blank:${card.createdAt}${card.accountOwnerUid ? `\n${card.accountOwnerUid}` : ""}`;
   }
 
-  return [title, prompt, negativePrompt, tags, category].join("\n");
+  return [title, prompt, negativePrompt, tags, category, ...(card.accountOwnerUid ? [card.accountOwnerUid] : [])].join("\n");
 }
 
 function shouldSyncPromptGroupPatch(patch: Partial<LibraryItem>): boolean {

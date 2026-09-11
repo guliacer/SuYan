@@ -1,7 +1,7 @@
-import { dialog } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import type JSZip from "jszip";
 import type { LibraryFile, LibraryItem } from "../../../src/features/library/types/library";
@@ -9,7 +9,9 @@ import {
   extractWordDocumentBlocks,
   extractWordImageRelationships,
   pairWordDocumentPrompts,
+  type WordDocumentPromptPair,
 } from "../../../src/features/library/utils/wordDocumentImport";
+import { logger } from "../appLogger";
 import { AppError } from "../ipc/errors";
 import { prepareImageThumbnails } from "./imageThumbnails";
 import { normalizeImportImageExtension } from "./imageCompressionPolicy";
@@ -55,6 +57,7 @@ export async function importWordDocument(): Promise<WordDocumentImportResult> {
 
   const importedItems: LibraryItem[] = [];
   let skippedImageCount = 0;
+  const startedAt = Date.now();
 
   for (const filePath of result.filePaths) {
     const fileResult = await parseWordDocumentFile(filePath);
@@ -70,6 +73,13 @@ export async function importWordDocument(): Promise<WordDocumentImportResult> {
   await prepareImageThumbnails(importedItems.map((item) => item.imageFileName));
   const library = await appendLibraryItems(importedItems);
 
+  logger.info("library", "word-import:complete", {
+    documentCount: result.filePaths.length,
+    importedCount: importedItems.length,
+    skippedImageCount,
+    durationMs: Date.now() - startedAt,
+  });
+
   return {
     canceled: false,
     documentCount: result.filePaths.length,
@@ -80,6 +90,7 @@ export async function importWordDocument(): Promise<WordDocumentImportResult> {
 }
 
 async function parseWordDocumentFile(filePath: string): Promise<WordDocumentImportFileResult> {
+  const startedAt = Date.now();
   const zip = await JSZipRuntime.loadAsync(await fs.readFile(filePath));
   const documentFile = zip.file("word/document.xml");
   const relationshipFile = zip.file("word/_rels/document.xml.rels");
@@ -93,20 +104,30 @@ async function parseWordDocumentFile(filePath: string): Promise<WordDocumentImpo
   const relationships = new Map(
     extractWordImageRelationships(relationshipXml).map((relationship) => [relationship.id, relationship.target]),
   );
-  const promptPairs = pairWordDocumentPrompts(extractWordDocumentBlocks(documentXml));
+  const blocks = extractWordDocumentBlocks(documentXml);
+  const promptPairs = pairWordDocumentPrompts(blocks);
+  const promptGroups = groupWordPromptPairs(promptPairs);
   const items: LibraryItem[] = [];
   let skippedImageCount = 0;
 
-  // 按提示词组批量导入：多图共享同一提示词时使用相同 title/prompt，避免被拆成空提示词 + 有提示词两张。
-  const pairsByGroup = new Map<string, typeof promptPairs>();
-  for (const promptPair of promptPairs) {
-    const group = pairsByGroup.get(promptPair.groupId) ?? [];
-    group.push(promptPair);
-    pairsByGroup.set(promptPair.groupId, group);
-  }
+  logger.info("library", "word-import:parsed", {
+    file: path.basename(filePath),
+    blockCount: blocks.length,
+    relationshipCount: relationships.size,
+    imagePairCount: promptPairs.length,
+    groupCount: promptGroups.length,
+    groups: promptGroups.slice(0, 200).map((group, index) => ({
+      index: index + 1,
+      imageCount: group.length,
+      promptFingerprint: createPromptFingerprint(group[0]?.prompt ?? ""),
+      promptLength: group[0]?.prompt.length ?? 0,
+      pageIndexes: [...new Set(group.map((pair) => pair.pageIndex))],
+      pairingMode: group[0]?.pairingMode ?? "flow",
+    })),
+  });
 
   let groupOrdinal = 0;
-  for (const groupPairs of pairsByGroup.values()) {
+  for (const groupPairs of promptGroups) {
     groupOrdinal += 1;
     const sharedPrompt = groupPairs.find((pair) => pair.prompt.trim())?.prompt ?? groupPairs[0]?.prompt ?? "";
     const sharedTitle = createWordImportTitle(filePath, groupOrdinal, sharedPrompt);
@@ -141,10 +162,48 @@ async function parseWordDocumentFile(filePath: string): Promise<WordDocumentImpo
     }
   }
 
+  logger.info("library", "word-import:file-complete", {
+    file: path.basename(filePath),
+    importedCount: items.length,
+    skippedImageCount,
+    durationMs: Date.now() - startedAt,
+  });
+
   return {
     items,
     skippedImageCount,
   };
+}
+
+function groupWordPromptPairs(promptPairs: readonly WordDocumentPromptPair[]): WordDocumentPromptPair[][] {
+  const groups: WordDocumentPromptPair[][] = [];
+
+  for (const promptPair of promptPairs) {
+    const previous = groups[groups.length - 1];
+    const previousPair = previous?.[previous.length - 1];
+    if (
+      previous &&
+      previousPair &&
+      previousPair.groupId === promptPair.groupId &&
+      previousPair.prompt === promptPair.prompt
+    ) {
+      previous.push(promptPair);
+      continue;
+    }
+
+    // Never use a global map here. A group is valid only while its image run is
+    // still contiguous in document order, even when a future parser reuses IDs.
+    groups.push([promptPair]);
+  }
+
+  return groups;
+}
+
+function createPromptFingerprint(prompt: string): string | null {
+  const normalized = prompt.trim();
+  return normalized
+    ? createHash("sha256").update(normalized).digest("hex").slice(0, 12)
+    : null;
 }
 
 function createWordImportTitle(filePath: string, index: number, prompt: string): string {

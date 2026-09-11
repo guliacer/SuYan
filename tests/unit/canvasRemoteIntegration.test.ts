@@ -58,9 +58,8 @@ describe("canvas remote integration", () => {
     );
     const form = buildImageEditRequestForm(settings, {
       prompt: "keep the subject",
-      referenceImageDataUrl: `data:image/jpeg;base64,${pngBytes.toString("base64")}`,
       size: "2048x2048",
-    }, reference);
+    }, [reference]);
     const image = form.get("image");
 
     expect(reference).toMatchObject({ mime: "image/png", fileName: "mismatched.png" });
@@ -70,6 +69,31 @@ describe("canvas remote integration", () => {
     expect(image).toBeInstanceOf(Blob);
     expect((image as Blob).type).toBe("image/png");
     expect(Buffer.from(await (image as Blob).arrayBuffer())).toEqual(pngBytes);
+  });
+
+  it("builds the documented Grok JSON edit body instead of multipart fields", () => {
+    const grokSettings = { ...settings, model: "grok-imagine-image-2.0" };
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const reference = parseReferenceImageDataUrl(
+      `data:image/png;base64,${pngBytes.toString("base64")}`,
+      "reference.png",
+    );
+    const body = buildImageGenerationRequestBody(grokSettings, {
+      prompt: "render as a pencil sketch",
+      ratio: "3:2",
+      size: "2496x1664",
+    }, { referenceImages: [reference] });
+
+    expect(body).toMatchObject({
+      model: "grok-imagine-image-2.0",
+      aspect_ratio: "3:2",
+      resolution: "2k",
+      response_format: "b64_json",
+      image: { type: "image_url", url: `data:image/png;base64,${pngBytes.toString("base64")}` },
+    });
+    expect(body).not.toHaveProperty("size");
+    expect(body).not.toHaveProperty("output_format");
+    expect(body).not.toHaveProperty("images");
   });
 
   it("rejects malformed reference image data before sending it upstream", () => {

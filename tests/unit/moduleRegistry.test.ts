@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canDeleteBuiltinModule,
   canDisableBuiltinModule,
   hasBuiltinModuleCapability,
   isBuiltinModuleEnabled,
@@ -16,6 +17,9 @@ describe("module registry", () => {
 
     expect(canDisableBuiltinModule("image-prompt")).toBe(false);
     expect(canDisableBuiltinModule("core-library")).toBe(false);
+    expect(canDeleteBuiltinModule("image-prompt")).toBe(false);
+    expect(canDeleteBuiltinModule("core-library")).toBe(false);
+    expect(canDeleteBuiltinModule("video-compression")).toBe(true);
     expect(isBuiltinModuleInstalled("image-prompt", state)).toBe(true);
     expect(isBuiltinModuleEnabled("image-prompt", state)).toBe(true);
     expect(isBuiltinModuleEnabled("core-library", state)).toBe(true);
@@ -35,6 +39,19 @@ describe("module registry", () => {
     // Non-video optional modules remain available out of the box.
     expect(hasBuiltinModuleCapability("image-compression", state)).toBe(true);
     expect(hasBuiltinModuleCapability("deduplicate-scan", state)).toBe(true);
+  });
+
+  it("keeps local NSFW recognition optional and disabled by default", () => {
+    const state = resolveBuiltinModuleState();
+
+    expect(isBuiltinModuleInstalled("nsfw-runtime", state)).toBe(false);
+    expect(isBuiltinModuleEnabled("nsfw-runtime", state)).toBe(false);
+    expect(hasBuiltinModuleCapability("nsfw-local-classification", state)).toBe(false);
+
+    const installed = resolveBuiltinModuleState({
+      "nsfw-runtime": { installed: true, enabled: true },
+    });
+    expect(hasBuiltinModuleCapability("nsfw-local-classification", installed)).toBe(true);
   });
 
   it("enables ffmpeg-dependent capabilities after the runtime is installed and enabled", () => {

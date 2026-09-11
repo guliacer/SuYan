@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { collectArchiveExportEntries, toPortableArchiveItem } from "../../electron/main/library/archiveExportPolicy";
+import { validateArchiveEntryBudget } from "../../electron/main/library/archiveBudget";
 import type { LibraryItem } from "@/features/library/types/library";
 
 describe("external archive export", () => {
@@ -27,6 +28,22 @@ describe("external archive export", () => {
         vi.fn().mockRejectedValue(new Error("ENOENT")),
       ),
     ).rejects.toMatchObject({ code: "ZIP_MEDIA_MISSING" });
+  });
+});
+
+describe("share archive safety budget", () => {
+  it("rejects an oversized archive before extraction", () => {
+    expect(() => validateArchiveEntryBudget(513 * 1024 * 1024, 1)).toThrow(/512 MB/);
+  });
+
+  it("rejects a single declared entry that exceeds the extraction budget", () => {
+    expect(() => validateArchiveEntryBudget(1024, 1, [
+      {
+        name: "images/huge.png",
+        _data: { uncompressedSize: 129 * 1024 * 1024 },
+        async: async () => Buffer.alloc(0),
+      },
+    ])).toThrow(/单文件上限/);
   });
 });
 

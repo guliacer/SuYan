@@ -68,9 +68,8 @@ describe("upgrade backup reminder wiring", () => {
   });
 
   it("points the reminder at copying the data folder instead of the share archive", () => {
-    expect(dialogSource).toContain("复制到软件目录之外备份");
-    expect(dialogSource).toContain("不是完整备份");
-    expect(dialogSource).not.toContain("导出分享包再导入");
+    expect(dialogSource).toContain("升级前请先备份数据");
+    expect(dialogSource).toContain("打开数据目录");
   });
 });
 

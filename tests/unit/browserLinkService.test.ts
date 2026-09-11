@@ -1,0 +1,53 @@
+import { beforeEach, afterEach, it, expect, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ start: vi.fn(), read: vi.fn(), open: vi.fn() }));
+vi.mock("electron", () => ({ app: { isPackaged: false } }));
+vi.mock("../../electron/main/account/oauth/guliIdentityClient", () => ({ startGuliIdentityLink: mocks.start, readGuliLinkedAccount: mocks.read, GULI_IDENTITY_PROVIDER: "guli" }));
+vi.mock("../../electron/main/account/oauth/oauthWindow", () => ({ openOAuthAuthorizationWindow: mocks.open }));
+import { startBrowserLink, startLogin, cancelLogin } from "../../electron/main/account/oauth/oauthService";
+beforeEach(() => {
+  vi.useFakeTimers();
+  mocks.start.mockReset().mockResolvedValue("https://auth.example.test/v1/oauth/link/test-transaction");
+  mocks.read.mockReset().mockResolvedValue({ uid: "current-user", username: "现有用户", identities: [] });
+  mocks.open.mockReset().mockResolvedValue(undefined);
+});
+afterEach(() => { cancelLogin(); vi.useRealTimers(); });
+it("opens a bearer-bound transaction, waits for the server binding and uses the latest token", async () => {
+  let token = "current-token";
+  const success = vi.fn().mockResolvedValue(undefined), error = vi.fn();
+  const result = await startBrowserLink("linuxdo", "current-user", () => token, success, error);
+  expect(mocks.start).toHaveBeenCalledWith("current-token", "linuxdo");
+  expect(JSON.stringify(result)).not.toContain("token");
+  await expect(startLogin("google")).rejects.toMatchObject({ code: "ACCOUNT_OAUTH_IN_PROGRESS" });
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(success).not.toHaveBeenCalled();
+  token = "rotated-token";
+  const linked = { uid: "current-user", username: "现有用户", identities: [{ provider: "linuxdo", providerUserId: "remote-subject" }] };
+  mocks.read.mockResolvedValue(linked);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(mocks.read).toHaveBeenLastCalledWith("rotated-token");
+  expect(success).toHaveBeenCalledExactlyOnceWith(linked);
+  expect(error).not.toHaveBeenCalled();
+});
+it("rejects a different account and never treats it as a successful link", async () => {
+  mocks.read.mockResolvedValue({ uid: "different-user", username: "other", identities: [{ provider: "google" }] });
+  const success = vi.fn(), error = vi.fn();
+  await startBrowserLink("google", "current-user", () => "token", success, error);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(success).not.toHaveBeenCalled();
+  expect(error).toHaveBeenCalledWith(expect.objectContaining({ code: "ACCOUNT_TOKEN_INVALID" }));
+});
+it("discards late results after cancel and expires even if the profile request hangs", async () => {
+  let resolve!: (user: unknown) => void;
+  mocks.read.mockReturnValue(new Promise((yes) => { resolve = yes; }));
+  const success = vi.fn(), error = vi.fn();
+  await startBrowserLink("github", "current-user", () => "token", success, error);
+  await vi.advanceTimersByTimeAsync(3000);
+  cancelLogin();
+  resolve({ uid: "current-user", identities: [{ provider: "github" }] });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(success).not.toHaveBeenCalled();
+  mocks.read.mockReturnValue(new Promise(() => {}));
+  await startBrowserLink("github", "current-user", () => "token", success, error);
+  await vi.advanceTimersByTimeAsync(600000);
+  expect(error).toHaveBeenCalledWith(expect.objectContaining({ code: "ACCOUNT_OAUTH_EXPIRED" }));
+});

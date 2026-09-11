@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeGeneratedImageDataUrl,
+  decodeGeneratedMediaDataUrl,
   detectGeneratedImageExtension,
 } from "../../electron/main/library/generatedImageData";
 
@@ -22,5 +23,12 @@ describe("generated image data URLs", () => {
   it("rejects non-image or malformed generated payloads", () => {
     expect(() => decodeGeneratedImageDataUrl("https://example.com/image.png")).toThrow();
     expect(() => decodeGeneratedImageDataUrl("data:image/png;base64,AQID")).toThrow();
+  });
+
+  it("decodes generated MP4 data URLs as video media", () => {
+    const mp4Bytes = Buffer.from("0000ftypisom", "ascii");
+    const decoded = decodeGeneratedMediaDataUrl(`data:video/mp4;base64,${mp4Bytes.toString("base64")}`);
+    expect(decoded.extension).toBe(".mp4");
+    expect(decoded.buffer).toEqual(mp4Bytes);
   });
 });

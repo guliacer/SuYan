@@ -1,6 +1,10 @@
 /** Logical image paths for recommendation cards, mirrored from W:\中转站推荐网页. */
 
 export const recommendationImageCatalog: Record<string, string[]> = {
+  "https://platform.agnes-ai.com": [
+    "/images/agnes/pricing.webp",
+    "/images/agnes/usage-overview.webp",
+  ],
   "https://ai.xmiaom.com/sign-up?aff=bibi": [
     "/images/gugagu/models.webp",
     "/images/gugagu/models-gallery.webp",

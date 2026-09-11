@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, ChevronRight, ExternalLink, Globe2, Images, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
 import { CAPSULE_TONES, type CapsuleTone } from "@/components/ui/capsuleTones";
 import { getRecommendationImagePaths } from "./recommendationImageCatalog";
 import { resolveRecommendationImageUrls } from "./recommendationImages";
@@ -397,6 +398,7 @@ function orderRecommendations(
 }
 
 export function PromptSiteRecommendationsView({ sites, starredUrls, onToggleStar, onCopySiteUrl, onOpenSite }: PromptSiteRecommendationsViewProps) {
+  const { t } = useLocale();
   const starredUrlSet = new Set(starredUrls);
   // 分类与线上 resource-recommendations 的 index.js 对齐：
   // 个人项目 → 友情项目 → 代理推荐 → 免费 API → 收费 API → 提示词网站 → 生图网站。
@@ -448,18 +450,15 @@ export function PromptSiteRecommendationsView({ sites, starredUrls, onToggleStar
   const totalRecommendationCount = sections.reduce((sum, section) => sum + section.items.length, 0);
 
   return (
-    <div className="grid gap-5">
+    <div data-feature-guide="prompt-sites-catalog" className="grid gap-5">
       <header className="grid gap-2">
-        <p className="text-xs font-semibold tracking-wide text-muted">资源推荐</p>
+        <p className="text-xs font-semibold tracking-wide text-muted">{t("资源推荐")}</p>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-foreground">资源推荐</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
-              与线上资源推荐目录同步：个人项目、友情项目、代理、免费/收费 API、提示词与生图站点。
-            </p>
+            <h1 className="text-2xl font-semibold text-foreground">{t("资源推荐")}</h1>
           </div>
           <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-muted">
-            {totalRecommendationCount} 个推荐
+            {t("{count} 个推荐", { count: totalRecommendationCount })}
           </span>
         </div>
       </header>
@@ -468,11 +467,11 @@ export function PromptSiteRecommendationsView({ sites, starredUrls, onToggleStar
         <section key={section.id} className="grid gap-3">
           <div className="flex flex-wrap items-end justify-between gap-2 border-b border-border/60 pb-2">
             <div className="min-w-0">
-              <h2 className="text-lg font-semibold text-foreground">{section.title}</h2>
-              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">{section.description}</p>
+              <h2 className="text-lg font-semibold text-foreground">{t(section.title)}</h2>
+              <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">{t(section.description)}</p>
             </div>
             <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-muted">
-              {section.items.length} 个
+              {t("{count} 个", { count: section.items.length })}
             </span>
           </div>
           <div className="grid gap-3 min-[760px]:grid-cols-2 min-[1180px]:grid-cols-3">
@@ -539,9 +538,11 @@ type PromptSiteRecommendationCardProps = {
 };
 
 function PromptSiteRecommendationCard({ site, tone, starred, onToggleStar, onCopyUrl, onOpen }: PromptSiteRecommendationCardProps) {
+  const { t } = useLocale();
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const imageUrls = resolveRecommendationImageUrls(getRecommendationImagePaths(site.url));
   const hasImages = imageUrls.length > 0;
+  const localizedTitle = t(site.title);
 
   return (
     <article
@@ -549,10 +550,11 @@ function PromptSiteRecommendationCard({ site, tone, starred, onToggleStar, onCop
     >
       <div className={`flex min-h-10 items-center gap-2 border-b px-4 py-2 ${tone.header}`}>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-base font-semibold text-foreground group-hover/site:text-current">{site.title}</h2>
+          <h2 className="truncate text-base font-semibold text-foreground group-hover/site:text-current">{localizedTitle}</h2>
         </div>
         <button
-          aria-label={starred ? `取消星标：${site.title}` : `星标并置顶：${site.title}`}
+          data-feature-guide="prompt-sites-star"
+          aria-label={starred ? t("取消星标：{title}", { title: localizedTitle }) : t("星标并置顶：{title}", { title: localizedTitle })}
           aria-pressed={starred}
           className={`icon-tooltip-button flex size-7 shrink-0 items-center justify-center rounded-lg outline-none transition-all hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-primary/25 ${
             starred ? "text-warning" : "text-muted hover:text-foreground"
@@ -564,44 +566,44 @@ function PromptSiteRecommendationCard({ site, tone, starred, onToggleStar, onCop
         >
           <Star size={16} className={starred ? "fill-current" : ""} />
           <span className="icon-tooltip-button__bubble" role="tooltip">
-            {starred ? "取消星标" : "星标置顶"}
+            {starred ? t("取消星标") : t("星标置顶")}
           </span>
         </button>
       </div>
 
       <div className="grid gap-2 p-4">
-        <p className="line-clamp-2 text-sm leading-5 text-muted">{site.description}</p>
+        <p className="line-clamp-2 text-sm leading-5 text-muted">{t(site.description)}</p>
 
         <div className="flex flex-wrap gap-1.5">
           {site.tags.map((tag) => (
             <span className={`rounded-full border px-2 py-0.5 text-[11px] ${tone.tag}`} key={tag}>
-              {tag}
+              {t(tag)}
             </span>
           ))}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div data-feature-guide="prompt-sites-actions" className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className={`w-fit bg-panel shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated ${tone.button}`}
+              className={`min-h-8 w-fit px-2.5 py-1.5 text-xs shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated ${tone.button}`}
               icon={<ExternalLink size={14} />}
               onClick={onOpen}
             >
-              直达
+              {t("直达")}
             </Button>
             {hasImages ? (
               <Button
-                className={`w-fit bg-panel shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated ${tone.button}`}
+                className={`min-h-8 w-fit px-2.5 py-1.5 text-xs shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-elevated ${tone.button}`}
                 icon={<Images size={14} />}
                 onClick={() => setIsViewerOpen(true)}
-                title={`查看 ${site.title} 的图片`}
+                title={t("查看 {title} 的图片", { title: localizedTitle })}
               >
-                查看 {imageUrls.length}
+                {t("查看 {count}", { count: imageUrls.length })}
               </Button>
             ) : null}
           </div>
           <button
-            aria-label={`复制网址：${site.title}`}
+            aria-label={t("复制网址：{title}", { title: localizedTitle })}
             className={`icon-tooltip-button flex size-9 shrink-0 items-center justify-center rounded-lg border bg-panel/85 shadow-sm outline-none transition-all hover:-translate-y-0.5 hover:shadow-elevated focus-visible:ring-2 focus-visible:ring-primary/25 ${tone.icon}`}
             data-tooltip-align="end"
             data-tooltip-placement="above"
@@ -610,7 +612,7 @@ function PromptSiteRecommendationCard({ site, tone, starred, onToggleStar, onCop
           >
             <Globe2 size={15} />
             <span className="icon-tooltip-button__bubble" role="tooltip">
-              复制网址
+              {t("复制网址")}
             </span>
           </button>
         </div>
@@ -618,7 +620,7 @@ function PromptSiteRecommendationCard({ site, tone, starred, onToggleStar, onCop
 
       {isViewerOpen && hasImages
         ? createPortal(
-            <RecommendationImageViewer images={imageUrls} title={site.title} onClose={() => setIsViewerOpen(false)} />,
+            <RecommendationImageViewer images={imageUrls} title={localizedTitle} onClose={() => setIsViewerOpen(false)} />,
             document.body,
           )
         : null}
@@ -633,6 +635,7 @@ type RecommendationImageViewerProps = {
 };
 
 function RecommendationImageViewer({ images, title, onClose }: RecommendationImageViewerProps) {
+  const { t } = useLocale();
   const [activeIndex, setActiveIndex] = useState(0);
   const currentImage = images[activeIndex] ?? images[0];
 
@@ -659,12 +662,12 @@ function RecommendationImageViewer({ images, title, onClose }: RecommendationIma
 
 return (
     <div
-      className="fixed inset-0 z-[80] flex items-stretch justify-stretch bg-overlay/75 p-4 backdrop-blur-sm"
+      className="app-window-overlay z-[80] flex items-stretch justify-stretch bg-overlay/75 p-4 backdrop-blur-sm"
       role="presentation"
       onClick={onClose}
     >
       <section
-        aria-label={`${title} 截图预览`}
+        aria-label={t("{title} 截图预览", { title })}
         aria-modal="true"
         className="grid size-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-2xl border border-border bg-panel shadow-image"
         role="dialog"
@@ -672,11 +675,11 @@ return (
       >
         <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-muted">截图预览</p>
+            <p className="text-xs font-medium text-muted">{t("截图预览")}</p>
             <h3 className="truncate text-base font-semibold text-foreground">{title}</h3>
           </div>
           <button
-            aria-label="关闭预览"
+            aria-label={t("关闭预览")}
             className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-panel/80 text-muted transition-colors hover:bg-primary-soft hover:text-foreground"
             type="button"
             onClick={onClose}
@@ -687,16 +690,16 @@ return (
 
         <div className="relative grid min-h-0 place-items-center overflow-hidden bg-background px-14 py-4">
           <button
-            aria-label="上一张"
+            aria-label={t("上一张")}
             className="absolute left-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm transition-colors hover:bg-primary-soft"
             type="button"
             onClick={() => setActiveIndex((current) => (current - 1 + images.length) % images.length)}
           >
             <ChevronLeft size={18} />
           </button>
-          <img alt={`${title} 截图 ${activeIndex + 1}`} className="max-h-full max-w-full object-contain" src={currentImage} />
+          <img alt={t("{title} 截图 {index}", { title, index: activeIndex + 1 })} className="max-h-full max-w-full object-contain" src={currentImage} />
           <button
-            aria-label="下一张"
+            aria-label={t("下一张")}
             className="absolute right-3 top-1/2 z-10 flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm transition-colors hover:bg-primary-soft"
             type="button"
             onClick={() => setActiveIndex((current) => (current + 1) % images.length)}
@@ -713,7 +716,7 @@ return (
             {images.map((image, index) => (
               <button
                 aria-current={index === activeIndex ? "true" : undefined}
-                aria-label={`查看第 ${index + 1} 张`}
+                aria-label={t("查看第 {index} 张", { index: index + 1 })}
                 className={`relative h-16 w-24 shrink-0 overflow-hidden rounded-lg border transition-colors ${
                   index === activeIndex ? "border-primary ring-2 ring-primary/30" : "border-border hover:border-primary/50"
                 }`}

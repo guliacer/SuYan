@@ -87,6 +87,8 @@ import img81 from "./images/wisart/game-2.webp?url";
 import img82 from "./images/wisart/home.webp?url";
 import img83 from "./images/wisart/square.webp?url";
 import img84 from "./images/wisart/works.webp?url";
+import img85 from "./images/agnes/pricing.webp?url";
+import img86 from "./images/agnes/usage-overview.webp?url";
 
 const recommendationImageUrls: Record<string, string> = {
   "/images/abrdns/checkin.webp": img0,
@@ -174,6 +176,8 @@ const recommendationImageUrls: Record<string, string> = {
   "/images/wisart/home.webp": img82,
   "/images/wisart/square.webp": img83,
   "/images/wisart/works.webp": img84,
+  "/images/agnes/pricing.webp": img85,
+  "/images/agnes/usage-overview.webp": img86,
 };
 
 export function resolveRecommendationImageUrls(paths: string[] | undefined): string[] {

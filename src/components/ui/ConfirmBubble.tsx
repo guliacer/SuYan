@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useLocale } from "@/components/LocaleProvider";
 
 type ConfirmBubbleProps = {
   cancelLabel?: string;
@@ -16,18 +17,21 @@ type ConfirmBubbleProps = {
 };
 
 export function ConfirmBubble({
-  cancelLabel = "取消",
+  cancelLabel,
   className = "",
   confirmLabel,
   description,
   icon,
   isBusy = false,
-  busyLabel = "处理中…",
+  busyLabel,
   placement = "above",
   title,
   onCancel,
   onConfirm,
 }: ConfirmBubbleProps) {
+  const { t } = useLocale();
+  const resolvedCancelLabel = cancelLabel ?? t("取消");
+  const resolvedBusyLabel = busyLabel ?? t("处理中…");
   const arrowClassName =
     placement === "below"
       ? "-top-1.5 border-l border-t"
@@ -54,20 +58,20 @@ export function ConfirmBubble({
         <button
           className="flex min-h-9 min-w-0 items-center justify-center rounded-xl border border-border bg-background px-3 py-1.5 text-center text-sm font-medium leading-tight break-words text-foreground transition-colors hover:bg-primary-soft disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isBusy}
-          title={cancelLabel}
+          title={resolvedCancelLabel}
           type="button"
           onClick={onCancel}
         >
-          {cancelLabel}
+          {resolvedCancelLabel}
         </button>
         <button
           className="flex min-h-9 min-w-0 items-center justify-center rounded-xl border border-danger bg-danger px-3 py-1.5 text-center text-sm font-medium leading-tight break-words text-danger-foreground transition-colors hover:bg-danger-strong disabled:cursor-not-allowed disabled:opacity-60"
           disabled={isBusy}
-          title={isBusy ? busyLabel : confirmLabel}
+          title={isBusy ? resolvedBusyLabel : confirmLabel}
           type="button"
           onClick={onConfirm}
         >
-          {isBusy ? busyLabel : confirmLabel}
+          {isBusy ? resolvedBusyLabel : confirmLabel}
         </button>
       </div>
     </div>

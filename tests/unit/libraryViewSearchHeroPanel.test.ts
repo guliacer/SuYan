@@ -9,7 +9,7 @@ function readSearchHeroPanelSource(): string {
     path.join(projectRoot, "src", "features", "library", "components", "LibraryView.tsx"),
     "utf8",
   );
-  const match = source.match(/type SearchHeroPanelProps[\s\S]*?\nfunction getNextThemeMode/);
+  const match = source.match(/type SearchHeroPanelProps[\s\S]*?\nfunction clampMasonryColumnCount/);
 
   expect(match).not.toBeNull();
 

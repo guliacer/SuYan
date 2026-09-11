@@ -150,7 +150,7 @@ describe("promptLexicons", () => {
     );
   });
 
-  it("prunes derived categories and tags that no remaining prompt references", () => {
+  it("prunes unused derived categories while preserving structured tag knowledge", () => {
     const remainingItem = makeLibraryItem("prompt-b", "镜头：{{cameraAngle: 俯视拍摄角度}}", {
       tags: ["保留标签"],
     });
@@ -190,9 +190,9 @@ describe("promptLexicons", () => {
     const result = prunePromptLexiconsForLibraryItems(withDerivedCategory, [remainingItem]);
 
     expect(result.removedCategoryCount).toBeGreaterThanOrEqual(1);
-    expect(result.removedTagCount).toBeGreaterThanOrEqual(1);
+    expect(result.removedTagCount).toBe(0);
     expect(result.promptLexicons?.categories.some((entry) => entry.label === "AI 临时分类")).toBe(false);
-    expect(result.promptLexicons?.tags.some((entry) => entry.label === "独有标签")).toBe(false);
+    expect(result.promptLexicons?.tags.find((entry) => entry.label === "独有标签")).toEqual(merged.promptLexicons.tags.find((entry) => entry.label === "独有标签"));
     expect(result.promptLexicons?.tags.some((entry) => entry.label === "保留标签")).toBe(true);
   });
 });

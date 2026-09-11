@@ -5,6 +5,7 @@ const memoryWarningThresholdMb = 512;
 
 let monitorTimer: ReturnType<typeof setInterval> | null = null;
 let lastItemCount = 0;
+let largeLibraryReported = false;
 
 export function startPerformanceMonitor(): void {
   if (monitorTimer !== null) {
@@ -24,11 +25,14 @@ export function stopPerformanceMonitor(): void {
 export function reportLibrarySize(itemCount: number): void {
   lastItemCount = itemCount;
 
-  if (itemCount > 1000) {
+  if (itemCount > 1000 && !largeLibraryReported) {
+    largeLibraryReported = true;
     logger.warn("performance", "large-library", {
       itemCount,
       recommendation: "建议定期清理不需要的素材以保持流畅。",
     });
+  } else if (itemCount <= 1000) {
+    largeLibraryReported = false;
   }
 }
 

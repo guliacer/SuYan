@@ -28,6 +28,16 @@ export function buildAiErrorPresentation(
   const targetLabel = targetLabels[target ?? ""] ?? "AI \u5206\u6790";
   const message = normalizeRemoteMessage(fallbackMessage);
 
+  if (code === "TAG_KNOWLEDGE_SAVE_FAILED") {
+    return {
+      code, title: "标签归纳结果保存失败",
+      summary: "标签已识别，但分组与依据保存失败，本次标签未应用。",
+      cause: "本地词库写入未完成，可能是目录不可写、磁盘空间不足或保存连接中断。",
+      actions: ["检查软件 data 目录是否可写及磁盘剩余空间", "恢复后重新分析，或在归纳整理中检查现有分组"],
+      targetLabel, retryable: true, shouldStopBackground: true,
+    };
+  }
+
   if (code === "AI_IMAGE_REQUIRED") {
     return {
       code,

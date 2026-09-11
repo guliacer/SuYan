@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   installComponent,
+  removeFfmpegComponentFromBaseDir,
   type ComponentArtifactProvider,
 } from "../../electron/main/modules/componentInstaller";
 import {
@@ -13,7 +14,13 @@ import {
   type CommandRunner,
   type ZipArchiveLoader,
 } from "../../electron/main/modules/componentSecurity";
-import { DEFAULT_COMPONENT_LIMITS } from "../../electron/main/modules/componentConfig";
+import {
+  DEFAULT_COMPONENT_LIMITS,
+  FFMPEG_COMPONENT_RELEASE_PAGE_URL,
+  FFMPEG_COMPONENT_VERSION,
+  NSFW_COMPONENT_RELEASE_PAGE_URL,
+  NSFW_COMPONENT_VERSION,
+} from "../../electron/main/modules/componentConfig";
 
 const temporaryDirectories: string[] = [];
 
@@ -88,6 +95,15 @@ async function stagingLeftovers(base: string): Promise<string[]> {
   return entries.filter((entry) => entry.startsWith(".staging"));
 }
 describe("installComponent secure flow", () => {
+  it("uses the fixed configured FFmpeg release page", () => {
+    expect(FFMPEG_COMPONENT_RELEASE_PAGE_URL).toBe(
+      `https://github.com/guliacer/suyan-components/releases/tag/ffmpeg-${FFMPEG_COMPONENT_VERSION}`,
+    );
+    expect(NSFW_COMPONENT_RELEASE_PAGE_URL).toBe(
+      `https://github.com/guliacer/suyan-components/releases/tag/nsfw-${NSFW_COMPONENT_VERSION}`,
+    );
+  });
+
   it("installs a validly signed component and records current.json", async () => {
     const base = await makeBaseDir();
     const component = await buildSignedComponent();
@@ -106,6 +122,42 @@ describe("installComponent secure flow", () => {
     const current = await readCurrentComponent(base, "ffmpeg");
     expect(current?.version).toBe("7.1.1-suyan.1");
     expect(await stagingLeftovers(base)).toHaveLength(0);
+  });
+
+  it("supports a signed non-executable component with a custom staging self-check", async () => {
+    const base = await makeBaseDir();
+    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+    const model = Buffer.from("model payload");
+    const zipBuffer = await makeZip({ "model/nsfw.onnx": model });
+    const manifest = {
+      componentId: "nsfw-runtime",
+      version: "1.0.0",
+      platform: "win32-x64",
+      archive: { name: "nsfw-runtime-win32-x64.zip", sha256: sha256Hex(zipBuffer), size: zipBuffer.length },
+      files: [{ name: "model/nsfw.onnx", sha256: sha256Hex(model), size: model.length }],
+    };
+    const manifestBytes = Buffer.from(JSON.stringify(manifest), "utf8");
+    const signature = crypto.sign(null, manifestBytes, privateKey);
+
+    const result = await installComponent({
+      provider: {
+        fetchManifest: async () => manifestBytes,
+        fetchSignature: async () => signature,
+        fetchArchive: async () => zipBuffer,
+      },
+      baseComponentsDir: base,
+      publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
+      limits: DEFAULT_COMPONENT_LIMITS,
+      loadZip,
+      expected: { componentId: "nsfw-runtime", version: "1.0.0", platform: "win32-x64" },
+      selfCheck: async (stagingDir) => {
+        const content = await fs.readFile(path.join(stagingDir, "model", "nsfw.onnx"));
+        return content.equals(model);
+      },
+    });
+
+    expect(result.version).toBe("1.0.0");
+    expect(await fs.readFile(path.join(result.installedDir, "model", "nsfw.onnx"))).toEqual(model);
   });
 
   it("rejects a component signed by the wrong key and installs nothing", async () => {
@@ -200,5 +252,25 @@ describe("installComponent secure flow", () => {
     const current = await readCurrentComponent(base, "ffmpeg");
     expect(current?.version).toBe("6.0.0-old");
     expect(await fs.readFile(path.join(oldPlatformDir, "ffmpeg.exe"), "utf8")).toBe("OLD BINARY");
+  });
+
+  it("removes only the managed FFmpeg component directory", async () => {
+    const base = await makeBaseDir();
+    const ffmpegFile = path.join(base, "ffmpeg", "6.0-suyan.1", "win32-x64", "ffmpeg.exe");
+    const otherComponentFile = path.join(base, "image-runtime", "keep.txt");
+    const baseMarker = path.join(base, "keep.txt");
+    await fs.mkdir(path.dirname(ffmpegFile), { recursive: true });
+    await fs.mkdir(path.dirname(otherComponentFile), { recursive: true });
+    await Promise.all([
+      fs.writeFile(ffmpegFile, "managed ffmpeg"),
+      fs.writeFile(otherComponentFile, "keep image runtime"),
+      fs.writeFile(baseMarker, "keep base"),
+    ]);
+
+    await expect(removeFfmpegComponentFromBaseDir(base)).resolves.toBe(true);
+    await expect(fs.stat(path.join(base, "ffmpeg"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.readFile(otherComponentFile, "utf8")).resolves.toBe("keep image runtime");
+    await expect(fs.readFile(baseMarker, "utf8")).resolves.toBe("keep base");
+    await expect(removeFfmpegComponentFromBaseDir(base)).resolves.toBe(false);
   });
 });

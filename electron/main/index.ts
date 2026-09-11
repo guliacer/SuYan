@@ -1,8 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type IpcMainEvent } from "electron";
+import { release as osRelease } from "node:os";
+import { supportsWindowAcrylic } from "./window/windowMaterial";
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc/registerIpcHandlers";
+import { registerWindowResize } from "./window/windowResize";
 import { ipcChannels } from "../shared/ipcChannels";
 import { isVideoMediaFile } from "../../src/features/library/utils/mediaFileTypes";
 import {
@@ -11,7 +15,7 @@ import {
   getOrCreateImageThumbnailPath,
   getOrCreateImageThumbnailPathForItem,
 } from "./library/imageThumbnails";
-import { getImagePath, getStartupGalleryImagePath } from "./library/libraryPaths";
+import { getImagePath, getPromptContentImagePath, getStartupGalleryImagePath, getThemeBackgroundPath } from "./library/libraryPaths";
 import { findLibraryItemByImageFileName } from "./library/libraryStore";
 import { resolveMediaAbsolutePath } from "./library/mediaPathResolver";
 import { ensureStartupGalleryStorage, getFreshStartupThumbnailPath } from "./library/startupGalleryStore";
@@ -33,16 +37,44 @@ import { assertRuntimeIntegrityOrExit } from "./app/runtimeIntegrity";
 import { startPerformanceMonitor } from "./performance/performanceMonitor";
 import { rustCoreRuntime } from "./runtime/rustCoreRuntime";
 import { readWindowState, watchWindowState } from "./window/windowStateStore";
+import { constrainWindowContentBounds } from "./window/windowContentBounds";
 import {
   restoreExternalLibraryWatchers,
   shutdownExternalLibraryWatchers,
 } from "./library/externalLibraryWatcher";
 import { startImportReceiver, stopImportReceiver } from "./library/importReceiver";
+import {
+  broadcastAccountError,
+  getAccountStatus,
+  handleOAuthCallback,
+  initializeAccount,
+} from "./account/accountService";
+import { OAuthCallbackDispatcher } from "./account/oauth/oauthCallbackDispatcher";
+import { findOAuthDeeplink, isOAuthDeeplink } from "./account/oauth/oauthDeeplink";
 import { minimumWindowSize } from "./window/windowStateModel";
+import { resetFfmpegPathCache } from "./runtime/videoRuntime";
+import {
+  ACCOUNT_AVATAR_PROTOCOL,
+  findCachedAccountAvatarPath,
+  getAccountAvatarContentType,
+} from "./account/accountAvatarCache";
 
 app.setName("素言");
 if (process.platform === "win32") {
   app.setAppUserModelId("local.suyan");
+}
+
+/**
+ * 开发/便携模式（electron . / pnpm dev）直接跑在 node_modules 的 Electron 里，
+ * 窗口不会沿用打包 exe 内嵌的图标，需要显式给 BrowserWindow 设置品牌 logo。
+ * 打包产物（resources/app.asar 内）不包含 build/ 目录，故只在非打包态使用。
+ */
+function resolveWindowIconPath(): string | undefined {
+  if (process.platform !== "win32") {
+    return undefined;
+  }
+  const logoPath = path.join(app.getAppPath(), "build", "logo-source.png");
+  return existsSync(logoPath) ? logoPath : undefined;
 }
 
 // Only one main process should own the UI. A second double-click must focus the
@@ -91,6 +123,9 @@ if (appUserDataPreparation.reason === "not-writable") {
   });
 } else {
   app.setPath("userData", appUserDataPreparation.userDataPath);
+  // userData 重定向后清掉 ffmpeg 探测缓存：若引导期有过早期探测（旧 userData），
+  // 直接命中旧路径会把已安装的按需组件误报为未安装。
+  resetFfmpegPathCache();
   const usesSharedDevProfile =
     !app.isPackaged
     || (appUserDataPreparation.packagedRoot !== null
@@ -172,9 +207,47 @@ protocol.registerSchemesAsPrivileged([
       stream: true,
     },
   },
+  {
+    scheme: "app-theme",
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+  {
+    scheme: ACCOUNT_AVATAR_PROTOCOL,
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+    },
+  },
+  {
+    // OAuth 回调协议（方案 §八）：只此一处，绝不加入宽泛外部协议白名单。
+    scheme: "suyan",
+    privileges: {
+      secure: true,
+      standard: true,
+      supportFetchAPI: false,
+      corsEnabled: false,
+    },
+  },
 ]);
 
 let mainWindowRef: BrowserWindow | null = null;
+let queuedOAuthDeeplink = findOAuthDeeplink(process.argv);
+const oauthCallbackDispatcher = new OAuthCallbackDispatcher({
+  handleCallback: handleOAuthCallback,
+  onError: (error) => {
+    broadcastAccountError(error);
+    logger.warn("account", "oauth-deeplink-failed", { message: String(error) });
+  },
+  onSettled: () => focusMainWindow(),
+});
 
 function focusMainWindow(window: BrowserWindow | null = mainWindowRef): void {
   if (!window || window.isDestroyed()) {
@@ -202,8 +275,43 @@ function focusMainWindow(window: BrowserWindow | null = mainWindowRef): void {
   logStartupEvent("window:focus-existing");
 }
 
-app.on("second-instance", () => {
+function routeOAuthDeeplink(rawUrl: unknown): void {
+  if (!isOAuthDeeplink(rawUrl)) {
+    return;
+  }
+
+  if (!app.isReady()) {
+    // Windows cold-start and macOS open-url can arrive before app.whenReady.
+    // Keep only the newest valid callback until the main process is initialized.
+    queuedOAuthDeeplink = rawUrl;
+    return;
+  }
+
+  void oauthCallbackDispatcher.dispatch(rawUrl);
+  logStartupEvent("app:oauth-deeplink", { url: "suyan://oauth/callback..." });
+}
+
+function dispatchQueuedOAuthDeeplink(): void {
+  const deeplink = queuedOAuthDeeplink;
+  queuedOAuthDeeplink = null;
+  if (deeplink) {
+    routeOAuthDeeplink(deeplink);
+  }
+}
+
+// Register before app.whenReady so macOS does not lose a callback delivered
+// while the application is still creating its first window.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  routeOAuthDeeplink(url);
+});
+
+app.on("second-instance", (_event, argv) => {
   logStartupEvent("app:second-instance");
+  const deeplink = Array.isArray(argv) ? findOAuthDeeplink(argv) : null;
+  if (deeplink) {
+    routeOAuthDeeplink(deeplink);
+  }
   const existing = mainWindowRef && !mainWindowRef.isDestroyed()
     ? mainWindowRef
     : BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) ?? null;
@@ -223,6 +331,8 @@ async function createWindow(): Promise<void> {
   logStartupEvent("window:create:start");
   const windowState = await readWindowState();
   logStartupEvent("window:state:read");
+  const windowIconPath = resolveWindowIconPath();
+  const nativeAcrylic = supportsWindowAcrylic(process.platform, osRelease());
   const mainWindow = new BrowserWindow({
     width: windowState.width,
     height: windowState.height,
@@ -232,12 +342,23 @@ async function createWindow(): Promise<void> {
     minWidth: minimumWindowSize.width,
     minHeight: minimumWindowSize.height,
     title: "素言",
-    titleBarStyle: "hidden",
+    // The React title bar owns all window controls. Keeping Electron's native
+    // controls hidden prevents the Windows close button from painting over the
+    // custom close button in the renderer.
+    frame: false,
+    roundedCorners: true,
+    // A native frame supplies the resize edge, rounded corners and shadow for
+    // Acrylic. Older systems retain the existing transparent CSS shell.
+    thickFrame: nativeAcrylic,
+    transparent: !nativeAcrylic,
+    ...(nativeAcrylic ? { backgroundMaterial: "acrylic" as const } : {}),
     autoHideMenuBar: true,
-    backgroundColor: "#f6f5f1",
+    ...(windowIconPath ? { icon: windowIconPath } : {}),
+    backgroundColor: "#00000000",
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
+      additionalArguments: nativeAcrylic ? ["--suyan-native-acrylic"] : [],
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -245,6 +366,7 @@ async function createWindow(): Promise<void> {
     },
   });
   mainWindowRef = mainWindow;
+  logger.info("window", "material:configured", { material: nativeAcrylic ? "acrylic" : "css-fallback" });
   mainWindow.on("closed", () => {
     if (mainWindowRef === mainWindow) {
       mainWindowRef = null;
@@ -315,9 +437,11 @@ async function createWindow(): Promise<void> {
 
   watchWindowState(mainWindow);
   watchWindowForGpuCrash(mainWindow);
+  watchRendererDiagnostics(mainWindow);
   configureExternalLinkHandling(mainWindow);
   blockPackagedDevToolsShortcuts(mainWindow);
   registerWindowControls(mainWindow);
+  registerWindowResize(mainWindow);
 
   try {
     if (process.env.VITE_DEV_SERVER_URL) {
@@ -334,6 +458,37 @@ async function createWindow(): Promise<void> {
     logStartupEvent("window:load:failed");
     showWindow("load-failed");
   }
+}
+
+function watchRendererDiagnostics(window: BrowserWindow): void {
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const details = {
+      consoleLevel: level,
+      message: message.slice(0, 500),
+      line,
+      sourceId: sourceId.slice(0, 300),
+    };
+
+    if (level >= 3) {
+      logger.error("renderer", "console-error", {
+        ...details,
+        code: "RENDERER_CONSOLE_ERROR",
+      });
+      return;
+    }
+
+    if (level >= 2) {
+      logger.warn("renderer", "console-warning", details);
+    }
+  });
+
+  window.webContents.on("unresponsive", () => {
+    logger.warn("renderer", "unresponsive", { code: "RENDERER_UNRESPONSIVE" });
+  });
+
+  window.webContents.on("responsive", () => {
+    logger.info("renderer", "responsive");
+  });
 }
 
 function blockPackagedDevToolsShortcuts(window: BrowserWindow): void {
@@ -516,6 +671,19 @@ app.whenReady().then(async () => {
   await migrateOldStartupLog();
   startPerformanceMonitor();
   Menu.setApplicationMenu(null);
+  // OAuth 回调深链（方案 §八）：注册为默认协议处理程序（Windows/包装版 OS 级路由）。
+  // 开发模式（electron .）必须带上进程与 app 路径，否则系统回跳 suyan:// 时
+  // 第二个 electron 实例不会加载应用，深链会丢失（见 Electron 文档 defaultApp 示例）。
+  try {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient("suyan", process.execPath, [path.resolve(process.argv[1])]);
+    } else {
+      app.setAsDefaultProtocolClient("suyan");
+    }
+    logStartupEvent("oauth:protocol-client-registered");
+  } catch (error) {
+    logger.warn("account", "oauth:set-default-protocol-failed", { message: String(error) });
+  }
   try {
     await applyStoredProxySettings();
     logStartupEvent("proxy:applied");
@@ -532,6 +700,9 @@ app.whenReady().then(async () => {
     try {
       const url = new URL(request.url);
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      if (url.hostname === "prompt") {
+        return await serveFileWithRange(getPromptContentImagePath(imageFileName), request.headers.get("range"));
+      }
       const item = await findLibraryItemByImageFileName(imageFileName);
       const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
 
@@ -561,16 +732,69 @@ app.whenReady().then(async () => {
     }
   });
 
-  protocol.handle("app-thumbnail", async (request) => {
+  protocol.handle("app-theme", async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname !== "local") {
+        return new Response("Not found", { status: 404 });
+      }
       const imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      return await net.fetch(pathToFileURL(getThemeBackgroundPath(imageFileName)).toString());
+    } catch (error) {
+      logger.warn("theme", "background:serve-failed", { message: String(error) });
+      return new Response("Not found", { status: 404 });
+    }
+  });
+
+  protocol.handle(ACCOUNT_AVATAR_PROTOCOL, async (request) => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname !== "avatar") {
+        return new Response("Not found", { status: 404 });
+      }
+      const key = decodeURIComponent(url.pathname.replace(/^\//, ""));
+      const filePath = await findCachedAccountAvatarPath(key);
+      if (!filePath) {
+        return new Response("Not found", { status: 404 });
+      }
+      return await serveFileWithRange(filePath, request.headers.get("range"), {
+        "Cache-Control": "no-store",
+        "Content-Type": getAccountAvatarContentType(filePath),
+      });
+    } catch (error) {
+      logger.warn("account", "avatar:serve-failed", { message: String(error) });
+      return new Response("Not found", { status: 404 });
+    }
+  });
+
+  protocol.handle("suyan", async (request) => {
+    const callbackResult = await oauthCallbackDispatcher.dispatch(request.url);
+    const callbackSucceeded = callbackResult.status === "succeeded";
+    const pageMessage = callbackSucceeded
+      ? "身份验证完成，请回到素言确认登录。"
+      : "登录未完成，请返回素言查看提示并重新尝试。";
+    const pageColor = callbackSucceeded ? "#176b45" : "#a63e3e";
+    return new Response(`<html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>素言登录</title></head><body style='background:#f6f5f1;font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;color:${pageColor}'><main style='padding:32px;text-align:center'><strong style='font-size:18px'>${pageMessage}</strong></main></body></html>`, {
+      headers: { "Content-Type": "text/html" },
+    });
+  });
+
+  protocol.handle("app-thumbnail", async (request) => {
+    const startedAt = Date.now();
+    let source: "thumbnail" | "original" | "missing" = "missing";
+    let generationAttempted = false;
+    let imageFileName = "";
+
+    try {
+      const url = new URL(request.url);
+      imageFileName = decodeURIComponent(url.pathname.replace(/^\//, ""));
       const item = await findLibraryItemByImageFileName(imageFileName);
       let thumbnailPath = item
         ? await getFreshImageThumbnailPathForItem(item)
         : await getFreshImageThumbnailPath(imageFileName);
 
       if (!thumbnailPath) {
+        generationAttempted = true;
         try {
           thumbnailPath = item
             ? await getOrCreateImageThumbnailPathForItem(item)
@@ -584,6 +808,7 @@ app.whenReady().then(async () => {
       }
 
       if (thumbnailPath) {
+        source = "thumbnail";
         return net.fetch(pathToFileURL(thumbnailPath).toString());
       }
 
@@ -591,6 +816,7 @@ app.whenReady().then(async () => {
       const imageStats = await fs.stat(imagePath).catch(() => null);
 
       if (imageStats) {
+        source = "original";
         return net.fetch(pathToFileURL(imagePath).toString());
       }
 
@@ -600,13 +826,45 @@ app.whenReady().then(async () => {
         },
         status: 404,
       });
-    } catch {
+    } catch (error) {
+      logger.warn("media-thumbnail", "serve:failed", {
+        file: imageFileName,
+        message: error instanceof Error ? error.message : String(error),
+      });
       return new Response("Not found", { status: 404 });
+    } finally {
+      const durationMs = Date.now() - startedAt;
+      if (durationMs >= 350) {
+        logger.info("media-thumbnail", "serve:slow", {
+          file: imageFileName,
+          durationMs,
+          source,
+          generationAttempted,
+        });
+      }
     }
   });
 
   registerIpcHandlers();
   logStartupEvent("ipc:registered");
+
+  // 恢复账号登录态（方案 §十一）：失败只回到未登录，不阻塞主流程。
+  try {
+    await initializeAccount();
+    const accountStatus = getAccountStatus();
+    logStartupEvent("account:initialized", {
+      status: accountStatus.status,
+      provider: accountStatus.provider ?? null,
+      uid: accountStatus.user?.uid ?? null,
+    });
+  } catch (error) {
+    logger.warn("account", "init-failed", { message: String(error) });
+  }
+
+  // A protocol launch may be the first process instance. Dispatch it only
+  // after account initialization so the callback can safely persist and
+  // broadcast the resulting session.
+  dispatchQueuedOAuthDeeplink();
 
   try {
     await ensureStartupGalleryStorage();
@@ -632,7 +890,7 @@ app.whenReady().then(async () => {
     logger.warn("import-receiver", "start-failed", { message: String(error) });
   }
 
-  app.on("activate", () => {
+app.on("activate", () => {
     const existing = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) ?? null;
     if (existing) {
       focusMainWindow(existing);
@@ -676,6 +934,16 @@ function registerWindowControls(window: BrowserWindow): void {
 
   ipcMain.handle(ipcChannels.windowIsMaximized, () => {
     return { ok: true, data: { maximized: window.isMaximized() } };
+  });
+
+  ipcMain.handle(ipcChannels.windowAlwaysOnTopToggle, () => {
+    const alwaysOnTop = !window.isAlwaysOnTop();
+    window.setAlwaysOnTop(alwaysOnTop);
+    return { ok: true, data: { alwaysOnTop } };
+  });
+
+  ipcMain.handle(ipcChannels.windowIsAlwaysOnTop, () => {
+    return { ok: true, data: { alwaysOnTop: window.isAlwaysOnTop() } };
   });
 
   window.on("maximize", () => {

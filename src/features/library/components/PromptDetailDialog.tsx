@@ -18,11 +18,11 @@ import {
   Clipboard,
   Copy,
   Download,
-  Eraser,
   Expand,
   Eye,
   EyeOff,
   FileText,
+  Film,
   GripVertical,
   Heart,
   ImageIcon,
@@ -51,12 +51,12 @@ import {
   X,
 } from "lucide-react";
 import { AppDialog } from "@/components/ui/AppDialog";
+import { useLocale } from "@/components/LocaleProvider";
 import { AppLogoMark } from "@/components/ui/AppLogoMark";
 import { Button } from "@/components/ui/Button";
 import { ConfirmBubble } from "@/components/ui/ConfirmBubble";
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
 import { TextArea } from "@/components/ui/TextArea";
-import { CAPSULE_TONES, type CapsuleTone } from "@/components/ui/capsuleTones";
 import { NsfwImage } from "./NsfwImage";
 import { VideoDetailSection } from "./video/VideoDetailSection";
 import type {
@@ -64,6 +64,7 @@ import type {
   AiAnalyzePromptPayload,
   AiAnalyzeTarget,
   AiFeatureAction,
+  AiModelSelection,
   AiProviderModelCapability,
   AiRecognitionKind,
   AiRecognitionSource,
@@ -88,11 +89,9 @@ import type { LibraryItem, PromptContentType } from "../types/library";
 import {
   addTags,
   applyAnalysisInlineChips,
-  buildPromptAnalysisFromSavedCapsules,
   isGenericPromptLabel,
   moveNegativePromptValuesFromPrompt,
   normalizeConcretePromptTags,
-  omitNegativeAnalysisSections,
   splitNegativePromptFromPrompt,
   type PromptAnalysisResult,
   type PromptAnalysisSection,
@@ -100,7 +99,7 @@ import {
 import { maxAnalysisResultCount, mergeAnalysisLabelsWithFitCap } from "../utils/analysisMergeCap";
 import type { PromptAnalysisRunResult } from "../utils/remotePromptAnalysis";
 import {
-  getGenerationModelOptions,
+  getConfiguredGenerationModelOptions,
   hideGenerationModelOption,
   isSameGenerationModelLabel,
   moveGenerationModelOption,
@@ -119,6 +118,10 @@ import type { CategoryTaxonomy } from "../types/category";
 import { getPromptTypeLabel } from "../utils/promptType";
 import { getImageSrc, getImageThumbnailSrc } from "../utils/getImageSrc";
 import { buildAuthorAvatarSources } from "../utils/authorAvatarSources";
+import { SyncWorksDialog } from "./SyncWorksDialog";
+import { getPromptImageGroupKey } from "../utils/promptImageGroups";
+import { toPromptCardData } from "../utils/promptFilters";
+import { useAccountStore } from "../../account/store/useAccountStore";
 import { isAudioMediaFile, isVideoMediaFile } from "../utils/mediaFileTypes";
 import {
   getStoredAudioMuted,
@@ -137,10 +140,6 @@ import { useLibraryStore } from "../store/useLibraryStore";
 import { VideoRuntimeInstallBanner } from "./VideoRuntimeInstallBanner";
 import type { PromptCardData } from "../utils/promptFilters";
 import {
-  normalizePromptSectionValue,
-  parsePromptTemplateSegments,
-  promptSectionMeta,
-  resolvePromptSectionKeyForValue,
   resolvePromptTemplateText,
 } from "../utils/promptSplit";
 
@@ -173,11 +172,6 @@ type ActiveAiProfileMenu = {
   action: AiProfileAction;
   position: { left: number; top: number };
   recognitionKind?: AiRecognitionKind;
-};
-
-type AiModelSelection = {
-  profileId: string;
-  modelId: string;
 };
 
 type PromptLanguageVersion = AiPromptTranslationLanguage;
@@ -310,7 +304,11 @@ export function PromptDetailDialog({
   onImportClipboardReferenceImage,
   onImportReferenceImageFromUrl,
 }: PromptDetailDialogProps) {
+  const { t } = useLocale();
   const [isAuthorHidden, setIsAuthorHidden] = useState(false);
+  const accountUser = useAccountStore(state => state.user);
+  const libraryItems = useLibraryStore(state => state.items);
+  const [syncWorkOpen, setSyncWorkOpen] = useState(false);
   const [isAuthorEditing, setIsAuthorEditing] = useState(false);
   const [authorNameDraft, setAuthorNameDraft] = useState(item.author ?? "");
   const [authorUrlDraft, setAuthorUrlDraft] = useState(item.authorUrl ?? "");
@@ -323,6 +321,7 @@ export function PromptDetailDialog({
   const [savedGenerationMethod, setSavedGenerationMethod] = useState(item.generationMethod);
   const [savedPromptType, setSavedPromptType] = useState<PromptContentType>(item.promptType);
   const [moduleNoticeText, setModuleNoticeText] = useState("");
+  const [analysisNoticeText, setAnalysisNoticeText] = useState("");
   const [tagDrafts, setTagDrafts] = useState<string[]>(item.tags);
   const [newTagDraft, setNewTagDraft] = useState("");
   const [promptDraft, setPromptDraft] = useState(item.prompt);
@@ -408,12 +407,12 @@ export function PromptDetailDialog({
     : negativePromptDraft;
   const targetTranslationLanguage: PromptLanguageVersion = promptLanguageVersion === "zh" ? "en" : "zh";
   const promptText = useMemo(
-    () => buildPromptTextFromParts(activePromptDraft, activeNegativePromptDraft),
-    [activeNegativePromptDraft, activePromptDraft],
+    () => buildPromptTextFromParts(activePromptDraft, activeNegativePromptDraft, t),
+    [activeNegativePromptDraft, activePromptDraft, t],
   );
   const copyPromptText = useMemo(
-    () => buildPromptTextFromParts(activePromptDraft, isNegativePromptVisible ? activeNegativePromptDraft : ""),
-    [activeNegativePromptDraft, activePromptDraft, isNegativePromptVisible],
+    () => buildPromptTextFromParts(activePromptDraft, isNegativePromptVisible ? activeNegativePromptDraft : "", t),
+    [activeNegativePromptDraft, activePromptDraft, isNegativePromptVisible, t],
   );
   const shareText = useMemo(
     () => buildShareText({
@@ -421,10 +420,10 @@ export function PromptDetailDialog({
       author: item.author,
       tags: tagDrafts,
       promptText,
-    }),
-    [item.author, promptText, tagDrafts, titleDraft],
+    }, t),
+    [item.author, promptText, tagDrafts, titleDraft, t],
   );
-  const sourceLabel = item.sourceUrl ? "网络提示词" : "本地提示词";
+  const sourceLabel = item.sourceUrl ? t("网络提示词") : t("本地提示词");
   const modelLabel = resolveGenerationModelLabel({
     category: savedCategory,
     generationMethod: savedGenerationMethod,
@@ -438,8 +437,14 @@ export function PromptDetailDialog({
     [generationModelOrder, hiddenGenerationModels],
   );
   const modelOptions = useMemo(
-    () => getVisibleModelOptions(modelSearch, modelLabel, modelPreferences),
-    [modelLabel, modelPreferences, modelSearch],
+    () =>
+      getVisibleModelOptions(
+        modelSearch,
+        modelLabel,
+        modelPreferences,
+        aiSettings.profiles.flatMap((profile) => profile.models),
+      ),
+    [aiSettings.profiles, modelLabel, modelPreferences, modelSearch],
   );
   const categoryChips = useMemo(
     () => getCategoryChips(savedCategory, savedGenreIds, categoryTaxonomy),
@@ -448,10 +453,6 @@ export function PromptDetailDialog({
   const visibleTagDrafts = useMemo(
     () => getVisibleTagDrafts(tagDrafts, categoryChips),
     [categoryChips, tagDrafts],
-  );
-  const hasPromptCapsules = useMemo(
-    () => analysisResult !== null || promptHasTemplateParameters(promptDraft) || promptHasTemplateParameters(negativePromptDraft),
-    [analysisResult, negativePromptDraft, promptDraft],
   );
   const hasNegativePromptDraft = negativePromptDraft.trim().length > 0;
   const hasActiveNegativePromptDraft = activeNegativePromptDraft.trim().length > 0;
@@ -522,10 +523,10 @@ export function PromptDetailDialog({
     setModelSearch("");
   }, [item.id]);
 
-  // 打开已是视频类型的素材时，若视频运行时缺失则直接给出安装提示。
+  // 打开已是视频类型的素材时，若视频依赖缺失则直接给出安装提示。
   useEffect(() => {
     if (item.promptType === "video" && !videoRuntimeAvailable) {
-      setModuleNoticeText("视频媒体功能需要视频运行时（FFmpeg），请先安装。");
+      setModuleNoticeText(t("视频媒体功能需要视频依赖（FFmpeg），请先安装。"));
     }
   }, [item.id, videoRuntimeAvailable]);
 
@@ -538,15 +539,9 @@ export function PromptDetailDialog({
         return;
       }
 
-      const savedCapsuleAnalysis = buildSavedCapsuleAnalysis(item, item.prompt, item.negativePrompt, knownCategories);
-
-      if (isCanceled) {
-        return;
-      }
-
-      setAnalysisResult(savedCapsuleAnalysis);      logPromptDetailEvent("detail-analysis:ready", {
+      logPromptDetailEvent("detail-analysis:ready", {
         durationMs: Math.round(performance.now() - startedAt),
-        hasAnalysis: Boolean(savedCapsuleAnalysis),
+        hasAnalysis: false,
         itemId: item.id,
       });
     };
@@ -779,17 +774,11 @@ export function PromptDetailDialog({
   }, [isModelMenuOpen]);
 
   useEffect(() => {
-    const availableModels = new Set(
-      getSelectableAiProfiles(aiSettings).flatMap((profile) =>
-        profile.models.map((model) => `${profile.id}/${model.id}`),
-      ),
-    );
-
     setSelectedAiModelByAction((currentSelections) => {
       const nextSelections: Partial<Record<AiProfileAction, AiModelSelection>> = {};
 
       for (const [action, selection] of Object.entries(currentSelections) as [AiProfileAction, AiModelSelection][]) {
-        if (availableModels.has(`${selection.profileId}/${selection.modelId}`)) {
+        if (hasAiModelSelection(aiSettings, selection, action)) {
           nextSelections[action] = selection;
         }
       }
@@ -1017,7 +1006,7 @@ export function PromptDetailDialog({
     if (nextPromptType === "video" && !videoRuntimeAvailable) {
       setSavedPromptType(nextPromptType);
       void onSave({ promptType: nextPromptType });
-      setModuleNoticeText("视频媒体功能需要视频运行时（FFmpeg），请先安装。");
+      setModuleNoticeText(t("视频媒体功能需要视频依赖（FFmpeg），请先安装。"));
       return;
     }
 
@@ -1051,7 +1040,7 @@ export function PromptDetailDialog({
   function resolveAiModelSelection(action: AiProfileAction): AiModelSelection | undefined {
     const selectedSelection = selectedAiModelByAction[action];
 
-    if (selectedSelection && hasAiModelSelection(aiSettings, selectedSelection)) {
+    if (selectedSelection && hasAiModelSelection(aiSettings, selectedSelection, action)) {
       return selectedSelection;
     }
 
@@ -1063,7 +1052,7 @@ export function PromptDetailDialog({
       hasAiModelSelection(aiSettings, {
         profileId: preferredSelection.profileId,
         modelId: preferredSelection.modelId,
-      })
+      }, action)
     ) {
       return {
         profileId: preferredSelection.profileId,
@@ -1071,11 +1060,15 @@ export function PromptDetailDialog({
       };
     }
 
-    const selectableProfiles = getSelectableAiProfiles(aiSettings);
+    const selectableProfiles = getSelectableAiProfiles(aiSettings, action);
     const activeProfile =
       selectableProfiles.find((profile) => profile.id === aiSettings.activeProfileId) ?? selectableProfiles[0];
     const activeModel =
-      activeProfile?.models.find((model) => model.id === activeProfile.model) ?? activeProfile?.models[0];
+      activeProfile?.models.find(
+        (model) =>
+          model.id === activeProfile.model &&
+          model.capabilities.includes(getAiProfileActionCapability(action)),
+      ) ?? activeProfile?.models.find((model) => model.capabilities.includes(getAiProfileActionCapability(action)));
 
     return activeProfile && activeModel
       ? {
@@ -1277,6 +1270,7 @@ export function PromptDetailDialog({
     );
     const usesPrompt = action === "prompt-category";
 
+    setAnalysisNoticeText("");
     setAnalyzingTarget(action);
 
     try {
@@ -1329,6 +1323,8 @@ export function PromptDetailDialog({
               ? 0.8
               : 0.65,
       });
+    } catch (error) {
+      setAnalysisNoticeText(error instanceof Error ? error.message : t("识别失败，请重试。"));
     } finally {
       setAnalyzingTarget(null);
     }
@@ -1342,6 +1338,7 @@ export function PromptDetailDialog({
     const action = getRecognitionAction("tags", resolveEffectiveRecognitionSource(recognitionSourceByKind.tags));
     const usesPrompt = action === "prompt-tags";
 
+    setAnalysisNoticeText("");
     setAnalyzingTarget(action);
 
     try {
@@ -1372,6 +1369,8 @@ export function PromptDetailDialog({
       if (!areStringArraysEqual(nextTags, visibleTagDrafts)) {
         commitVisibleTags(nextTags);
       }
+    } catch (error) {
+      setAnalysisNoticeText(error instanceof Error ? error.message : t("识别失败，请重试。"));
     } finally {
       setAnalyzingTarget(null);
     }
@@ -1396,12 +1395,10 @@ export function PromptDetailDialog({
 
     const nextPrompt = promptUndoSnapshot.prompt;
     const nextNegativePrompt = promptUndoSnapshot.negativePrompt;
-    const savedCapsuleAnalysis = buildSavedCapsuleAnalysis(item, nextPrompt, nextNegativePrompt, knownCategories);
 
     setPromptDraft(nextPrompt);
     setNegativePromptDraft(nextNegativePrompt);
     setPromptUndoSnapshot(null);
-    setAnalysisResult(savedCapsuleAnalysis);
     setIsNegativePromptVisible(nextNegativePrompt.trim().length > 0 && isNegativePromptVisible);
     void onSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
   }
@@ -1409,34 +1406,8 @@ export function PromptDetailDialog({
   function commitPrompt() {
     const nextPrompt = promptDraft.trim();
     const nextNegativePrompt = negativePromptDraft.trim();
-    const savedCapsuleAnalysis = buildSavedCapsuleAnalysis(item, nextPrompt, nextNegativePrompt, knownCategories);
-
-    setAnalysisResult(savedCapsuleAnalysis);
 
     if (nextPrompt !== item.prompt || nextNegativePrompt !== item.negativePrompt) {
-      void onSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
-    }
-  }
-
-  function clearPromptCapsules() {
-    if (!hasPromptCapsules) {
-      return;
-    }
-
-    const nextPrompt = resolvePromptTemplateText(promptDraft, { explicitParameters: true }).trim();
-    const nextNegativePrompt = resolvePromptTemplateText(negativePromptDraft, { explicitParameters: true }).trim();
-
-    const promptChanged = nextPrompt !== promptDraft || nextNegativePrompt !== negativePromptDraft;
-
-    if (promptChanged) {
-      rememberPromptUndoSnapshot();
-      setPromptDraft(nextPrompt);
-      setNegativePromptDraft(nextNegativePrompt);
-    }
-
-    setAnalysisResult(null);
-
-    if (promptChanged && (nextPrompt !== item.prompt || nextNegativePrompt !== item.negativePrompt)) {
       void onSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
     }
   }
@@ -1709,11 +1680,11 @@ export function PromptDetailDialog({
   return (
     <AppDialog
       overlayClassName="z-40 p-2 min-[720px]:p-3 min-[920px]:p-5"
-      panelClassName="grid max-h-[min(96dvh,100%)] w-full max-w-[min(1840px,100%)] min-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,min(94dvh,100%))]"
+      panelClassName="grid max-h-[min(96dvh,100%)] w-full max-w-[min(1840px,100%)] grid-rows-[minmax(0,30dvh)_minmax(0,1fr)] overflow-hidden min-[560px]:grid-rows-[minmax(0,32dvh)_minmax(0,1fr)] min-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,min(94dvh,100%))]"
       onClose={onClose}
     >
         <div
-          className={`relative flex min-h-[280px] min-w-0 flex-col overflow-y-auto bg-panel px-3 py-3 min-[720px]:px-4 min-[900px]:min-h-[70dvh] min-[900px]:border-r min-[900px]:border-border min-[900px]:px-6 ${
+          className={`relative flex min-h-0 min-w-0 flex-col overflow-y-auto bg-panel px-3 py-3 min-[720px]:min-h-0 min-[720px]:px-4 min-[900px]:min-h-[70dvh] min-[900px]:border-r min-[900px]:border-border min-[900px]:px-6 ${
             isCurrentMediaLandscape ? "min-[900px]:justify-center min-[900px]:py-4" : "min-[900px]:py-6"
           }`}
         >
@@ -1722,7 +1693,11 @@ export function PromptDetailDialog({
               isCurrentMediaVideo ? "mx-auto gap-4" : "m-auto justify-center gap-4"
             }`}
           >
-            <div className="flex max-h-full w-full items-center justify-center px-1 min-[900px]:px-4" ref={detailImageAreaRef}>
+            <div
+              className="flex max-h-full w-full items-center justify-center px-1 min-[900px]:px-4"
+              data-feature-guide="prompt-detail-media"
+              ref={detailImageAreaRef}
+            >
               <div
                 className={`relative inline-flex cursor-zoom-in items-center justify-center overflow-hidden ${
                   useFixedDetailImageBox
@@ -1739,7 +1714,7 @@ export function PromptDetailDialog({
                 {item.imageFileName ? (
                   isCurrentMediaVideo ? (
                     <video
-                      aria-label={titleDraft || "提示词效果视频"}
+                      aria-label={titleDraft || t("提示词效果视频")}
                        className={`block object-contain shadow-image ${
                          isCurrentMediaLandscape ? "h-auto w-full max-h-[62vh] max-w-full" : "max-h-[78vh] max-w-full"
                        } ${
@@ -1763,7 +1738,7 @@ export function PromptDetailDialog({
                     />
                   ) : (
                     <NsfwImage
-                      alt={titleDraft || "提示词效果图"}
+                      alt={titleDraft || t("提示词效果图")}
                       blurNsfwImages={blurNsfwImages}
                       className={useFixedDetailImageBox ? "h-full w-full" : "max-h-[80vh] max-w-full"}
                       image={item}
@@ -1787,9 +1762,9 @@ export function PromptDetailDialog({
                 <div className="group/warning-badge absolute right-2 top-2 z-10 flex size-3 items-center justify-center rounded-full bg-warning/65">
                   <AlertCircle size={10} className="text-primary-foreground" />
                   <div className="pointer-events-none invisible absolute right-0 top-4 z-50 w-44 rounded-lg border border-border bg-tooltip px-3 py-2 text-xs text-tooltip-foreground opacity-0 shadow-elevated transition-all duration-200 group-hover/warning-badge:visible group-hover/warning-badge:opacity-100">
-                    <div className="mb-0.5 font-semibold text-warning">文件体积过大</div>
+                    <div className="mb-0.5 font-semibold text-warning">{t("文件体积过大")}</div>
                     <div className="leading-relaxed">
-                      当前效果图 {formatFileSize(imageFileSize)}，建议右键"图像压缩"按钮调整参数后压缩，以优化文件大小。
+                      {t("当前效果图 {size}，建议右键“图像压缩”按钮调整参数后压缩，以优化文件大小。", { size: formatFileSize(imageFileSize) })}
                     </div>
                   </div>
                 </div>
@@ -1821,8 +1796,8 @@ export function PromptDetailDialog({
 
             {canNavigate ? (
               <>
-                <ImageNavButton ariaLabel="上一张效果图" direction="left" onClick={onNavigatePrevious} />
-                <ImageNavButton ariaLabel="下一张效果图" direction="right" onClick={onNavigateNext} />
+                <ImageNavButton ariaLabel={t("上一张效果图")} direction="left" onClick={onNavigatePrevious} />
+                <ImageNavButton ariaLabel={t("下一张效果图")} direction="right" onClick={onNavigateNext} />
               </>
             ) : null}
           </div>
@@ -1835,6 +1810,7 @@ export function PromptDetailDialog({
                   : "relative mt-1 w-full"
                 : "absolute inset-x-4 bottom-6 min-h-24 min-[900px]:inset-x-6"
             }`}
+            data-feature-guide="prompt-detail-media-actions"
           >
             <div
               className={`flex min-h-10 w-full items-center justify-between gap-3 rounded-full border border-border bg-panel/90 px-3 py-2 shadow-elevated backdrop-blur transition-all duration-200 group-hover/image-actions:-translate-y-1 group-hover/image-actions:opacity-100 group-focus-within/image-actions:-translate-y-1 group-focus-within/image-actions:opacity-100 ${
@@ -1853,30 +1829,32 @@ export function PromptDetailDialog({
                   />
                 ) : item.author && !isAuthorHidden ? (
                   <AuthorChip
+                    onSync={accountUser ? () => setSyncWorkOpen(true) : undefined}
                     author={item.author}
                     authorAvatarUrl={item.authorAvatarUrl}
                     authorUrl={item.authorUrl}
                     sourceUrl={item.sourceUrl}
-                    onEdit={() => setIsAuthorEditing(true)}
+                    onEdit={() => item.accountOwnerUid ? setSyncWorkOpen(true) : setIsAuthorEditing(true)}
                     onHide={() => setIsAuthorHidden(true)}
                   />
                 ) : null}
+                {syncWorkOpen ? <SyncWorksDialog itemIds={libraryItems.filter(entry => getPromptImageGroupKey(toPromptCardData(entry)) === getPromptImageGroupKey(item)).map(entry => entry.id)} onClose={() => setSyncWorkOpen(false)} /> : null}
                 <IconTooltipButton
-                  ariaLabel={isCurrentMediaVideo ? "视频不支持传送到画布" : "传送到画布"}
+                  ariaLabel={t("传送到画布")}
                   disabled={isBusy || !item.imageFileName || isCurrentMediaVideo}
                   icon={<Send size={14} />}
-                  label={isCurrentMediaVideo ? "视频不支持传送到画布" : "传送到画布"}
+                  label={t("传送到画布")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
                   variant="subtle"
-                  onClick={() => onPushToCanvas(promptDraft, negativePromptDraft)}
+                  onClick={() => void onPushToCanvas(promptDraft, negativePromptDraft)}
                 />
                 <IconTooltipButton
-                  ariaLabel={isCurrentMediaVideo ? "视频不支持复制到剪贴板" : "复制图片到剪贴板"}
+                  ariaLabel={t("复制图片到剪贴板")}
                   disabled={isBusy || !item.imageFileName || isCurrentMediaVideo}
                   icon={<Copy size={14} />}
-                  label={isCurrentMediaVideo ? "视频不支持复制到剪贴板" : "复制图片到剪贴板"}
+                  label={t("复制图片")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -1884,10 +1862,10 @@ export function PromptDetailDialog({
                   onClick={onCopyImage}
                 />
                 <IconTooltipButton
-                  ariaLabel={isCurrentMediaVideo ? "导出视频到本地" : "导出图片到本地"}
+                   ariaLabel={t("导出到本地")}
                   disabled={isBusy || !item.imageFileName}
                   icon={<Download size={14} />}
-                  label={isCurrentMediaVideo ? "导出视频到本地" : "导出图片到本地"}
+                   label={t("导出到本地")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -1896,10 +1874,10 @@ export function PromptDetailDialog({
                 />
                 <div className="relative" ref={compressSettingsRef}>
                   <IconTooltipButton
-                    ariaLabel={isCurrentMediaVideo ? "视频不支持压缩" : "图像压缩（右键设置参数）"}
+                    ariaLabel={isCurrentMediaVideo ? t("视频不支持压缩") : t("图像压缩")}
                     disabled={isBusy || !item.imageFileName || isCurrentMediaVideo || isCompressingImage}
                     icon={isCompressingImage ? <Loader2 size={14} className="animate-spin" /> : <Minimize2 size={14} />}
-                    label={isCompressingImage ? "压缩中…" : isCurrentMediaVideo ? "视频不支持压缩" : "图像压缩"}
+                    label={isCompressingImage ? t("压缩中…") : isCurrentMediaVideo ? t("视频不支持压缩") : t("图像压缩")}
                     size="md"
                     tooltipAlign="center"
                     tooltipPlacement="below"
@@ -1913,10 +1891,10 @@ export function PromptDetailDialog({
                   />
                   {compressSettingsOpen ? (
                     <div className="absolute bottom-full left-0 z-50 mb-2 w-56 rounded-xl border border-border bg-panel p-3 shadow-elevated">
-                      <div className="mb-2 text-xs font-semibold text-foreground">压缩参数</div>
+                      <div className="mb-2 text-xs font-semibold text-foreground">{t("压缩参数")}</div>
                       <div className="mb-3">
                         <div className="mb-1 flex items-center justify-between text-xs text-muted">
-                          <span>压缩质量</span>
+                          <span>{t("压缩质量")}</span>
                           <span className="font-medium text-foreground">{compressQuality}</span>
                         </div>
                         <input
@@ -1929,7 +1907,7 @@ export function PromptDetailDialog({
                         />
                       </div>
                       <div className="mb-3">
-                        <div className="mb-1 text-xs text-muted">输出格式</div>
+                        <div className="mb-1 text-xs text-muted">{t("输出格式")}</div>
                         <div className="flex gap-2">
                           <button
                             className={`flex-1 rounded-lg border px-2 py-1 text-xs transition-colors ${
@@ -1940,7 +1918,7 @@ export function PromptDetailDialog({
                             type="button"
                             onClick={() => setCompressFormat("keep")}
                           >
-                            保持原格式
+                            {t("保持原格式")}
                           </button>
                           <button
                             className={`flex-1 rounded-lg border px-2 py-1 text-xs transition-colors ${
@@ -1956,10 +1934,10 @@ export function PromptDetailDialog({
                         </div>
                       </div>
                       <div className="mb-3">
-                        <div className="mb-1 text-xs text-muted">尺寸限制</div>
+                        <div className="mb-1 text-xs text-muted">{t("尺寸限制")}</div>
                         <div className="flex flex-wrap gap-1.5">
                           {[
-                            { label: "不限", value: 0 },
+                         { label: t("不限"), value: 0 },
                             { label: "4096px", value: 4096 },
                             { label: "2048px", value: 2048 },
                             { label: "1024px", value: 1024 },
@@ -1984,7 +1962,7 @@ export function PromptDetailDialog({
                         type="button"
                         onClick={handleCompressCurrentImage}
                       >
-                        开始压缩
+                        {t("开始压缩")}
                       </button>
                     </div>
                   ) : null}
@@ -1995,9 +1973,9 @@ export function PromptDetailDialog({
                 {shouldShowNsfwRevealAction ? (
                   <IconTooltipButton
                     active={isCurrentImageRevealed}
-                    ariaLabel={isCurrentImageRevealed ? "恢复模糊" : "显示图像"}
+                    ariaLabel={isCurrentImageRevealed ? t("恢复模糊") : t("显示图像")}
                     icon={isCurrentImageRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
-                    label={isCurrentImageRevealed ? "恢复模糊" : "显示图像"}
+                    label={isCurrentImageRevealed ? t("恢复模糊") : t("显示图像")}
                     pressed={isCurrentImageRevealed}
                     size="md"
                     tooltipAlign="center"
@@ -2017,10 +1995,10 @@ export function PromptDetailDialog({
                   />
                 ) : null}
                 <IconTooltipButton
-                  ariaLabel="本地导入"
+                  ariaLabel={t("本地导入")}
                   disabled={isBusy}
                   icon={<ImagePlus size={14} />}
-                  label="本地导入"
+                  label={t("本地导入")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2028,10 +2006,10 @@ export function PromptDetailDialog({
                   onClick={onImportImages}
                 />
                 <IconTooltipButton
-                  ariaLabel="剪贴板"
+                  ariaLabel={t("剪贴板")}
                   disabled={isBusy}
                   icon={<Clipboard size={14} />}
-                  label="剪贴板"
+                  label={t("剪贴板")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2040,22 +2018,22 @@ export function PromptDetailDialog({
                 />
                 <IconTooltipButton
                   active={isImageLiked}
-                  ariaLabel={isImageLiked ? "取消喜爱图片" : "喜爱"}
+                  ariaLabel={isImageLiked ? t("取消喜爱图片") : t("喜爱图片")}
                   disabled={isBusy}
                   icon={<Heart size={14} fill={isImageLiked ? "currentColor" : "none"} />}
-                  label={isImageLiked ? "取消喜爱图片" : "喜爱"}
+                  label={isImageLiked ? t("取消喜爱图片") : t("喜爱图片")}
                   pressed={isImageLiked}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
-                  variant="danger"
+                  variant="subtle"
                   onClick={onToggleImageLike}
                 />
                 <IconTooltipButton
-                  ariaLabel="删除"
+                  ariaLabel={t("删除")}
                   disabled={isBusy}
                   icon={<Trash2 size={14} />}
-                  label="删除"
+                  label={t("删除")}
                   size="md"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2070,11 +2048,11 @@ export function PromptDetailDialog({
                 {isDeleteConfirmOpen ? (
                   <ConfirmBubble
                     className="bottom-full right-0 mb-3"
-                    confirmLabel="确认删除"
-                    description="将删除这张图和对应提示词，无法撤销。"
+                    confirmLabel={t("确认删除")}
+                    description={t("将删除这张图和对应提示词，无法撤销。")}
                     icon={<Trash2 size={15} />}
                     isBusy={isBusy}
-                    title="删除这张效果图？"
+                    title={t("删除这张效果图？")}
                     onCancel={() => setIsDeleteConfirmOpen(false)}
                     onConfirm={() => {
                       setIsDeleteConfirmOpen(false);
@@ -2087,17 +2065,17 @@ export function PromptDetailDialog({
           </div>
         </div>
 
-        <aside className="flex min-h-0 min-w-0 flex-col bg-panel px-4 py-3 min-[720px]:px-5 min-[720px]:py-4 min-[900px]:max-h-[min(94dvh,100%)] min-[900px]:px-7 min-[900px]:py-5">
+          <aside className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto bg-panel px-4 py-3 min-[720px]:px-5 min-[720px]:py-4 min-[900px]:max-h-[min(94dvh,100%)] min-[900px]:px-7 min-[900px]:py-5">
           <header
-            className={`group/detail-card relative shrink-0 overflow-hidden rounded-xl border bg-panel shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-image focus-within:-translate-y-1 focus-within:shadow-image ${detailInfoCardTone.article}`}
+            className={`group/detail-card relative max-[899px]:max-h-[min(28dvh,16rem)] max-[899px]:overflow-y-auto shrink-0 overflow-hidden rounded-xl border bg-panel shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-image focus-within:-translate-y-1 focus-within:shadow-image ${detailInfoCardTone.article}`}
           >
             <div className={`flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2 ${detailInfoCardTone.header}`}>
               <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold text-current">
                 <FileText size={15} />
-                <span className="truncate">素材详情</span>
+                <span className="truncate">{t("素材详情")}</span>
               </span>
               <button
-                aria-label="关闭详情"
+                aria-label={t("关闭详情")}
                 className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-current/20 bg-panel/80 text-current outline-none transition-all hover:-translate-y-0.5 hover:bg-panel focus-visible:ring-2 focus-visible:ring-primary/25"
                 type="button"
                 onClick={onClose}
@@ -2106,7 +2084,7 @@ export function PromptDetailDialog({
               </button>
             </div>
             <div className="grid gap-3 px-3 py-3">
-            <div className="flex min-w-0 flex-col gap-2">
+             <div className="flex min-w-0 flex-col gap-2" data-feature-guide="prompt-detail-header">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <span className={`inline-flex w-fit rounded-md border px-2 py-0.5 text-[11px] font-semibold ${detailInfoCardTone.tag}`}>
                   {sourceLabel}
@@ -2115,14 +2093,14 @@ export function PromptDetailDialog({
                   <button
                     aria-expanded={isModelMenuOpen}
                     aria-haspopup="listbox"
-                    aria-label={`切换模型：${modelLabel ?? "未设置模型"}`}
+                     aria-label={t("切换模型：{model}", { model: modelLabel ?? t("未设置模型") })}
                     className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
                     ref={modelButtonRef}
-                    title="切换模型"
+                    title={t("切换模型")}
                     type="button"
                     onClick={() => setIsModelMenuOpen((current) => !current)}
                   >
-                    <span className="min-w-0 truncate">模型：{modelLabel ?? "未设置模型"}</span>
+                    <span className="min-w-0 truncate">{t("模型：{model}", { model: modelLabel ?? t("未设置模型") })}</span>
                     <ChevronDown size={11} />
                   </button>
                   {isModelMenuOpen ? (
@@ -2144,7 +2122,7 @@ export function PromptDetailDialog({
                 <PromptTypeSwitch value={savedPromptType} onChange={commitPromptType} />
                 {item.sourceUrl ? (
                   <a
-                    aria-label={`打开来源链接：${formatCompactUrl(item.sourceUrl)}`}
+                 aria-label={`${t("打开来源")}: ${formatCompactUrl(item.sourceUrl)}`}
                     className="inline-flex max-w-[220px] items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-muted transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
                     href={item.sourceUrl}
                     rel="noreferrer"
@@ -2158,7 +2136,7 @@ export function PromptDetailDialog({
               </div>
 
               <input
-                aria-label="编辑标题"
+                 aria-label={t("编辑标题")}
                 className="w-full rounded-md border border-transparent bg-transparent px-0 py-1 text-2xl font-semibold leading-tight text-foreground outline-none transition-colors focus:border-border focus:bg-background focus:px-3 focus:ring-2 focus:ring-primary/20"
                 value={titleDraft}
                 onBlur={commitTitle}
@@ -2179,13 +2157,19 @@ export function PromptDetailDialog({
                 onInstalled={() => setModuleNoticeText("")}
               />
             ) : null}
+            {analysisNoticeText ? (
+              <p className="mt-3 rounded-md border border-border bg-background px-3 py-2 text-xs leading-5 text-muted">
+                {analysisNoticeText}
+              </p>
+            ) : null}
 
             {!isPromptEditing ? (
               <div className="mt-4 grid gap-3">
-                <div className="grid gap-1.5">
+                 <div className="grid gap-1.5" data-feature-guide="prompt-detail-category">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-muted">分类</span>
+                    <span className="text-xs font-medium text-muted">{t("分类")}</span>
                     <IconTooltipButton
+                      data-feature-guide="prompt-detail-ai-quick-switch"
                       data-ai-profile-trigger="true"
                       disabled={isAnalyzing || isBusy}
                       icon={<Sparkles size={14} />}
@@ -2194,8 +2178,8 @@ export function PromptDetailDialog({
                           "category",
                           resolveEffectiveRecognitionSource(recognitionSourceByKind.category),
                         )
-                          ? "识别中"
-                          : "识别分类"
+                          ? t("识别中")
+                          : t("识别分类")
                       }
                       size="sm"
                       tooltipAlign="center"
@@ -2227,7 +2211,7 @@ export function PromptDetailDialog({
                           isEditing={editingChip?.kind === "category" && isSameLabel(editingChip.originalValue, category)}
                           key={category}
                           label={category}
-                          removeLabel={`取消分类 ${category}`}
+                          removeLabel={`${t("取消分类")} ${category}`}
                           onCancelEdit={() => setEditingChip(null)}
                           onCommitEdit={(nextValue) => renameCategoryChip(category, nextValue)}
                           onEditValueChange={(value) =>
@@ -2241,16 +2225,16 @@ export function PromptDetailDialog({
                       ))
                     ) : (
                       <span className="inline-flex min-h-6 items-center rounded-full border border-border bg-background px-2 text-[11px] leading-5 text-muted">
-                        未分类
+                        {t("未分类")}
                       </span>
                     )}
                     <label
                       className="group inline-flex min-h-6 max-w-full items-center gap-0 rounded-full border border-border bg-background px-2 text-[11px] leading-5 text-muted transition-transform duration-150 hover:scale-[1.03] hover:bg-primary-soft hover:text-foreground focus-within:gap-1 focus-within:scale-[1.03]"
-                      title="添加分类"
+                      title={t("添加分类")}
                     >
                       <Plus size={12} />
                       <input
-                        aria-label="添加分类"
+                        aria-label={t("添加分类")}
                         className={`min-w-0 bg-transparent text-[11px] text-foreground outline-none transition-[width] duration-150 ${
                           categoryDraft ? "w-16" : "w-0 focus:w-16"
                         }`}
@@ -2268,10 +2252,11 @@ export function PromptDetailDialog({
                   </div>
                 </div>
 
-                <div className="grid gap-2">
+                 <div className="grid gap-2" data-feature-guide="prompt-detail-tags">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-muted">标签</span>
+                    <span className="text-xs font-medium text-muted">{t("标签")}</span>
                     <IconTooltipButton
+                      data-feature-guide="prompt-detail-ai-quick-switch"
                       data-ai-profile-trigger="true"
                       disabled={isAnalyzing || isBusy}
                       icon={<Sparkles size={14} />}
@@ -2280,8 +2265,8 @@ export function PromptDetailDialog({
                           "tags",
                           resolveEffectiveRecognitionSource(recognitionSourceByKind.tags),
                         )
-                          ? "识别中"
-                          : "识别标签"
+                          ? t("识别中")
+                          : t("识别标签")
                       }
                       size="sm"
                       tooltipAlign="center"
@@ -2305,7 +2290,7 @@ export function PromptDetailDialog({
                           editingValue={editingChip?.kind === "tag" && editingChip.originalValue === tag ? editingChip.value : ""}
                           isEditing={editingChip?.kind === "tag" && editingChip.originalValue === tag}
                           label={tag}
-                          removeLabel={`删除标签 ${tag}`}
+                          removeLabel={`${t("删除标签")} ${tag}`}
                           onCancelEdit={() => setEditingChip(null)}
                           onCommitEdit={(nextValue) => renameTag(tag, nextValue)}
                           onEditValueChange={(value) => setEditingChip({ kind: "tag", originalValue: tag, value })}
@@ -2315,16 +2300,16 @@ export function PromptDetailDialog({
                       ))
                     ) : (
                       <span className="rounded-full border border-border bg-background px-2.5 py-0.5 text-[11px] text-muted">
-                        暂无标签
+                        {t("暂无标签")}
                       </span>
                     )}
                     <label
                       className="group inline-flex min-h-6 max-w-full items-center gap-0 rounded-full border border-border bg-background px-2 text-[11px] leading-5 text-muted transition-transform duration-150 hover:scale-[1.03] hover:bg-primary-soft hover:text-foreground focus-within:gap-1 focus-within:scale-[1.03]"
-                      title="添加标签"
+                      title={t("添加标签")}
                     >
                       <Plus size={12} />
                       <input
-                        aria-label="添加标签"
+                        aria-label={t("添加标签")}
                         className={`min-w-0 bg-transparent text-[11px] text-foreground outline-none transition-[width] duration-150 ${
                           newTagDraft ? "w-20" : "w-0 focus:w-20"
                         }`}
@@ -2347,20 +2332,22 @@ export function PromptDetailDialog({
           </header>
 
           <section
-            className={`group/detail-card relative mt-4 flex min-h-[460px] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-panel shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-image focus-within:-translate-y-1 focus-within:shadow-image ${detailPromptCardTone.article}`}
+            className={`group/detail-card relative mt-4 flex min-h-[clamp(10rem,24dvh,20rem)] min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-panel shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-image focus-within:-translate-y-1 focus-within:shadow-image min-[900px]:min-h-0 ${detailPromptCardTone.article}`}
+            data-feature-guide="prompt-detail-prompt"
           >
             <div className={`flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2 ${detailPromptCardTone.header}`}>
               <span className="inline-flex items-center gap-2 text-sm font-semibold text-current">
                 <Tags size={15} />
-                提示词
+                {t("提示词")}
               </span>
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2" data-feature-guide="prompt-detail-prompt-actions">
                 {!isCurrentMediaVideo ? (
                   <div className="relative">
                     <IconTooltipButton
-                      ariaLabel="添加参考图"
+                      data-feature-guide="prompt-detail-reference-image"
+                      ariaLabel={t("添加参考图")}
                       icon={<ImagePlus size={14} />}
-                      label="添加参考图"
+                      label={t("添加参考图")}
                       size="sm"
                       tooltipAlign="center"
                       tooltipPlacement="below"
@@ -2375,10 +2362,10 @@ export function PromptDetailDialog({
                 />
                 <IconTooltipButton
                   data-ai-profile-trigger="true"
-                  ariaLabel={isTranslatingPrompt ? "翻译中" : `翻译为${getPromptLanguageLabel(targetTranslationLanguage)}`}
+                   ariaLabel={isTranslatingPrompt ? t("翻译中") : t("翻译为{language}", { language: t(getPromptLanguageLabel(targetTranslationLanguage)) })}
                   disabled={isAnalyzing || isOptimizingPrompt || isTranslatingPrompt || isReversingImagePrompt || isBusy}
                   icon={<Languages size={14} />}
-                  label={isTranslatingPrompt ? "翻译中" : `翻译为${getPromptLanguageLabel(targetTranslationLanguage)}`}
+                   label={isTranslatingPrompt ? t("翻译中") : t("翻译为{language}", { language: t(getPromptLanguageLabel(targetTranslationLanguage)) })}
                   size="sm"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2389,7 +2376,7 @@ export function PromptDetailDialog({
                 <IconTooltipButton
                   active={isPromptEditing}
                   icon={isPromptEditing ? <Check size={14} /> : <Pencil size={14} />}
-                  label={isPromptEditing ? "完成" : "编辑"}
+                  label={isPromptEditing ? t("完成") : t("编辑")}
                   pressed={isPromptEditing}
                   size="sm"
                   tooltipAlign="center"
@@ -2408,10 +2395,10 @@ export function PromptDetailDialog({
                   }}
                 />
                 <IconTooltipButton
-                  ariaLabel="撤回上一步"
+                  ariaLabel={t("撤销")}
                   disabled={isBusy || isViewingTranslatedPrompt || !canUndoPromptChange}
                   icon={<Undo2 size={14} />}
-                  label="撤回上一步"
+                  label={t("撤销")}
                   size="sm"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2421,10 +2408,10 @@ export function PromptDetailDialog({
                 />
                 <IconTooltipButton
                   data-ai-profile-trigger="true"
-                  ariaLabel={isOptimizingPrompt ? "优化中" : "优化提示词"}
+                  ariaLabel={isOptimizingPrompt ? t("优化中") : t("优化提示词")}
                   disabled={isViewingTranslatedPrompt || isAnalyzing || isOptimizingPrompt || isTranslatingPrompt || isReversingImagePrompt || isBusy}
                   icon={<WandSparkles size={14} />}
-                  label={isOptimizingPrompt ? "优化中" : "优化提示词"}
+                  label={isOptimizingPrompt ? t("优化中") : t("优化提示词")}
                   size="sm"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2434,10 +2421,10 @@ export function PromptDetailDialog({
                 />
                 <IconTooltipButton
                   data-ai-profile-trigger="true"
-                  ariaLabel={isReversingImagePrompt ? "反推中" : "图像反推"}
+                  ariaLabel={isReversingImagePrompt ? t("反推中") : t("图像反推")}
                   disabled={isViewingTranslatedPrompt || isAnalyzing || isOptimizingPrompt || isTranslatingPrompt || isReversingImagePrompt || isBusy}
                   icon={<ScanSearch size={14} />}
-                  label={isReversingImagePrompt ? "反推中" : "图像反推"}
+                  label={isReversingImagePrompt ? t("反推中") : t("图像反推")}
                   size="sm"
                   tooltipAlign="center"
                   tooltipPlacement="below"
@@ -2445,19 +2432,7 @@ export function PromptDetailDialog({
                   onContextMenu={(event) => openAiProfileMenu(event, "image-reverse")}
                   onClick={() => void reverseCurrentImagePrompt()}
                 />
-                <IconTooltipButton
-                  ariaLabel="清除胶囊"
-                  disabled={isBusy || isViewingTranslatedPrompt || !hasPromptCapsules}
-                  icon={<Eraser size={14} />}
-                  label="清除胶囊"
-                  size="sm"
-                  tooltipAlign="center"
-                  tooltipPlacement="below"
-                  variant="panel"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={clearPromptCapsules}
-                />
-                <span className="text-xs text-current/70">{copyPromptText.length} 字符</span>
+                 <span className="text-xs text-current/70">{copyPromptText.length} {t("字符")}</span>
               </div>
             </div>
 
@@ -2471,11 +2446,11 @@ export function PromptDetailDialog({
                 />
               ) : null}
               <div
-                className={`${isPromptEditing ? "min-h-[520px]" : "min-h-[420px]"} h-full overflow-y-auto bg-background p-3`}
+                className="h-full min-h-0 overflow-y-auto bg-background p-3"
               >
               {isPromptEditing ? (
                 <div
-                  className="grid gap-4"
+                  className="grid min-h-0 gap-4"
                   onBlur={(event) => {
                     const nextFocusTarget = event.relatedTarget;
 
@@ -2490,11 +2465,11 @@ export function PromptDetailDialog({
                   }}
                 >
                   <label className="grid gap-2 text-xs font-medium text-muted">
-                    正向提示词
+                    {t("正向提示词")}
                     <TextArea
                       ref={promptTextAreaRef}
                       className={`${
-                        hasActiveNegativePromptDraft ? "min-h-[500px]" : "min-h-[620px]"
+                        "h-[clamp(10rem,28dvh,24rem)] min-h-0 max-h-[min(38dvh,24rem)]"
                       } border-transparent bg-transparent p-0 font-mono text-[11px] leading-5 [overflow-wrap:anywhere] focus:border-transparent focus:ring-0`}
                       resizeMode="vertical"
                       value={activePromptDraft}
@@ -2508,20 +2483,20 @@ export function PromptDetailDialog({
                       }`}
                     >
                       <span className="flex items-center justify-between gap-2">
-                        <span>负向提示词</span>
+                        <span>{t("负向提示词")}</span>
                         <button
                           className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground"
                           type="button"
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => setIsNegativePromptVisible((current) => !current)}
                         >
-                          {isNegativePromptVisible ? "隐藏" : "查看"}
+                          {isNegativePromptVisible ? t("隐藏") : t("查看")}
                         </button>
                       </span>
                       {isNegativePromptVisible ? (
                         <TextArea
-                          aria-label="编辑负向提示词"
-                          className="min-h-[160px] border-transparent bg-transparent p-0 font-mono text-[11px] leading-5 [overflow-wrap:anywhere] focus:border-transparent focus:ring-0"
+                           aria-label={t("编辑负向提示词")}
+                          className="h-[clamp(7rem,16dvh,12rem)] min-h-0 max-h-[min(22dvh,12rem)] border-transparent bg-transparent p-0 font-mono text-[11px] leading-5 [overflow-wrap:anywhere] focus:border-transparent focus:ring-0"
                           resizeMode="vertical"
                           value={activeNegativePromptDraft}
                           onChange={(event) => updateActiveNegativePromptDraft(event.target.value)}
@@ -2565,10 +2540,11 @@ export function PromptDetailDialog({
             ) : null}
           </section>
 
-          <footer className="mt-4 grid shrink-0 grid-cols-3 gap-3 bg-panel pt-3">
+          <footer className="mt-4 grid shrink-0 grid-cols-3 sticky bottom-0 z-10 gap-2 bg-panel pt-2 min-[560px]:gap-3 min-[560px]:pt-3" data-feature-guide="prompt-detail-actions">
             <Button
-              className="h-12 rounded-md bg-panel"
+              className="h-10 min-w-0 rounded-md px-1.5 text-xs min-[560px]:h-12 min-[560px]:px-3 min-[560px]:text-sm"
               icon={<Share2 size={17} />}
+              title={t("分享")}
               onClick={() => {
                 if (imageCount > 1 && onShareGroup) {
                   onShareGroup();
@@ -2577,35 +2553,43 @@ export function PromptDetailDialog({
                 onShareText?.(shareText);
               }}
             >
-              {imageCount > 1 && onShareGroup ? "分享本组" : "分享"}
+              <span className="min-w-0 truncate">{imageCount > 1 && onShareGroup ? t("分享本组") : t("分享")}</span>
             </Button>
             <Button
-              className="h-12 rounded-md border-progress bg-progress text-primary-foreground hover:bg-progress/90"
+              className="h-10 min-w-0 rounded-md px-1.5 text-xs min-[560px]:h-12 min-[560px]:px-3 min-[560px]:text-sm border-progress bg-progress text-primary-foreground hover:bg-progress/90"
               icon={<Copy size={17} />}
               variant="primary"
+              title={t("复制提示词")}
               onClick={() => onCopyText(copyPromptText)}
             >
-              复制提示词
+              <span className="min-w-0 truncate">
+                <span className="min-[560px]:hidden">{t("复制")}</span>
+                <span className="hidden min-[560px]:inline">{t("复制提示词")}</span>
+              </span>
             </Button>
             <Button
-              className="h-12 rounded-md"
+              className="h-10 min-w-0 rounded-md px-1.5 text-xs min-[560px]:h-12 min-[560px]:px-3 min-[560px]:text-sm"
               icon={<Send size={17} />}
+              title={t("传送到画布")}
               onClick={() => onPushPromptToCanvas(promptDraft, negativePromptDraft)}
             >
-              传送到画布
+              <span className="min-w-0 truncate">
+                <span className="min-[560px]:hidden">{t("传送")}</span>
+                <span className="hidden min-[560px]:inline">{t("传送到画布")}</span>
+              </span>
             </Button>
           </footer>
         </aside>
 
         {activeAiProfileMenu ? (
           <AiProfileQuickSwitchMenu
-            actionLabel={getAiProfileActionLabel(activeAiProfileMenu.action)}
+            actionLabel={t(getAiProfileActionLabel(activeAiProfileMenu.action))}
             activeProfileId={aiSettings.activeProfileId}
             capability={getAiProfileActionCapability(activeAiProfileMenu.action)}
             allowImageSource={!isCurrentMediaVideoFile}
             menuRef={aiProfileMenuRef}
             position={activeAiProfileMenu.position}
-            profiles={aiSettings.profiles}
+            profiles={getSelectableAiProfiles(aiSettings, activeAiProfileMenu.action)}
             recognitionSource={
               activeAiProfileMenu.recognitionKind
                 ? resolveEffectiveRecognitionSource(recognitionSourceByKind[activeAiProfileMenu.recognitionKind])
@@ -2655,9 +2639,10 @@ type PromptLanguageSwitchProps = {
 };
 
 function PromptLanguageSwitch({ value, onChange }: PromptLanguageSwitchProps) {
+  const { t } = useLocale();
   const options: Array<{ label: string; value: PromptLanguageVersion }> = [
-    { label: "中文", value: "zh" },
-    { label: "英文", value: "en" },
+    { label: t("中文"), value: "zh" },
+    { label: t("英文"), value: "en" },
   ];
 
   return (
@@ -2682,6 +2667,7 @@ function PromptLanguageSwitch({ value, onChange }: PromptLanguageSwitchProps) {
 }
 
 function PromptTypeSwitch({ value, onChange }: PromptTypeSwitchProps) {
+  const { t } = useLocale();
   const options: Array<{ icon: ReactNode; type: PromptContentType }> = [
     { icon: <ImageIcon size={11} />, type: "image" },
     { icon: <Play size={11} />, type: "video" },
@@ -2689,13 +2675,13 @@ function PromptTypeSwitch({ value, onChange }: PromptTypeSwitchProps) {
 
   return (
     <div
-      aria-label="选择提示词类型"
+      aria-label={t("选择提示词类型")}
       className="inline-flex overflow-hidden rounded-md border border-border bg-background p-0.5"
       role="group"
     >
       {options.map((option) => {
         const active = option.type === value;
-        const label = getPromptTypeLabel(option.type);
+        const label = t(getPromptTypeLabel(option.type));
 
         return (
           <button
@@ -2704,7 +2690,7 @@ function PromptTypeSwitch({ value, onChange }: PromptTypeSwitchProps) {
               active ? "bg-primary-soft text-primary" : "text-muted hover:bg-panel hover:text-foreground"
             }`}
             key={option.type}
-            title={`提示词类型：${label}`}
+            title={t("提示词类型：{label}", { label })}
             type="button"
             onClick={() => onChange(option.type)}
           >
@@ -2720,18 +2706,19 @@ function PromptTypeSwitch({ value, onChange }: PromptTypeSwitchProps) {
 function PromptAnalysisSummary({
   analysis,
 }: PromptAnalysisSummaryProps) {
+  const { t } = useLocale();
   return (
     <div className="border-t border-border px-4 py-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-        <span className="font-medium text-foreground">AI \u5206\u6790\u7ED3\u679C</span>
+        <span className="font-medium text-foreground">{t("AI 分析结果")}</span>
         {analysis.suggestedTags.length > 0 ? (
           <span className="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] text-muted">
-            {analysis.suggestedTags.length} \u4E2A\u5EFA\u8BAE\u6807\u7B7E
+            {t("{count} 个建议标签", { count: analysis.suggestedTags.length })}
           </span>
         ) : null}
         {analysis.suggestedCategories.length > 0 ? (
           <span className="rounded-full border border-border bg-panel px-2 py-0.5 text-[11px] text-muted">
-            {analysis.suggestedCategories.length} \u4E2A\u5EFA\u8BAE\u5206\u7C7B
+            {t("{count} 个建议分类", { count: analysis.suggestedCategories.length })}
           </span>
         ) : null}
       </div>
@@ -2776,6 +2763,7 @@ function AiProfileQuickSwitchMenu({
   onSelectSource,
   onToggleRule,
 }: AiProfileQuickSwitchMenuProps) {
+  const { t } = useLocale();
   const selectableProfiles = profiles.filter((profile) => profile.enabled);
   const [activeBranch, setActiveBranch] = useState<"source" | "model" | "rules" | null>(
     () => (recognitionSource ? "source" : null),
@@ -2790,6 +2778,8 @@ function AiProfileQuickSwitchMenu({
   );
   const activeProvider =
     selectableProfiles.find((profile) => profile.id === activeProviderId) ?? selectableProfiles[0] ?? null;
+  const activeProviderModels =
+    activeProvider?.models.filter((model) => model.capabilities.includes(capability)) ?? [];
   const selectedRuleCount = ruleSelection.rulePresetIds.length;
 
   function handleProviderFocus(profileId: string) {
@@ -2806,11 +2796,11 @@ function AiProfileQuickSwitchMenu({
       <div className="ai-quick-switch__panel ai-quick-switch__panel--root">
         <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 pb-1.5 pt-1">
           <div className="min-w-0">
-            <p className="truncate text-xs font-semibold text-foreground">AI 快速设置</p>
+            <p className="truncate text-xs font-semibold text-foreground">{t("AI 快速设置")}</p>
             <p className="truncate text-[11px] text-muted">{actionLabel}</p>
           </div>
           <button
-            aria-label="关闭 AI 快速设置菜单"
+            aria-label={t("关闭 AI 快速设置菜单")}
             className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
             type="button"
             onClick={onClose}
@@ -2823,17 +2813,17 @@ function AiProfileQuickSwitchMenu({
           {recognitionSource && onSelectSource ? (
             <AiCascadeBranchButton
               active={activeBranch === "source"}
-              detail={getAiRecognitionSourceLabel(recognitionSource)}
+              detail={t(getAiRecognitionSourceLabel(recognitionSource))}
               icon={recognitionSource === "image" ? <ImageIcon size={14} /> : <FileText size={14} />}
-              label="来源"
+              label={t("来源")}
               onActivate={() => setActiveBranch("source")}
             />
           ) : null}
           <AiCascadeBranchButton
             active={activeBranch === "model"}
-            detail={selectedSelection?.modelId ?? "选择服务商"}
+            detail={selectedSelection?.modelId ?? t("选择服务商")}
             icon={<Sparkles size={14} />}
-            label="模型"
+            label={t("模型")}
             onActivate={() => {
               setActiveBranch("model");
               setActiveProviderId(selectedSelection?.profileId ?? activeProviderId);
@@ -2841,9 +2831,9 @@ function AiProfileQuickSwitchMenu({
           />
           <AiCascadeBranchButton
             active={activeBranch === "rules"}
-            detail={selectedRuleCount > 0 ? `${selectedRuleCount} 条已选` : "选择规则"}
+            detail={selectedRuleCount > 0 ? t("{count} 条已选", { count: selectedRuleCount }) : t("选择规则")}
             icon={<FileText size={14} />}
-            label="规则"
+            label={t("规则")}
             onActivate={() => setActiveBranch("rules")}
           />
         </div>
@@ -2852,8 +2842,7 @@ function AiProfileQuickSwitchMenu({
       {activeBranch === "source" && recognitionSource && onSelectSource ? (
         <div className="ai-quick-switch__panel ai-quick-switch__panel--source ai-quick-switch__panel--layer-2">
           <div className="border-b border-border/70 px-2 pb-1.5 pt-1">
-            <p className="text-xs font-semibold text-foreground">选择分析来源</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted">来源决定可选模型和规则</p>
+            <p className="text-xs font-semibold text-foreground">{t("选择分析来源")}</p>
           </div>
           <div className="grid gap-1 pt-1.5">
             {(["image", "prompt"] as const).map((source) => {
@@ -2885,9 +2874,9 @@ function AiProfileQuickSwitchMenu({
                     {selected ? <Check size={11} /> : null}
                   </span>
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{getAiRecognitionSourceLabel(source)}</span>
+                    <span className="block truncate text-sm font-medium">{t(getAiRecognitionSourceLabel(source))}</span>
                     <span className="block truncate text-[11px] text-muted">
-                      {disabled ? "视频仅支持文本分析" : source === "image" ? "图像模型与规则" : "文本模型与规则"}
+                      {disabled ? t("视频仅支持文本分析") : source === "image" ? t("图像模型与规则") : t("文本模型与规则")}
                     </span>
                   </span>
                 </button>
@@ -2900,8 +2889,7 @@ function AiProfileQuickSwitchMenu({
       {activeBranch === "model" ? (
         <div className="ai-quick-switch__panel ai-quick-switch__panel--provider ai-quick-switch__panel--layer-2">
           <div className="border-b border-border/70 px-2 pb-1.5 pt-1">
-            <p className="text-xs font-semibold text-foreground">选择服务商</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted">先选 API，再选模型</p>
+            <p className="text-xs font-semibold text-foreground">{t("选择服务商")}</p>
           </div>
           <div className="grid max-h-[calc(100vh-8rem)] gap-1 overflow-y-auto pt-1.5">
             {selectableProfiles.length > 0 ? (
@@ -2935,9 +2923,9 @@ function AiProfileQuickSwitchMenu({
                       {selectedProvider ? <Check size={11} /> : null}
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate font-medium">{profile.name || "未命名 API"}</span>
+                      <span className="block truncate font-medium">{profile.name || t("未命名 API")}</span>
                       <span className="block truncate text-[11px] text-muted">
-                        {ready ? `${usableModelCount} 个可用模型` : profile.enabled ? "待完善" : "已停用"}
+                        {ready ? t("{count} 个可用模型", { count: usableModelCount }) : profile.enabled ? t("待完善") : t("已停用")}
                       </span>
                     </span>
                     <ChevronRight size={13} />
@@ -2946,7 +2934,7 @@ function AiProfileQuickSwitchMenu({
               })
             ) : (
               <p className="rounded-xl border border-border bg-background px-3 py-6 text-center text-xs text-muted">
-                还没有已启用的 API
+                {t("还没有已启用的 API")}
               </p>
             )}
           </div>
@@ -2956,14 +2944,13 @@ function AiProfileQuickSwitchMenu({
       {activeBranch === "model" && activeProvider ? (
         <div className="ai-quick-switch__panel ai-quick-switch__panel--model ai-quick-switch__panel--layer-3">
           <div className="border-b border-border/70 px-2 pb-1.5 pt-1">
-            <p className="truncate text-xs font-semibold text-foreground">{activeProvider.name || "未命名 API"}</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted">选择具体模型</p>
+            <p className="truncate text-xs font-semibold text-foreground">{activeProvider.name || t("未命名 API")}</p>
           </div>
           <div className="grid max-h-[calc(100vh-8rem)] gap-1 overflow-y-auto pt-1.5">
-            {activeProvider.models.length > 0 ? (
-              activeProvider.models.map((model) => {
-                const selected =
-                  selectedSelection?.profileId === activeProvider.id && selectedSelection.modelId === model.id;
+            {activeProviderModels.length > 0 ? (
+              activeProviderModels.map((model) => {
+                const selected = selectedSelection?.profileId === activeProvider.id &&
+                  selectedSelection.modelId === model.id;
                 const ready = isPublicAiProfileReady(activeProvider) && model.capabilities.includes(capability);
 
                 return (
@@ -2996,7 +2983,7 @@ function AiProfileQuickSwitchMenu({
               })
             ) : (
               <p className="rounded-xl border border-border bg-background px-3 py-6 text-center text-xs text-muted">
-                这个服务商还没有模型
+                {t("这个服务商没有适用的模型")}
               </p>
             )}
           </div>
@@ -3007,9 +2994,9 @@ function AiProfileQuickSwitchMenu({
         <div className="ai-quick-switch__panel ai-quick-switch__panel--rules ai-quick-switch__panel--layer-2">
           <div className="flex items-start justify-between gap-3 border-b border-border/70 px-2 pb-1.5 pt-1">
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-foreground">选择规则</p>
+              <p className="text-xs font-semibold text-foreground">{t("选择规则")}</p>
               <p className="mt-0.5 truncate text-[11px] text-muted">
-                {ruleSelection.isUsingSettings ? "来自模型配置" : "来自快速选择"}
+                {ruleSelection.isUsingSettings ? t("来自模型配置") : t("来自快速选择")}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -3018,14 +3005,14 @@ function AiProfileQuickSwitchMenu({
                 type="button"
                 onClick={onResetRules}
               >
-                恢复
+                {t("恢复")}
               </button>
               <button
                 className="rounded-lg border border-border bg-background px-2 py-0.5 text-[11px] font-medium text-muted transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
                 type="button"
                 onClick={onClearRules}
               >
-                清空
+                {t("清空")}
               </button>
             </div>
           </div>
@@ -3061,7 +3048,7 @@ function AiProfileQuickSwitchMenu({
               })
             ) : (
               <p className="rounded-xl border border-border bg-background px-3 py-6 text-center text-xs text-muted">
-                当前功能还没有可用规则
+                {t("当前功能还没有可用规则")}
               </p>
             )}
           </div>
@@ -3116,20 +3103,21 @@ function PromptTemplatePreview({
   onToggleNegativePrompt,
   prompt,
 }: PromptTemplatePreviewProps) {
+  const { t } = useLocale();
   const hasPrompt = Boolean(prompt.trim());
   const hasNegativePrompt = Boolean(negativePrompt.trim());
 
   if (!hasPrompt && !hasNegativePrompt) {
-    return <p className="text-xs text-muted">暂无提示词详情。</p>;
+    return <p className="text-xs text-muted">{t("暂无提示词详情。")}</p>;
   }
 
   return (
     <div
       className="whitespace-pre-wrap break-words font-mono text-[11px] leading-6 text-foreground [overflow-wrap:anywhere]"
-      title="双击编辑提示词"
+      title={t("双击编辑提示词")}
       onDoubleClick={onDoubleClick}
     >
-      {hasPrompt ? <PromptTemplateSegments text={prompt} /> : null}
+      {hasPrompt ? <span>{prompt}</span> : null}
       {hasNegativePrompt ? (
         <div className={hasPrompt ? "mt-4" : ""}>
           <button
@@ -3141,12 +3129,12 @@ function PromptTemplatePreview({
             }}
             onDoubleClick={(event) => event.stopPropagation()}
           >
-            {isNegativePromptVisible ? "隐藏负向提示词" : "查看负向提示词"}
+            {isNegativePromptVisible ? t("隐藏负向提示词") : t("查看负向提示词")}
           </button>
           {isNegativePromptVisible ? (
             <div className="mt-3 rounded-md border border-border bg-panel px-3 py-3">
-              <span className="font-sans text-xs font-medium text-muted">负向提示词：</span>
-              <PromptTemplateSegments text={negativePrompt} />
+              <span className="font-sans text-xs font-medium text-muted">{t("负向提示词：")}</span>
+              <span>{negativePrompt}</span>
             </div>
           ) : null}
         </div>
@@ -3160,40 +3148,7 @@ function PromptTemplateSegments({
 }: {
   text: string;
 }) {
-  return (
-    <>
-      {parsePromptTemplateSegments(text).map((segment, index) => {
-        if (segment.type !== "parameter") {
-          return <span key={`${segment.text}-${index}`}>{segment.text}</span>;
-        }
-
-        const sectionKey = resolvePromptSectionKeyForValue(segment.variable, segment.value);
-
-        if (!sectionKey) {
-          return <span key={`${segment.source}-${index}`}>{resolvePromptTemplateText(segment.source)}</span>;
-        }
-
-        const capsuleVariable = promptSectionMeta[sectionKey].variable;
-        const capsuleValue = normalizePromptSectionValue(sectionKey, segment.value);
-
-        if (!capsuleValue) {
-          return <span key={`${segment.source}-${index}`}>{resolvePromptTemplateText(segment.source)}</span>;
-        }
-
-        const toneClassName = getPromptCapsuleToneClassName(capsuleVariable);
-
-        return (
-          <span
-            className={`mx-0.5 inline-flex max-w-full translate-y-[1px] items-center rounded-full border px-2 py-0.5 font-sans text-[11px] font-semibold leading-5 shadow-elevated ${toneClassName}`}
-            key={`${segment.source}-${index}`}
-            title={`参数 ${capsuleVariable}：${capsuleValue}`}
-          >
-            <span className="max-w-56 truncate">{capsuleValue}</span>
-          </span>
-        );
-      })}
-    </>
-  );
+  return <span>{text}</span>;
 }
 
 type ModelSwitchMenuProps = {
@@ -3223,6 +3178,7 @@ function ModelSwitchMenu({
   onSearchChange,
   onSelect,
 }: ModelSwitchMenuProps) {
+  const { t } = useLocale();
   const customModel = search.trim();
   const canUseCustomModel =
     customModel.length > 0 && !options.some((option) => isSameGenerationModelLabel(option, customModel));
@@ -3269,9 +3225,9 @@ function ModelSwitchMenu({
       ref={menuRef}
     >
       <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
-        <span className="text-xs font-semibold text-foreground">切换模型</span>
+         <span className="text-xs font-semibold text-foreground">{t("切换模型")}</span>
         <button
-          aria-label="关闭模型选择"
+           aria-label={t("关闭模型选择")}
           className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-background hover:text-foreground"
           type="button"
           onClick={onClose}
@@ -3283,9 +3239,9 @@ function ModelSwitchMenu({
       <label className="mx-2 mt-2 flex h-9 items-center gap-2 rounded-xl border border-border bg-background px-2 text-muted focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
         <Search size={14} />
         <input
-          aria-label="搜索模型"
+           aria-label={t("搜索模型")}
           className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted"
-          placeholder="搜索或输入模型"
+           placeholder={t("搜索或输入模型")}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           onKeyDown={(event) => {
@@ -3304,7 +3260,7 @@ function ModelSwitchMenu({
             type="button"
             onClick={() => onSelect(activeModel)}
           >
-            <span className="min-w-0 truncate">当前：{activeModel}</span>
+             <span className="min-w-0 truncate">{t("当前：{model}", { model: activeModel })}</span>
             <Check size={14} />
           </button>
         ) : null}
@@ -3316,7 +3272,7 @@ function ModelSwitchMenu({
             onClick={() => onSelect(customModel)}
           >
             <Plus size={14} />
-            <span className="min-w-0 truncate">使用“{customModel}”</span>
+             <span className="min-w-0 truncate">{t("使用“{model}”", { model: customModel })}</span>
           </button>
         ) : null}
 
@@ -3405,7 +3361,7 @@ function ModelSwitchMenu({
                   onMouseLeave={() => hideDeleteControl(option)}
                 >
                   <button
-                    aria-label={`删除模型：${option}`}
+                     aria-label={t("删除模型：{model}", { model: option })}
                     className={`flex size-7 items-center justify-center rounded-full text-muted transition-opacity hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/25 ${
                       isDeleteReady ? "opacity-100" : "pointer-events-none opacity-0"
                     }`}
@@ -3425,7 +3381,7 @@ function ModelSwitchMenu({
           })
         ) : (
           <p className="rounded-md border border-border bg-background px-3 py-6 text-center text-xs text-muted">
-            没有匹配的内置模型
+             {t("没有匹配的内置模型")}
           </p>
         )}
       </div>
@@ -3436,7 +3392,7 @@ function ModelSwitchMenu({
           type="button"
           onClick={onClear}
         >
-          恢复自动识别
+           {t("恢复自动识别")}
         </button>
       </div>
     </div>
@@ -3468,6 +3424,7 @@ function CompactChip({
   onRemove,
   onStartEdit,
 }: CompactChipProps) {
+  const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -3481,7 +3438,7 @@ function CompactChip({
     return (
       <span className="inline-flex min-h-6 max-w-44 items-center rounded-full border border-primary bg-panel px-2 text-[11px] leading-5 text-foreground shadow-elevated">
         <input
-          aria-label={`编辑 ${label}`}
+          aria-label={t("编辑 {label}", { label })}
           className="min-w-0 flex-1 bg-transparent outline-none"
           ref={inputRef}
           value={editingValue}
@@ -3533,6 +3490,7 @@ function CompactChip({
 }
 
 type AuthorChipProps = {
+  onSync?: () => void;
   author: string;
   authorAvatarUrl: string | null;
   authorUrl: string | null;
@@ -3541,11 +3499,12 @@ type AuthorChipProps = {
   onHide: () => void;
 };
 
-function AuthorChip({ author, authorAvatarUrl, authorUrl, sourceUrl, onEdit, onHide }: AuthorChipProps) {
+function AuthorChip({ author, authorAvatarUrl, authorUrl, sourceUrl, onEdit, onHide, onSync }: AuthorChipProps) {
+  const { t } = useLocale();
   const link = authorUrl ?? sourceUrl;
   const content = (
     <>
-      <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+      <span role={onSync ? "button" : undefined} tabIndex={onSync ? 0 : undefined} title={onSync ? t("是否同步为当前账户的作品？点击确认") : undefined} onClick={event => { if (onSync) { event.preventDefault(); event.stopPropagation(); onSync(); } }} onKeyDown={event => { if (onSync && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onSync(); } }} className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
         <AuthorAvatar
           author={author}
           authorAvatarUrl={authorAvatarUrl}
@@ -3570,7 +3529,7 @@ function AuthorChip({ author, authorAvatarUrl, authorUrl, sourceUrl, onEdit, onH
         <span className="inline-flex min-w-0 items-center gap-2">{content}</span>
       )}
       <button
-        aria-label="编辑作者信息"
+        aria-label={t("编辑作者信息")}
         className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted/60 transition-colors hover:bg-background hover:text-foreground"
         type="button"
         onClick={onEdit}
@@ -3578,7 +3537,7 @@ function AuthorChip({ author, authorAvatarUrl, authorUrl, sourceUrl, onEdit, onH
         <Pencil size={11} />
       </button>
       <button
-        aria-label="本次隐藏作者"
+        aria-label={t("本次隐藏作者")}
         className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted/60 transition-colors hover:bg-background hover:text-foreground"
         type="button"
         onClick={onHide}
@@ -3606,6 +3565,7 @@ function AuthorEditForm({
   onChangeUrl,
   onSubmit,
 }: AuthorEditFormProps) {
+  const { t } = useLocale();
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -3619,24 +3579,24 @@ function AuthorEditForm({
   return (
     <div className="inline-flex max-w-[300px] min-w-0 items-center gap-1.5 rounded-full border border-border bg-panel/95 py-1 pl-2.5 pr-1 shadow-elevated">
       <input
-        aria-label="作者名称"
+        aria-label={t("作者名称")}
         autoFocus
         className="min-w-0 flex-1 bg-transparent text-xs font-semibold text-foreground outline-none placeholder:text-muted/60"
-        placeholder="作者名称"
+        placeholder={t("作者名称")}
         value={authorNameDraft}
         onChange={(event) => onChangeName(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <input
-        aria-label="作者链接"
+        aria-label={t("作者链接")}
         className="min-w-0 flex-1 bg-transparent text-[10px] text-muted outline-none placeholder:text-muted/60"
-        placeholder="作者链接（可选）"
+        placeholder={t("作者链接（可选）")}
         value={authorUrlDraft}
         onChange={(event) => onChangeUrl(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <button
-        aria-label="保存作者信息"
+        aria-label={t("保存作者信息")}
         className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted/60 transition-colors hover:bg-background hover:text-foreground"
         type="button"
         onClick={onSubmit}
@@ -3644,7 +3604,7 @@ function AuthorEditForm({
         <Check size={11} />
       </button>
       <button
-        aria-label="取消编辑作者"
+        aria-label={t("取消编辑作者")}
         className="flex size-5 shrink-0 items-center justify-center rounded-full text-muted/60 transition-colors hover:bg-background hover:text-foreground"
         type="button"
         onClick={onCancel}
@@ -3661,6 +3621,7 @@ function AuthorAvatar({
   authorUrl,
   sourceUrl,
 }: Pick<AuthorChipProps, "author" | "authorAvatarUrl" | "authorUrl" | "sourceUrl">) {
+  const { t } = useLocale();
   const avatarSources = useMemo(
     () => buildAuthorAvatarSources({ authorAvatarUrl, authorUrl, sourceUrl }),
     [authorAvatarUrl, authorUrl, sourceUrl],
@@ -3676,7 +3637,7 @@ function AuthorAvatar({
   if (currentSource) {
     return (
       <img
-        alt={`${author} 的头像`}
+        alt={`${author} ${t("头像")}`}
         className="h-full w-full object-cover"
         src={currentSource}
         onError={() => setSourceIndex((currentIndex) => currentIndex + 1)}
@@ -3684,7 +3645,7 @@ function AuthorAvatar({
     );
   }
 
-  return <AppLogoMark className="size-full rounded-full" iconSize={14} />;
+  return <AppLogoMark className="size-full rounded-full" />;
 }
 
 type ImageNavButtonProps = {
@@ -3714,12 +3675,16 @@ function ImageNavButton({ ariaLabel, direction, onClick }: ImageNavButtonProps) 
   );
 }
 
-function buildPromptTextFromParts(promptValue: string, negativePromptValue: string): string {
+function buildPromptTextFromParts(
+  promptValue: string,
+  negativePromptValue: string,
+  translate: (text: string) => string = (text) => text,
+): string {
   const prompt = resolvePromptTemplateText(normalizePromptText(promptValue));
   const negativePrompt = resolvePromptTemplateText(normalizePromptText(negativePromptValue));
-  const parts = [prompt, negativePrompt ? `负向提示词：${negativePrompt}` : ""].filter(Boolean);
+  const parts = [prompt, negativePrompt ? `${translate("负向提示词：")}${negativePrompt}` : ""].filter(Boolean);
 
-  return parts.join("\n\n") || "暂无提示词详情。";
+  return parts.join("\n\n") || translate("暂无提示词详情。");
 }
 
 function logPromptDetailEvent(event: string, details: Record<string, unknown> = {}): void {
@@ -3727,61 +3692,6 @@ function logPromptDetailEvent(event: string, details: Record<string, unknown> = 
     window.suyanApi.logStartupEvent(event, details);
   } catch {
   }
-}
-
-function promptHasTemplateParameters(text: string): boolean {
-  return parsePromptTemplateSegments(text).some((segment) => segment.type === "parameter");
-}
-
-function buildSavedCapsuleAnalysis(
-  item: PromptCardData,
-  prompt: string,
-  negativePrompt: string,
-  knownCategories: readonly string[],
-): PromptAnalysisResult | null {
-  const promptAnalysis = buildPromptAnalysisFromSavedCapsules(`${prompt}\n${negativePrompt}`, {
-    title: item.title,
-    tags: item.tags,
-    currentCategory: item.category,
-    knownCategories,
-  });
-
-  return promptAnalysis ? omitNegativeAnalysisSections(promptAnalysis) : null;
-}
-
-const PROMPT_CAPSULE_TONE_BY_VARIABLE: Record<string, CapsuleTone> = {
-  aspectratio: "clay",
-  atmosphere: "sand",
-  avoid: "stone",
-  brand: "stone",
-  cameraangle: "lavender",
-  clothing: "sage",
-  color: "rose",
-  colordetail: "rose",
-  composition: "stone",
-  depthoffield: "fog",
-  details: "stone",
-  facemakeup: "rose",
-  famousperson: "lavender",
-  hairaccessory: "sand",
-  handgesture: "clay",
-  handprop: "lavender",
-  imagestyle: "sage",
-  lightreceiving: "stone",
-  lightshadow: "fog",
-  pose: "mist",
-  shotsize: "mist",
-  textcontent: "clay",
-  typography: "mist",
-};
-
-function getPromptCapsuleToneClassName(variable: string): string {
-  const tone = PROMPT_CAPSULE_TONE_BY_VARIABLE[normalizeVariableKey(variable)] ?? "stone";
-  return CAPSULE_TONES[tone].solid;
-}
-
-function normalizeVariableKey(value: string): string {
-  return value.trim().toLowerCase();
 }
 
 function areStringArraysEqual(first: readonly string[], second: readonly string[]): boolean {
@@ -3885,9 +3795,10 @@ function getVisibleModelOptions(
   search: string,
   activeModel: string | null,
   preferences: GenerationModelPreferences,
+  configuredModels: readonly { id: string; label?: string | null; capabilities?: readonly string[] }[],
 ): string[] {
   const query = normalizeModelSearch(search);
-  const builtInOptions = getGenerationModelOptions(preferences);
+  const builtInOptions = getConfiguredGenerationModelOptions(configuredModels, preferences);
   const options = builtInOptions.filter((option) => {
     if (activeModel && isSameGenerationModelLabel(option, activeModel)) {
       return false;
@@ -3956,22 +3867,39 @@ function toAiPayloadSelection(selection: AiModelSelection | undefined): {
   apiProfileId?: string;
   apiModelId?: string;
 } {
-  return selection
-    ? {
-        apiProfileId: selection.profileId,
-        apiModelId: selection.modelId,
-      }
-    : {};
+  if (!selection) {
+    return {};
+  }
+
+  return {
+    apiProfileId: selection.profileId,
+    apiModelId: selection.modelId,
+  };
 }
 
-function hasAiModelSelection(settings: PublicAiProviderSettings, selection: AiModelSelection): boolean {
+function hasAiModelSelection(
+  settings: PublicAiProviderSettings,
+  selection: AiModelSelection,
+  action: AiProfileAction,
+): boolean {
   const profile = settings.profiles.find((item) => item.id === selection.profileId);
 
-  return Boolean(profile?.enabled && profile.models.some((model) => model.id === selection.modelId));
+  return Boolean(
+    profile?.enabled &&
+      profile.models.some(
+        (model) =>
+          model.id === selection.modelId && model.capabilities.includes(getAiProfileActionCapability(action)),
+      ),
+  );
 }
 
-function getSelectableAiProfiles(settings: PublicAiProviderSettings): PublicAiProviderProfile[] {
-  return settings.profiles.filter((profile) => profile.enabled);
+function getSelectableAiProfiles(
+  settings: PublicAiProviderSettings,
+  action?: AiProfileAction,
+): PublicAiProviderProfile[] {
+  return settings.profiles.filter(
+    (profile) => profile.enabled && (!action || profile.models.some((model) => model.capabilities.includes(getAiProfileActionCapability(action)))),
+  );
 }
 
 function isPublicAiProfileReady(profile: PublicAiProviderProfile): boolean {
@@ -3989,6 +3917,7 @@ function AiModelCapabilityIcons({ capabilities }: { capabilities: readonly AiPro
       {capabilities.includes("text") ? <FileText size={13} /> : null}
       {capabilities.includes("vision") ? <ImageIcon size={13} /> : null}
       {capabilities.includes("image-generation") ? <Sparkles size={13} /> : null}
+      {capabilities.includes("video-generation") ? <Film size={13} /> : null}
     </span>
   );
 }
@@ -4023,12 +3952,12 @@ function buildShareText({
   author: string | null;
   tags: string[];
   promptText: string;
-}): string {
+}, translate: (text: string) => string = (text) => text): string {
   const parts = [
-    title.trim() ? `标题：${title.trim()}` : "",
-    author ? `作者：${author}` : "",
-    tags.length > 0 ? `标签：${tags.join("，")}` : "",
-    `提示词：\n${promptText}`,
+    title.trim() ? `${translate("标题：")}${title.trim()}` : "",
+    author ? `${translate("作者：")}${author}` : "",
+    tags.length > 0 ? `${translate("标签：")}${tags.join(translate("，"))}` : "",
+    `${translate("提示词：")}\n${promptText}`,
   ].filter(Boolean);
 
   return parts.join("\n\n");
@@ -4051,6 +3980,7 @@ function ReferenceImageThumb({
   onPreview,
   onDelete,
 }: ReferenceImageThumbProps) {
+  const { t } = useLocale();
   const [isDeleteArmed, setIsDeleteArmed] = useState(false);
   const [isPointerOverDelete, setIsPointerOverDelete] = useState(false);
   const longPressTimerRef = useRef<number | null>(null);
@@ -4132,7 +4062,7 @@ function ReferenceImageThumb({
     >
       <button
         ref={deleteButtonRef}
-        aria-label={`删除参考图 ${index + 1}`}
+        aria-label={t("删除参考图 {index}", { index: index + 1 })}
         className={`absolute -right-1.5 -top-1.5 z-10 flex size-4 items-center justify-center rounded-full border border-border bg-panel text-muted/70 shadow-sm outline-none transition-all duration-150 hover:bg-danger-soft hover:text-danger ${
           isDeleteArmed
             ? "pointer-events-auto scale-100 opacity-100"
@@ -4151,7 +4081,7 @@ function ReferenceImageThumb({
         className={`relative ${sizeClassName} overflow-hidden rounded-lg border bg-background shadow-lg outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary/35 ${
           isDeleteArmed ? "border-danger ring-2 ring-danger/40" : "border-border"
         } ${isDeleting ? "pointer-events-none opacity-50" : ""}`}
-        title={`${isAudio ? "音频" : "参考图"} ${index + 1}（点击试听，长按删除）`}
+        title={`${isAudio ? t("音频") : t("参考图")} ${index + 1}`}
         type="button"
         onClick={handleClick}
         onContextMenu={(event) => event.preventDefault()}
@@ -4166,7 +4096,7 @@ function ReferenceImageThumb({
           </span>
         ) : (
           <img
-            alt={`参考图 ${index + 1}`}
+            alt={`${t("参考图")} ${index + 1}`}
             className="block size-full object-cover"
             decoding="async"
             draggable={false}
@@ -4192,6 +4122,7 @@ function ReferenceImageFloatingStrip({
   onPreview,
   onDelete,
 }: ReferenceImageFloatingStripProps) {
+  const { t } = useLocale();
   if (referenceImages.length === 0) {
     return null;
   }
@@ -4199,7 +4130,7 @@ function ReferenceImageFloatingStrip({
   return (
     <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[62%] flex-col items-start gap-1">
       <span className="rounded-full bg-panel/90 px-2 py-0.5 text-[10px] font-semibold text-muted shadow-sm backdrop-blur">
-        参考图 {referenceImages.length}
+         {t("参考图 {count}", { count: referenceImages.length })}
       </span>
       <div className="flex flex-wrap gap-1.5">
         {referenceImages.map((imageFileName, index) => (
@@ -4224,6 +4155,7 @@ type ReferenceImagePreviewOverlayProps = {
 };
 
 function ReferenceImagePreviewOverlay({ imageFileName, onClose }: ReferenceImagePreviewOverlayProps) {
+  const { t } = useLocale();
   const isVideo = isVideoMediaFile(imageFileName);
   const isAudio = isAudioMediaFile(imageFileName);
 
@@ -4261,11 +4193,11 @@ function ReferenceImagePreviewOverlay({ imageFileName, onClose }: ReferenceImage
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-foreground/70 p-6 backdrop-blur-sm"
+      className="app-window-overlay z-[60] flex items-center justify-center bg-foreground/70 p-6 backdrop-blur-sm"
       onClick={onClose}
     >
       <button
-        aria-label="关闭预览"
+         aria-label={t("关闭预览")}
         className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-full bg-panel/90 text-foreground shadow-elevated outline-none transition-colors hover:bg-panel focus-visible:ring-2 focus-visible:ring-primary/40"
         type="button"
         onClick={onClose}
@@ -4274,7 +4206,7 @@ function ReferenceImagePreviewOverlay({ imageFileName, onClose }: ReferenceImage
       </button>
       {isVideo ? (
         <video
-          aria-label="参考素材预览"
+           aria-label={t("参考素材预览")}
           className="max-h-[88vh] max-w-[88vw] rounded-lg object-contain shadow-image"
           controls
           playsInline
@@ -4288,7 +4220,7 @@ function ReferenceImagePreviewOverlay({ imageFileName, onClose }: ReferenceImage
         />
       ) : isAudio ? (
         <audio
-          aria-label="音频参考素材试听"
+           aria-label={t("音频参考素材试听")}
           className="w-[min(88vw,640px)] rounded-lg bg-panel p-4 shadow-image"
           controls
           ref={handlePreviewAudioRef}
@@ -4301,7 +4233,7 @@ function ReferenceImagePreviewOverlay({ imageFileName, onClose }: ReferenceImage
         />
       ) : (
         <img
-          alt="参考素材预览"
+           alt={t("参考素材预览")}
           className="max-h-[88vh] max-w-[88vw] rounded-lg object-contain shadow-image"
           decoding="async"
           src={getImageSrc(imageFileName)}
@@ -4336,6 +4268,7 @@ function ReferenceImagePopover({
   onPreview,
   onDelete,
 }: ReferenceImagePopoverProps) {
+  const { t } = useLocale();
   const hasImages = referenceImages.length > 0;
 
   return (
@@ -4347,10 +4280,10 @@ function ReferenceImagePopover({
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
           <ImagePlus size={14} />
-          参考图
+           {t("参考图")}
         </span>
         <button
-          aria-label="关闭"
+           aria-label={t("关闭")}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground"
           type="button"
           onClick={onClose}
@@ -4375,7 +4308,7 @@ function ReferenceImagePopover({
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-5 text-center text-xs text-muted">
-          还没有参考图，可从剪贴板或本地文件添加。
+           {t("还没有参考图，可从剪贴板或本地文件添加。")}
         </div>
       )}
 
@@ -4387,7 +4320,7 @@ function ReferenceImagePopover({
           onClick={onImportFromClipboard}
         >
           <Clipboard size={13} />
-          {isImporting ? "导入中..." : "粘贴剪贴板"}
+           {t("粘贴剪贴板")}
         </button>
         <button
           className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-40"
@@ -4396,9 +4329,10 @@ function ReferenceImagePopover({
           onClick={onImportFromLocal}
         >
           <ImagePlus size={13} />
-          {isImporting ? "导入中..." : "本地上传"}
+           {t("本地上传")}
         </button>
       </div>
+      {isImporting ? <p role="status" className="text-xs text-muted">{t("正在添加参考图，请稍候…")}</p> : null}
     </div>
   );
 }

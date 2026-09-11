@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getConfiguredGenerationModelOptions,
   getGenerationModelOptions,
   hideGenerationModelOption,
   isGenericGenerationModelLabel,
@@ -17,6 +18,17 @@ describe("generationModels", () => {
     expect(matchGenerationModelLabel("flux-2-pro portrait")).toBe("FLUX.2 Pro");
     expect(matchGenerationModelLabel("Midjourney Niji V7 anime")).toBe("Midjourney Niji V7");
     expect(matchGenerationModelLabel("veo3 cinematic video")).toBe("Google Veo 3");
+  });
+
+  it("preserves an explicit provider model id and only lists configured generation models", () => {
+    expect(resolveGenerationModelLabel({ generationMethod: "grok-imagine-image-2.0" })).toBe("grok-imagine-image-2.0");
+    expect(
+      getConfiguredGenerationModelOptions([
+        { id: "grok-imagine-image-2.0", label: "Grok Imagine", capabilities: ["image-generation"] },
+        { id: "gpt-4o", label: "GPT-4o", capabilities: ["text", "vision"] },
+        { id: "video-model-v1", capabilities: ["video-generation"] },
+      ]),
+    ).toEqual(["grok-imagine-image-2.0", "video-model-v1"]);
   });
 
   it("puts common drawing models before less-used video models by default", () => {

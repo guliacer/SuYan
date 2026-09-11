@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { BatchProgressBar, formatBytes } from "./BatchProgressBar";
 import type { CompressProgress, CompressResult } from "@/types/suyanApi";
 import { useLibraryStore } from "../../store/useLibraryStore";
+import { useLocale } from "@/components/LocaleProvider";
 import { hasBuiltinModuleCapability } from "../../utils/moduleRegistry";
 import { VideoRuntimeInstallBanner } from "../VideoRuntimeInstallBanner";
 
@@ -44,6 +45,7 @@ export function VideoCompressPanel({
   onInvert,
   onClearSelection,
 }: VideoCompressPanelProps) {
+  const { t } = useLocale();
   const compressVideos = useLibraryStore((s) => s.compressVideos);
   const cancelCompress = useLibraryStore((s) => s.cancelCompress);
   const moduleState = useLibraryStore((s) => s.moduleState);
@@ -71,7 +73,7 @@ export function VideoCompressPanel({
   async function handleStart() {
     if (scopeDisabled) return;
     if (!hasBuiltinModuleCapability("video-runtime", moduleState)) {
-      setErrorMessage("需要视频运行时（FFmpeg），请先安装后再压缩。");
+      setErrorMessage(t("需要视频依赖（FFmpeg），请先安装后再压缩。"));
       setStatus("error");
       return;
     }
@@ -93,7 +95,7 @@ export function VideoCompressPanel({
       await onCompleted?.();
       setStatus("done");
     } else {
-      setErrorMessage("视频压缩失败，请重试。");
+      setErrorMessage(t("视频压缩失败，请重试。"));
       setStatus("error");
     }
   }
@@ -101,7 +103,8 @@ export function VideoCompressPanel({
   async function handleCancel() {
     try {
       await cancelCompress();
-    } catch {
+    } catch (error) {
+      console.error("取消压缩失败:", error);
     }
   }
 
@@ -117,11 +120,11 @@ export function VideoCompressPanel({
       return (
         <div className="flex items-center gap-3 text-sm text-muted">
           <LoaderCircle className="size-4 animate-spin" />
-          正在准备压缩…
+          {t("正在准备压缩…")}
         </div>
       );
     }
-    const label = progress.currentItem ? `正在压缩：${progress.currentItem}` : "正在压缩视频…";
+    const label = progress.currentItem ? `${t("正在压缩：")} ${progress.currentItem}` : t("正在压缩视频…");
     return (
       <div className="flex flex-col gap-3">
         <BatchProgressBar
@@ -131,8 +134,8 @@ export function VideoCompressPanel({
           total={progress.total}
         />
         <div>
-          <Button variant="danger" onClick={() => void handleCancel()}>
-            取消压缩
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="danger" onClick={() => void handleCancel()}>
+            {t("取消压缩")}
           </Button>
         </div>
       </div>
@@ -146,19 +149,18 @@ export function VideoCompressPanel({
         <div className="flex items-center gap-3 rounded-md border border-border/70 bg-panel px-4 py-3 text-sm">
           <Film className="size-4 text-primary" />
           <span className="text-foreground">
-            已压缩 <span className="font-semibold">{result.processedCount}</span> 个视频，节省{" "}
-            <span className="font-semibold">{formatBytes(savedBytes)}</span>
+            {t("已压缩 {count} 个视频，节省 {bytes}", { count: result.processedCount, bytes: formatBytes(savedBytes) })}
           </span>
         </div>
         {result.failedItems.length > 0 ? (
-          <p className="text-xs text-muted">{result.failedItems.length} 项压缩失败，已跳过。</p>
+          <p className="text-xs text-muted">{t("{count} 项压缩失败，已跳过。", { count: result.failedItems.length })}</p>
         ) : null}
         {result.skippedExternalCount > 0 ? (
-          <p className="text-xs text-muted">{result.skippedExternalCount} 项外链素材保持只读，未执行压缩。</p>
+          <p className="text-xs text-muted">{t("{count} 项外链素材保持只读，未执行压缩。", { count: result.skippedExternalCount })}</p>
         ) : null}
         <div>
-          <Button variant="primary" onClick={handleReset}>
-            再次压缩
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="primary" onClick={handleReset}>
+            {t("再次压缩")}
           </Button>
         </div>
       </div>
@@ -170,13 +172,13 @@ export function VideoCompressPanel({
   if (status === "error") {
     return (
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-danger">{errorMessage || "视频压缩失败，请重试。"}</p>
+        <p className="text-sm text-danger">{errorMessage || t("视频压缩失败，请重试。")}</p>
         {!videoRuntimeAvailable ? (
-          <VideoRuntimeInstallBanner message="需要视频运行时（FFmpeg），请先安装后再压缩。" />
+          <VideoRuntimeInstallBanner message={t("需要视频依赖（FFmpeg），请先安装后再压缩。")} />
         ) : null}
         <div>
-          <Button variant="primary" onClick={handleReset}>
-            重试
+          <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="primary" onClick={handleReset}>
+            {t("重试")}
           </Button>
         </div>
       </div>
@@ -186,12 +188,12 @@ export function VideoCompressPanel({
   return (
     <div className="flex flex-col gap-4">
       {!videoRuntimeAvailable ? (
-        <VideoRuntimeInstallBanner message="视频压缩需要视频运行时（FFmpeg），请先安装。" />
+        <VideoRuntimeInstallBanner message={t("视频压缩需要视频依赖（FFmpeg），请先安装。")} />
       ) : null}
       <div className="grid grid-cols-[1fr_1.3fr_1.4fr_1fr] divide-x divide-border/50">
         <div className="px-6 first:pl-0">
-          <div className="mb-4 text-sm font-semibold text-foreground">分辨率与编码</div>
-          <div className="mb-1.5 text-xs font-medium text-muted">目标分辨率</div>
+          <div className="mb-4 text-sm font-semibold text-foreground">{t("分辨率与编码")}</div>
+          <div className="mb-1.5 text-xs font-medium text-muted">{t("目标分辨率")}</div>
           <div className="grid grid-cols-2 gap-1.5">
             {resolutionOptions.map((option) => (
               <button
@@ -200,11 +202,11 @@ export function VideoCompressPanel({
                 type="button"
                 onClick={() => setResolution(option.value)}
               >
-                {option.label}
+                {t(option.label)}
               </button>
             ))}
           </div>
-          <div className="mt-4 mb-1.5 text-xs font-medium text-muted">编码器</div>
+          <div className="mt-4 mb-1.5 text-xs font-medium text-muted">{t("编码器")}</div>
           <div className="grid grid-cols-2 gap-1.5">
             <button
               className={codec === "h264" ? activeBtnClass : inactiveBtnClass}
@@ -224,7 +226,7 @@ export function VideoCompressPanel({
         </div>
 
         <div className="px-6">
-          <div className="mb-4 text-sm font-semibold text-foreground">质量 CRF</div>
+          <div className="mb-4 text-sm font-semibold text-foreground">{t("质量 CRF")}</div>
           <div className="text-3xl font-bold tabular-nums text-foreground">{crf}</div>
           <div className="relative mt-5 mb-2 h-2 rounded-full bg-border/50">
             <div
@@ -233,7 +235,7 @@ export function VideoCompressPanel({
             />
             <input
               type="range"
-              aria-label="质量 CRF"
+              aria-label={t("质量 CRF")}
               min={crfMin}
               max={crfMax}
               value={crf}
@@ -242,39 +244,39 @@ export function VideoCompressPanel({
             />
           </div>
           <div className="flex justify-between text-xs text-muted">
-            <span>{crfMin} 高质量</span>
-            <span>{crfMax} 小体积</span>
+            <span>{crfMin} {t("高质量")}</span>
+            <span>{crfMax} {t("小体积")}</span>
           </div>
-          <p className="mt-4 text-xs text-muted">推荐 18-28；越低越清晰、越大。</p>
+          {null}
         </div>
 
         <div className="px-6">
-          <div className="mb-4 text-sm font-semibold text-foreground">压缩范围</div>
+          <div className="mb-4 text-sm font-semibold text-foreground">{t("压缩范围")}</div>
           <div className="flex flex-col gap-2">
             <button
               className={scope === "all" ? activeBtnClass : inactiveBtnClass}
               type="button"
               onClick={() => setScope("all")}
             >
-              全部视频 {scope === "all" ? "✓" : ""}
+              {t("全部视频")} {scope === "all" ? "✓" : ""}
             </button>
             <button
               className={scope === "selected" ? activeBtnClass : inactiveBtnClass}
               type="button"
               onClick={() => setScope("selected")}
             >
-              选中({selectedItemIds.length}) {scope === "selected" ? "✓" : ""}
+              {t("选中({count})", { count: selectedItemIds.length })} {scope === "selected" ? "✓" : ""}
             </button>
           </div>
           <div className="mt-3 rounded-lg bg-background/70 p-2.5">
             <div className="flex flex-wrap gap-1.5">
               <button className={selectionBtnClass} type="button" onClick={onSelectAll}>
                 <CheckSquare size={12} />
-                全选
+                {t("全选")}
               </button>
               <button className={selectionBtnClass} type="button" onClick={onInvert}>
                 <Square size={12} />
-                反选
+                {t("反选")}
               </button>
               <button
                 className={selectionBtnClass}
@@ -283,20 +285,20 @@ export function VideoCompressPanel({
                 onClick={onClearSelection}
               >
                 <X size={12} />
-                取消选择
+                {t("取消选择")}
               </button>
             </div>
           </div>
-          <p className="mt-2 text-xs text-muted">已选 {selectedCount} / {totalCount} 组</p>
+          <p className="mt-2 text-xs text-muted">{t("已选 {selected} / {total} 组", { selected: selectedCount, total: totalCount })}</p>
         </div>
 
         <div className="px-6 last:pr-0">
-          <div className="mb-4 text-sm font-semibold text-foreground">预计效果</div>
+          <div className="mb-4 text-sm font-semibold text-foreground">{t("预计效果")}</div>
           <div className="flex items-baseline gap-1">
             <TrendingDown className="size-4 text-progress" />
             <span className="text-3xl font-bold tabular-nums text-progress">{estimatedSavingsPercent}%</span>
           </div>
-          <p className="mt-1 text-xs text-muted">CRF {crf} 预计压缩率</p>
+          <p className="mt-1 text-xs text-muted">{t("CRF {value} 预计压缩率", { value: crf })}</p>
           <Button
             disabled={scopeDisabled}
             icon={<Zap size={16} />}
@@ -304,7 +306,7 @@ export function VideoCompressPanel({
             onClick={() => void handleStart()}
             className="mt-5 w-full"
           >
-            开始压缩
+            {t("开始压缩")}
           </Button>
         </div>
       </div>

@@ -81,6 +81,50 @@ describe("detail AI provider/model preference", () => {
     ).toBeNull();
   });
 
+  it("serializes rapid model selections and keeps the latest selection after both responses", async () => {
+    const settings = createSettings();
+    const firstResolver: { current: ((result: unknown) => void) | null } = { current: null };
+    const saveAiSettings = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            firstResolver.current = resolve;
+          }),
+      )
+      .mockImplementation((payload) => Promise.resolve({ ok: true, data: payload }));
+    vi.stubGlobal("window", { suyanApi: { saveAiSettings } });
+    useLibraryStore.setState({ aiSettings: settings, statusMessage: null });
+
+    const firstSave = useLibraryStore.getState().saveAiActionModelPreference("prompt-category", {
+      profileId: "backup",
+      modelId: "backup-text",
+    });
+    const secondSave = useLibraryStore.getState().saveAiActionModelPreference("prompt-category", {
+      profileId: "main",
+      modelId: "main-text",
+    });
+
+    await Promise.resolve();
+    expect(saveAiSettings).toHaveBeenCalledTimes(1);
+    firstResolver.current?.({ ok: true, data: updateAiActionModelPreference(settings, "prompt-category", {
+      profileId: "backup",
+      modelId: "backup-text",
+    }) });
+
+    await expect(firstSave).resolves.toBe(true);
+    await expect(secondSave).resolves.toBe(true);
+    expect(saveAiSettings).toHaveBeenCalledTimes(2);
+    expect(saveAiSettings.mock.calls[1]?.[0].actionPreferences["prompt-category"]).toMatchObject({
+      profileId: "main",
+      modelId: "main-text",
+    });
+    expect(useLibraryStore.getState().aiSettings.actionPreferences["prompt-category"]).toMatchObject({
+      profileId: "main",
+      modelId: "main-text",
+    });
+  });
+
   it("optimistically updates the shared settings and persists the selection through the existing IPC", async () => {
     const settings = createSettings();
     const persistedSettings = updateAiActionModelPreference(settings, "prompt-category", {

@@ -18,6 +18,7 @@ const runtime = vi.hoisted(() => ({
 vi.mock("electron", () => ({
   app: {
     getPath: () => runtime.userDataPath,
+    getVersion: () => "9.8.7",
     isPackaged: false,
   },
   dialog: {
@@ -173,6 +174,9 @@ describe("aiSettingsBackupService", () => {
 
       expect(result.canceled).toBe(false);
       expect(result.filePath).toBe(exportPath);
+      expect(vi.mocked(dialog.showSaveDialog).mock.calls[0][0]).toMatchObject({
+        defaultPath: expect.stringMatching(/^素言-v9\.8\.7-AI设置-普通-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.suyan-ai\.json$/),
+      });
 
       const written = JSON.parse(await fs.readFile(exportPath, "utf8")) as Record<string, unknown>;
       expect(written.format).toBe("suyan-ai-settings");
@@ -198,6 +202,9 @@ describe("aiSettingsBackupService", () => {
       expect(result.filePath).toBe(exportPath);
 
       const raw = await fs.readFile(exportPath, "utf8");
+      expect(vi.mocked(dialog.showSaveDialog).mock.calls[0][0]).toMatchObject({
+        defaultPath: expect.stringMatching(/^素言-v9\.8\.7-AI设置-密码加密-.*\.suyan-ai$/),
+      });
       const envelope = JSON.parse(raw) as Record<string, unknown>;
       expect(envelope.format).toBe("suyan-ai-settings");
       expect(envelope.formatVersion).toBe(2);

@@ -13,6 +13,9 @@ import {
 import { supportedImportVisualMediaExtensions } from "./importedImageWriter";
 import { warmLibraryItemThumbnails } from "./imageThumbnails";
 import { readLibraryFile, updateLibraryFile } from "./libraryStore";
+import { getAuthorInfo } from "../account/accountService";
+import { attributeLocalImports } from "./workAttribution";
+import { readWorkFromImageFile } from "./workImageExchange";
 import { readLibraryRoots, updateLibraryRoot } from "./libraryRoots";
 import { mapWithConcurrency } from "./asyncMap";
 import { scanMediaFilesViaRustStream } from "../runtime/rustFileOps";
@@ -67,6 +70,7 @@ export async function createExternalLibraryItem(
   const draft = await readPngMetadataDraft(resolvedPath);
   const fileStats = knownStats ?? await fs.stat(resolvedPath);
   const imageFileName = `${id}${extension}`;
+  const work = await readWorkFromImageFile(resolvedPath);
 
   return {
     id,
@@ -96,6 +100,7 @@ export async function createExternalLibraryItem(
     authorName: null,
     authorUrl: null,
     authorAvatarUrl: null,
+    ...work,
     createdAt: now,
     updatedAt: now,
   };
@@ -106,6 +111,7 @@ export async function scanExternalLibraryRoot(
   rootId: string,
   onProgress?: (progress: ExternalScanProgress) => void,
 ): Promise<ExternalScanResult> {
+  const importAuthor = getAuthorInfo();
   const roots = await readLibraryRoots();
   const root = roots.find((candidate) => candidate.id === rootId);
 
@@ -145,9 +151,10 @@ export async function scanExternalLibraryRoot(
     candidates.push(mediaFile);
   }
 
-  const items = await mapWithConcurrency(candidates, 4, (mediaFile) =>
+  const scannedItems = await mapWithConcurrency(candidates, 4, (mediaFile) =>
     createExternalLibraryItem(root, mediaFile.absolutePath, now, mediaFile),
   );
+  const items = await attributeLocalImports(scannedItems, importAuthor);
 
   let importedItems: LibraryItem[] = [];
   const nextLibrary = items.length > 0

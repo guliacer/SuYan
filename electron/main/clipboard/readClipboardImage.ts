@@ -29,6 +29,8 @@ import {
 } from "../library/importedImageWriter";
 import { getImagePath } from "../library/libraryPaths";
 import { appendLibraryItems, readLibraryFile } from "../library/libraryStore";
+import { getAuthorInfo } from "../account/accountService";
+import { attributeLocalImports } from "../library/workAttribution";
 import {
   createImportAbortTimeout,
   createImportDeadline,
@@ -50,6 +52,7 @@ export async function importClipboardImage(): Promise<{
   canceled?: boolean;
 }> {
   const image = clipboard.readImage();
+  const importAuthor = getAuthorInfo();
   const clipboardText = clipboard.readText().trim();
 
   if (image.isEmpty() && !clipboardText) {
@@ -193,7 +196,7 @@ export async function importClipboardImage(): Promise<{
   imagesReadyAtMs = Date.now();
 
   warmImageThumbnails(items.map((item) => item.imageFileName));
-  const library = items.length > 0 ? await appendLibraryItems(items) : await readLibraryFile();
+  const library = items.length > 0 ? await appendLibraryItems(await attributeLocalImports(items, importAuthor)) : await readLibraryFile();
 
   const finishedAtMs = Date.now();
   logger.info("main", "import:timing", {

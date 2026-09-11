@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocale } from "@/components/LocaleProvider";
 import type {
   AiActionPreference,
   AiFeatureAction,
@@ -37,12 +38,13 @@ import {
   createNewProfileDraft,
   createProfileDrafts,
   ensureProfileSelectedModel,
-  getAiSettingsActionEntryDescription,
   getAiSettingsActionEntryLabel,
   isProfileComplete,
   moveItemBefore,
   normalizeAiSettingsActionOrder,
   resolveAiSettingsActionEntry,
+  resolveAiSettingsEntryAction,
+  getAiActionRecognitionKind,
   resolveDraftApiKeyState,
   resolveDraftApiKeyPreview,
   resolveSelectedProfileId,
@@ -70,6 +72,7 @@ export function useAiSettings({
   onReadApiKey,
   onNotify,
 }: AiSettingsDialogProps) {
+  const { t } = useLocale();
   const [profiles, setProfiles] = useState<AiProviderProfileDraft[]>(() => createProfileDrafts(settings));
   const [actionEntryOrder, setActionEntryOrder] = useState<string[]>(() => normalizeAiSettingsActionOrder(settings.actionOrder));
   const [activeProfileId, setActiveProfileId] = useState(settings.activeProfileId);
@@ -201,8 +204,7 @@ export function useAiSettings({
   );
   const selectedActionMeta = aiFeatureActionMeta[selectedAction];
   const selectedActionEntry = resolveAiSettingsActionEntry(selectedAction);
-  const selectedActionEntryLabel = getAiSettingsActionEntryLabel(selectedActionEntry);
-  const selectedActionEntryDescription = getAiSettingsActionEntryDescription(selectedActionEntry);
+  const selectedActionEntryLabel = t(getAiSettingsActionEntryLabel(selectedActionEntry));
   const selectedActionEntryHasSources = selectedActionEntry.actions.length > 1;
   const selectedActionPreference = normalizeActionPreferenceDraft(
     actionPreferences[selectedAction],
@@ -252,6 +254,10 @@ export function useAiSettings({
   }, [settings.recognitionSourcePreferences.category, settings.recognitionSourcePreferences.tags]);
 
   function handleSelectDefaultRecognitionSource(kind: AiRecognitionKind, source: AiRecognitionSource) {
+    const entry = aiSettingsActionEntries.find((candidate) => getAiActionRecognitionKind(candidate.actions[0]) === kind);
+    if (entry) {
+      setSelectedAction(resolveAiSettingsEntryAction(entry, null, { [kind]: source }));
+    }
     if ((recognitionSourcePreferences[kind] ?? "prompt") === source) {
       return;
     }
@@ -264,7 +270,7 @@ export function useAiSettings({
 
     recognitionSourceSaveRevisionRef.current = revision;
     setRecognitionSourcePreferences(nextPreferences);
-    setFeedbackText("默认识别来源已更新，正在自动保存。");
+    setFeedbackText(t("默认识别来源已更新，正在自动保存。"));
 
     void onSaveAiRecognitionSourcePreferences(nextPreferences).then((saved) => {
       if (!saved && recognitionSourceSaveRevisionRef.current === revision) {
@@ -278,10 +284,10 @@ export function useAiSettings({
       return;
     }
 
-    setFeedbackText("正在复制 API Key...");
+    setFeedbackText(t("正在复制 API Key..."));
     const copied = await onCopyApiKey(selectedProfile.id, selectedProfile.apiKey);
 
-    setFeedbackText(copied ? "API Key 已复制。" : "API Key 复制失败。");
+    setFeedbackText(copied ? t("API Key 已复制。") : t("API Key 复制失败。"));
   }
 
   async function handleCopyBaseUrl() {
@@ -291,12 +297,12 @@ export function useAiSettings({
 
     const normalized = normalizeAiBaseUrl(selectedProfile.baseUrl);
     if (!normalized) {
-      setFeedbackText("请先填写接口地址。");
+      setFeedbackText(t("请先填写接口地址。"));
       return;
     }
 
     const result = await window.suyanApi.writeClipboardText(normalized);
-    setFeedbackText(result.ok ? "接口地址已复制。" : "接口地址复制失败。");
+    setFeedbackText(result.ok ? t("接口地址已复制。") : t("接口地址复制失败。"));
   }
 
   async function handlePasteBaseUrl() {
@@ -306,19 +312,19 @@ export function useAiSettings({
 
     const result = await window.suyanApi.readClipboardText();
     if (!result.ok) {
-      setFeedbackText("读取剪贴板失败，请检查系统剪贴板权限。");
+      setFeedbackText(t("读取剪贴板失败，请检查系统剪贴板权限。"));
       return;
     }
 
     const normalized = normalizeAiBaseUrl(result.data.text);
     if (!normalized) {
-      setFeedbackText("剪贴板中没有可用的接口地址。");
+      setFeedbackText(t("剪贴板中没有可用的接口地址。"));
       return;
     }
 
     patchProfile(selectedProfile.id, { baseUrl: normalized });
     setRevealedBaseUrlProfileId(selectedProfile.id);
-    setFeedbackText("接口地址已粘贴并自动适配。");
+    setFeedbackText(t("接口地址已粘贴并自动适配。"));
   }
 
   function handleNormalizeBaseUrl() {
@@ -336,7 +342,7 @@ export function useAiSettings({
 
     patchProfile(selectedProfile.id, { baseUrl: "" });
     setRevealedBaseUrlProfileId(selectedProfile.id);
-    setFeedbackText("接口地址已清除。");
+    setFeedbackText(t("接口地址已清除。"));
   }
 
   async function handleToggleApiKeyVisibility() {
@@ -356,13 +362,13 @@ export function useAiSettings({
     }
 
     if (!selectedProfile.hasApiKey || selectedProfile.clearApiKey) {
-      setFeedbackText("当前 API 尚未配置可展示的 API Key。");
+      setFeedbackText(t("当前 API 尚未配置可展示的 API Key。"));
       return;
     }
 
     const apiKey = await onReadApiKey(selectedProfile.id);
     if (!apiKey) {
-      setFeedbackText("API Key 展示失败。");
+      setFeedbackText(t("API Key 展示失败。"));
       return;
     }
 
@@ -377,20 +383,65 @@ export function useAiSettings({
 
     const result = await window.suyanApi.readClipboardText();
     if (!result.ok) {
-      setFeedbackText("读取剪贴板失败，请检查系统剪贴板权限。");
+      setFeedbackText(t("读取剪贴板失败，请检查系统剪贴板权限。"));
       return;
     }
 
     const apiKey = result.data.text.trim();
     if (!apiKey) {
-      setFeedbackText("剪贴板中没有可用的 API Key。");
+      setFeedbackText(t("剪贴板中没有可用的 API Key。"));
       return;
     }
 
     patchProfile(selectedProfile.id, { apiKey, clearApiKey: false });
     setRevealedApiKeys((current) => ({ ...current, [selectedProfile.id]: apiKey }));
     setRevealedApiKeyProfileId(selectedProfile.id);
-    setFeedbackText("API Key 已粘贴。");
+    setFeedbackText(t("API Key 已粘贴。"));
+  }
+
+  async function importClipboardIntoSelectedProfile() {
+    if (!selectedProfile) {
+      return;
+    }
+
+    const result = await window.suyanApi.readClipboardText();
+    if (!result.ok) {
+      setFeedbackText(t("读取剪贴板失败，请检查系统剪贴板权限。"));
+      return;
+    }
+
+    const { parseAiClipboardImport } = await import("../utils/aiClipboardImport");
+    const parsed = parseAiClipboardImport(result.data.text);
+    if (!parsed) {
+      setFeedbackText(t("剪贴板中未识别到可用的 API 连接信息。"));
+      return;
+    }
+
+    const patch: Partial<AiProviderProfileDraft> = {};
+    let changed = false;
+
+    if (parsed.baseUrl) {
+      patch.baseUrl = normalizeAiBaseUrl(parsed.baseUrl);
+      changed = true;
+    }
+    if (parsed.apiKey) {
+      patch.apiKey = parsed.apiKey;
+      patch.clearApiKey = false;
+      changed = true;
+    }
+    if (parsed.model) {
+      patch.model = parsed.model;
+      changed = true;
+    }
+
+    if (!changed) {
+      setFeedbackText(t("剪贴板中未识别到可用的 API 连接信息。"));
+      return;
+    }
+
+    patchProfile(selectedProfile.id, patch);
+    setRevealedBaseUrlProfileId(selectedProfile.id);
+    setFeedbackText(t("已从剪贴板快速导入连接信息。"));
   }
 
   function commitProfileNameEdit(profileId: string) {
@@ -420,7 +471,7 @@ export function useAiSettings({
       return;
     }
 
-    setFeedbackText(`正在测试 ${selectedProfile.name || "当前 API"}...`);
+    setFeedbackText(t("正在测试 {name}...", { name: selectedProfile.name || t("当前 API") }));
     const result = await onTest(
       buildConnectionTestPayload({
         actionPreferences,
@@ -432,12 +483,12 @@ export function useAiSettings({
 
     if (result.ok) {
       patchProfile(selectedProfile.id, { enabled: true });
-      setFeedbackText("连接成功，已自动启用该 API。");
+      setFeedbackText(t("连接成功，已自动启用该 API。"));
       return;
     }
 
     patchProfile(selectedProfile.id, { enabled: false });
-    setFeedbackText(`连接失败：${result.message} 已自动停用该 API。`);
+    setFeedbackText(t("连接失败：{message} 已自动停用该 API。", { message: result.message }));
   }
 
   async function handleTestAllProfiles() {
@@ -448,13 +499,13 @@ export function useAiSettings({
     const testTargets = profiles.filter(canTestProfile);
 
     if (testTargets.length === 0) {
-      setFeedbackText("请先补全地址、模型和 API Key。");
+      setFeedbackText(t("请先补全地址、模型和 API Key。"));
       return;
     }
 
     setIsTestingAllProfiles(true);
     autoSave.pause();
-    setFeedbackText(`正在测试全部 API（0/${testTargets.length}）...`);
+    setFeedbackText(t("正在测试全部 API（{current}/{total}）...", { current: 0, total: testTargets.length }));
 
     const failedIds = new Set<string>();
     const succeededIds = new Set<string>();
@@ -464,9 +515,13 @@ export function useAiSettings({
     try {
       for (let index = 0; index < testTargets.length; index += 1) {
         const profile = testTargets[index];
-        const profileName = profile.name || "未命名 API";
+        const profileName = profile.name || t("未命名 API");
 
-        setFeedbackText(`正在测试 ${profileName}（${index + 1}/${testTargets.length}）...`);
+        setFeedbackText(t("正在测试 {name}（{current}/{total}）...", {
+          name: profileName,
+          current: index + 1,
+          total: testTargets.length,
+        }));
         const result = await onTest(
           buildConnectionTestPayload({
             actionPreferences,
@@ -502,17 +557,24 @@ export function useAiSettings({
       }
 
       const skippedCount = profiles.length - testTargets.length;
-      const skippedText = skippedCount > 0 ? `，跳过 ${skippedCount} 个未完善` : "";
+      const skippedText = skippedCount > 0 ? t("，跳过 {count} 个未完善", { count: skippedCount }) : "";
 
       if (failedIds.size === 0) {
-        setFeedbackText(`可测 API 全部连接成功${skippedText}，已启用。`);
+        setFeedbackText(t("可测 API 全部连接成功{skipped}，已启用。", { skipped: skippedText }));
         return;
       }
 
-      const failureText = failureMessages.length > 0 ? `失败原因：${failureMessages.join("；")}` : "";
+      const failureText = failureMessages.length > 0
+        ? t("失败原因：{details}", { details: failureMessages.join("；") })
+        : "";
 
       setFeedbackText(
-        `测试完成：成功 ${successCount}，失败 ${failedIds.size}${skippedText}。成功已启用，失败已停用。${failureText}`,
+        t("测试完成：成功 {success}，失败 {failed}{skipped}。成功已启用，失败已停用。{failure}", {
+          success: successCount,
+          failed: failedIds.size,
+          skipped: skippedText,
+          failure: failureText,
+        }),
       );
     } finally {
       setIsTestingAllProfiles(false);
@@ -527,11 +589,11 @@ export function useAiSettings({
 
     const queryPayload = buildModelQueryPayload({ profiles, selectedProfileId: selectedProfile.id });
 
-    setFeedbackText(`正在查询 ${selectedProfile.name || "当前 API"} 的模型...`);
+    setFeedbackText(t("正在查询 {name} 的模型...", { name: selectedProfile.name || t("当前 API") }));
     const models = await onListModels(queryPayload);
 
     if (!models) {
-      setFeedbackText("模型查询失败。");
+      setFeedbackText(t("模型查询失败。"));
       return;
     }
 
@@ -541,7 +603,7 @@ export function useAiSettings({
       models,
       selectedModelIds: selectedProfile.models.map((model) => model.id),
     });
-    setFeedbackText(`已查询到 ${models.length} 个模型。`);
+    setFeedbackText(t("已查询到 {count} 个模型。", { count: models.length }));
   }
 
   function addManualModel() {
@@ -666,7 +728,7 @@ export function useAiSettings({
       const targetIndex = currentProfiles.findIndex((profile) => profile.id === targetId);
       return moveItemBefore(currentProfiles, sourceIndex, targetIndex);
     });
-    setFeedbackText("API 顺序已调整，正在自动保存。");
+    setFeedbackText(t("API 顺序已调整，正在自动保存。"));
   }
 
   function reorderActionEntries(sourceId: string, targetId: string) {
@@ -675,7 +737,7 @@ export function useAiSettings({
       const targetIndex = currentOrder.indexOf(targetId);
       return moveItemBefore(currentOrder, sourceIndex, targetIndex);
     });
-    setFeedbackText("规则列表顺序已调整，正在自动保存。");
+    setFeedbackText(t("规则列表顺序已调整，正在自动保存。"));
   }
 
   function patchActionPreference(action: AiFeatureAction, patch: AiActionPreference) {
@@ -715,7 +777,7 @@ export function useAiSettings({
       rules,
       rulePresetIds: nextPresetIds,
     });
-    setFeedbackText("规则选择已更新，正在自动保存。");
+    setFeedbackText(t("规则选择已更新，正在自动保存。"));
   }
 
   function clearActionRules(action: AiFeatureAction) {
@@ -724,7 +786,7 @@ export function useAiSettings({
       rules: resolveActionRulesForDraft(action, actionPreferences[action]),
       rulePresetIds: [],
     });
-    setFeedbackText("当前功能规则选择已清空，正在自动保存。");
+    setFeedbackText(t("当前功能规则选择已清空，正在自动保存。"));
   }
 
   function editRule(rule: AiRulePreset) {
@@ -741,7 +803,7 @@ export function useAiSettings({
     const instructions = ruleEditor.instructions.trim();
 
     if (!label || !instructions) {
-      setFeedbackText("请先填写规则名称和规则内容。");
+      setFeedbackText(t("请先填写规则名称和规则内容。"));
       return;
     }
 
@@ -766,7 +828,7 @@ export function useAiSettings({
     });
     setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
     setRuleEditorOpen(false);
-    setFeedbackText(editingRuleId ? "规则已更新，正在自动保存。" : "规则已新增，正在自动保存。");
+    setFeedbackText(t(editingRuleId ? "规则已更新，正在自动保存。" : "规则已新增，正在自动保存。"));
   }
 
   function deleteRule(action: AiFeatureAction, ruleId: string) {
@@ -785,7 +847,7 @@ export function useAiSettings({
       setRuleEditorOpen(false);
     }
 
-    setFeedbackText("规则已删除，正在自动保存。");
+    setFeedbackText(t("规则已删除，正在自动保存。"));
   }
 
   function resetDrafts(nextSettings: PublicAiProviderSettings) {
@@ -862,7 +924,6 @@ export function useAiSettings({
     revealedApiKey,
     selectedActionCustomInstructions,
     selectedActionEntry,
-    selectedActionEntryDescription,
     selectedActionEntryHasSources,
     selectedActionEntryLabel,
     selectedActionHasCustomRules,
@@ -918,6 +979,7 @@ export function useAiSettings({
     handleTest,
     handleTestAllProfiles,
     handleToggleApiKeyVisibility,
+    importClipboardIntoSelectedProfile,
     patchActionPreference,
     patchProfile,
     removeModel,

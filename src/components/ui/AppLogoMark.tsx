@@ -2,7 +2,6 @@ import appLogo from "@/assets/app-logo.png";
 
 type AppLogoMarkProps = {
   className?: string;
-  iconSize?: number;
 };
 
 export function AppLogoMark({ className = "size-7" }: AppLogoMarkProps) {

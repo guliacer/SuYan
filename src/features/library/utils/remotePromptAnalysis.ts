@@ -4,6 +4,9 @@ import type {
   RemotePromptAnalysisV2,
 } from "../types/ai";
 import { uniqueTags } from "./buildLibraryFile";
+import { canonicalTagLabel, findKnownTag, buildAnalyzedTagEntry, tagKey } from "./tagKnowledge";
+import { shouldAdmitAnalyzedTag } from "./tagQuality";
+import type { PromptImageLexiconEntry } from "../types/library";
 import {
   analyzePromptText,
   isolateCategoryAnalysisResult,
@@ -128,22 +131,24 @@ function tagDimensionRank(dimension: RemoteAnalysisTagDimension): number {
  * evidence, so they skip the gate and keep their prior confidence-only order
  * (which mirrors the model's original ordering).
  */
-function selectTagLabelsByConfidence(analysis: RemotePromptAnalysisV2): string[] {
+function selectTagLabelsByConfidence(analysis: RemotePromptAnalysisV2, prompt: string): string[] {
   const gate = !isLegacyLiftedV2(analysis);
   return [...analysis.tags]
     .filter(
       (candidate) => !gate || (candidate.confidence >= genuineV2ConfidenceFloor && hasEvidence(candidate)),
     )
+    .filter(candidate => shouldAdmitAnalyzedTag(candidate.label, candidate.evidence, prompt))
     .sort(
       (a, b) =>
         tagDimensionRank(a.dimension) - tagDimensionRank(b.dimension) || b.confidence - a.confidence,
     )
-    .map((candidate) => candidate.normalizedLabel?.trim() || candidate.label);
+    .map((candidate) => candidate.label);
 }
 
 export type PromptAnalysisRunResult = {
   analysis: PromptAnalysisResult;
   source: PromptAnalysisSource;
+  failed?: boolean;
 };
 
 type PromptAnalysisBuildTarget = AiAnalyzeTarget | "mixed";
@@ -152,6 +157,7 @@ type PromptAnalysisBuildOptions = {
   knownCategories?: readonly string[] | null;
   /** Existing user/system tag labels for auto-matching. */
   knownTags?: readonly string[] | null;
+  knownTagEntries?: readonly PromptImageLexiconEntry[] | null;
 };
 
 export function buildPromptAnalysisFromRemote(
@@ -205,20 +211,37 @@ export function buildPromptAnalysisFromRemote(
     // The classification channel owns categories; a V2 tag response keeps
     // `categories` empty, and a legacy-lifted one exposes only its primary there
     // (used solely to strip an accidental category echo, never to add tags).
-    const rawTags = uniqueTags(selectTagLabelsByConfidence(remoteAnalysis));
+    const sourcePrompt = target === "prompt-tags" ? prompt : "";
+    const rawTags = uniqueTags(selectTagLabelsByConfidence(remoteAnalysis, sourcePrompt));
 
     const knownTags = Array.isArray(options.knownTags) ? options.knownTags : [];
-    const canonicalized = rawTags.map((tag) => matchKnownTagLabel(knownTags, tag) ?? tag);
+    const knownEntries = options.knownTagEntries ?? [];
+    const canonicalized = rawTags.map((tag) => canonicalTagLabel(matchKnownTagLabel(knownTags, tag) ?? tag, knownEntries));
 
-    const suggestedTags = sanitizePromptTags(canonicalized, {
+    const suggestedTags = uniqueTags(canonicalized.flatMap(label => findKnownTag(label, knownEntries)?.groupLocked ? [label] : sanitizePromptTags([label], {
       category: remoteAnalysis.categories[0]?.label ?? null,
       maxCount: 15,
-    }).filter((tag) => !resolvePhotographyCategory(tag) && !isPseudoPhotographyGenreLabel(tag));
+    })).map(tag => canonicalTagLabel(tag, knownEntries))).filter((tag) => {
+      const candidate = remoteAnalysis.tags.find(candidate => tagKey(canonicalTagLabel(candidate.label, knownEntries)) === tagKey(tag));
+      return shouldAdmitAnalyzedTag(tag, candidate?.evidence, sourcePrompt) && (findKnownTag(tag, knownEntries)?.groupLocked || (!resolvePhotographyCategory(tag) && !isPseudoPhotographyGenreLabel(tag)));
+    }).slice(0, 15);
+
+    const tagEntries = suggestedTags.map((label): PromptImageLexiconEntry => {
+      const known = findKnownTag(label, knownEntries);
+      const candidate = [...remoteAnalysis.tags].sort((a, b) => b.confidence - a.confidence).find(
+        tag => [canonicalTagLabel(tag.label, knownEntries), ...sanitizePromptTags([canonicalTagLabel(tag.label, knownEntries)]).map(t => canonicalTagLabel(t, knownEntries))].some(t => tagKey(t) === tagKey(label)),
+      );
+      return buildAnalyzedTagEntry(label, candidate && {
+        dimension: candidate.dimension, confidence: candidate.confidence,
+        evidence: candidate.evidence, suggestedGroup: candidate.group,
+      }, known);
+    });
 
     return {
       chips: [],
       sections: [],
       suggestedTags,
+      tagEntries,
       suggestedCategories: [],
       primaryCategory: "未分类",
       template: "",

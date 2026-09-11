@@ -30,6 +30,7 @@ describe("useAiSettingsAutoSave (source contract)", () => {
     expect(hookSource).toContain("return false;");
     // already-saved is treated as success, paused/disabled as skip
     expect(hookSource).toContain("requestSignature === lastSavedSignatureRef.current");
+    expect(hookSource).toContain("isBusyRef.current && !pausedRef.current");
   });
 
   it("wrapper merges pause sources into a suspend count", () => {

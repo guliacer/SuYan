@@ -160,8 +160,12 @@ export function mergeAiProviderSettingsPayload(
     profiles,
   };
 
-  validateAiProviderSettingsCollection(nextSettings);
-
+  // Do NOT enforce full per-profile completeness here. The save path must not
+  // be blocked by an incomplete enabled profile (e.g. a draft the user hasn't
+  // finished yet) — previously validateAiProviderSettingsCollection threw
+  // AI_SETTINGS_INCOMPLETE here, silently discarding every save. Strict
+  // validation still runs in the import/merge path (aiSettingsMerge.ts) and in
+  // connection test / model queries via resolveAiProviderSettingsForPayload.
   return nextSettings;
 }
 
@@ -413,7 +417,7 @@ export function normalizeAiProviderModel(input: unknown): AiProviderModelSetting
 export function normalizeModelCapabilities(input: unknown): AiProviderModelCapability[] {
   const capabilities = Array.isArray(input)
     ? input.filter((capability): capability is AiProviderModelCapability =>
-        capability === "text" || capability === "vision" || capability === "image-generation",
+        capability === "text" || capability === "vision" || capability === "image-generation" || capability === "video-generation",
       )
     : [];
 
@@ -487,7 +491,6 @@ function normalizeActionPreferences(
         preference.modelId = modelId;
       }
     }
-
     if (hasRules) {
       preference.rules = rules;
     }

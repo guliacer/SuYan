@@ -17,7 +17,6 @@ const maxReferenceDataUrlChars = Math.ceil((maxReferenceImageBytes * 4) / 3) + 1
 export async function saveCanvasReferenceImage(
   dataUrl: string,
   sourceFileName = "reference-image",
-  previousFileName = "",
 ): Promise<CanvasReferenceImageData> {
   const sourceBytes = decodeImageDataUrl(dataUrl);
   const image = nativeImage.createFromBuffer(sourceBytes);
@@ -44,7 +43,6 @@ export async function saveCanvasReferenceImage(
 
   await fs.writeFile(tempPath, pngBytes);
   await fs.rename(tempPath, targetPath);
-  await removeManagedCanvasReferenceImage(previousFileName);
 
   const size = image.getSize();
   const result = buildReferenceImageData(fileName, sourceFileName, pngBytes, size.width, size.height);

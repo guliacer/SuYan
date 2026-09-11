@@ -92,16 +92,10 @@ describe("Capsule component contract", () => {
 });
 
 describe("capsule color maps derive from CAPSULE_TONES (no literal triplets)", () => {
-  it("PromptDetailDialog tone-by-variable uses CAPSULE_TONES[tone].solid", () => {
-    const source = readSrc("features/library/components/PromptDetailDialog.tsx");
-    const functionBlock = source.match(
-      /function getPromptCapsuleToneClassName[\s\S]*?\n}/,
-    )?.[0] ?? "";
+  it("Capsule.tsx derives its filled variant from CAPSULE_TONES", () => {
+    const source = readSrc("components/ui/Capsule.tsx");
 
-    expect(functionBlock).not.toBe("");
-    expect(functionBlock).toContain("CAPSULE_TONES[tone].solid");
-    // No hand-written capsule triplet should remain inside the function body.
-    expect(functionBlock).not.toMatch(/border-capsule-\w+-border bg-capsule-\w+ text-capsule-\w+-foreground/);
+    expect(source).toContain("CAPSULE_TONES");
   });
 
   it("PromptSiteRecommendations palette is derived from CAPSULE_TONES", () => {
@@ -119,14 +113,16 @@ describe("capsule color maps derive from CAPSULE_TONES (no literal triplets)", (
     expect(paletteBlock).not.toMatch(/border-capsule-\w+-border bg-capsule-\w+ text-capsule-\w+-foreground/);
   });
 
-  it("LibraryView radialSortOptions consumes CAPSULE_TONES", () => {
+  it("LibraryView sort controls use the current semantic theme tokens", () => {
     const source = readSrc("features/library/components/LibraryView.tsx");
-    const radialBlock = source.match(
-      /const radialSortOptions[\s\S]*?\n\];/,
+    const sortBlock = source.match(
+      /const sortModeOptions[\s\S]*?function SortOptionButton[\s\S]*?\n\}/,
     )?.[0] ?? "";
 
-    expect(radialBlock).not.toBe("");
-    expect(radialBlock).toContain("CAPSULE_TONES.");
-    expect(radialBlock).not.toMatch(/border-capsule-\w+-border bg-capsule-\w+ text-capsule-\w+-foreground/);
+    expect(sortBlock).not.toBe("");
+    expect(sortBlock).toContain("sortDirectionOptions");
+    expect(sortBlock).toContain("bg-primary-soft");
+    expect(sortBlock).toContain("border-primary/30");
+    expect(sortBlock).not.toMatch(/border-capsule-\w+-border bg-capsule-\w+ text-capsule-\w+-foreground/);
   });
 });

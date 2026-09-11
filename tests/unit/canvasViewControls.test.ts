@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 const canvasSource = readFileSync("src/features/library/components/CanvasView.tsx", "utf8");
 const storeSource = readFileSync("src/features/library/store/useLibraryStore.ts", "utf8");
 const canvasGenSource = readFileSync("src/features/library/utils/canvasGeneration.ts", "utf8");
+const canvasTypesSource = readFileSync("src/features/library/types/canvas.ts", "utf8");
 const viewSettingsSource = readFileSync("electron/main/library/viewSettingsStore.ts", "utf8");
 
 describe("CanvasView controls", () => {
@@ -11,9 +12,9 @@ describe("CanvasView controls", () => {
     "renders the %s prompt action for both prompt fields",
     (label) => {
       if (label === "\u4f18\u5316") {
-        expect(canvasSource).toContain('label={isOptimizing ? "\u4f18\u5316\u4e2d" : "\u4f18\u5316"}');
+        expect(canvasSource).toContain('label={isOptimizing ? t("\u4f18\u5316\u4e2d") : t("\u4f18\u5316")}');
       } else {
-        expect(canvasSource).toContain(`label="${label}"`);
+        expect(canvasSource).toContain(`label={t("${label}")}`);
       }
     },
   );
@@ -27,11 +28,14 @@ describe("CanvasView controls", () => {
     expect(viewSettingsSource).toContain("normalizeCanvasDraftSettings(input.canvasDraft)");
   });
 
-  it("opens the reference-image popover and收敛 the positive prompt tools into primary actions plus a more menu", () => {
+  it("keeps optimize, paste, and reference image as primary prompt actions", () => {
     expect(canvasSource).toContain("isReferenceImagePopoverOpen");
     expect(canvasSource).toContain("setIsReferenceImagePopoverOpen(true)");
-    expect(canvasSource).toContain("添加参考图");
+    expect(canvasSource).toContain('t("优化")');
+    expect(canvasSource).toContain('t("粘贴")');
+    expect(canvasSource).toContain('t("参考图")');
     expect(canvasSource).toContain("PromptMoreMenuItem");
+    expect(canvasSource).not.toContain('label={t("粘贴")} onClick={() => { setIsMoreMenuOpen(false); void pasteFieldText("positive")');
     expect(canvasSource).toContain("CanvasReferenceImagePopover");
     expect(canvasSource).toContain("onImportFromClipboard");
   });
@@ -48,7 +52,7 @@ describe("CanvasView controls", () => {
   it("supports negative prompt visibility and transparent image generation", () => {
     expect(canvasSource).toContain("negativePromptHidden");
     expect(canvasSource).toContain("iconOnlyActions");
-    expect(canvasSource).toContain("aria-label={label === \"返回\" ? \"撤销最近一次更改\" : label}");
+    expect(canvasSource).toContain('aria-label={label === t("返回") ? t("撤销最近一次更改") : label}');
     expect(canvasSource).toContain("iconOnly ? \"sr-only\" : \"truncate\"");
     expect(canvasSource).toContain("buildCanvasImageGenerationPayload(canvasDraft");
     expect(canvasSource).toContain('disabled: canvasDraft.transparentBackground && option.value === "jpeg"');
@@ -61,20 +65,38 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain('label: "\u81ea\u5b9a\u4e49\u5bbd\u9ad8"');
     expect(canvasSource).toContain('{ value: "1k", label: "1K" }');
     expect(canvasSource).toContain('{ value: "2k", label: "2K" }');
+    expect(canvasSource).toContain('{ value: "3k", label: "3K" }');
     expect(canvasSource).toContain('{ value: "4k", label: "4K" }');
     expect(canvasSource).toContain("onClick={() => onDraftChange({ baseResolution: option.value })}");
     expect(canvasSource).not.toContain('<ResolutionButton disabled label="2K" />');
     expect(canvasSource).toContain("getCanvasGenerationSizeLabel(resolveCanvasGenerationSize(canvasDraft))");
-    expect(canvasSource).toContain("上方显示的实际请求像素");
   });
 
-  it("persists whether advanced canvas settings are expanded", () => {
+  it("opens canvas generation parameters from one compact settings button", () => {
+    expect(canvasSource).toContain("isGenerationSettingsOpen");
+    expect(canvasSource).toContain("<CanvasGenerationSettingsButton");
+    expect(canvasSource).toContain("<CanvasGenerationSettingsDialog");
+    expect(canvasSource).toContain("formatCanvasGenerationSettingsSummary");
+    expect(canvasSource).toContain('aria-haspopup="dialog"');
+    expect(canvasSource).toContain("图像参数");
+    expect(canvasSource).toContain("视频参数");
+    expect(canvasSource).toContain("生成设置");
+    expect(canvasSource).toContain("CanvasSizePanel canvasDraft={canvasDraft} onDraftChange={onDraftChange}");
+    expect(canvasSource).toContain("CanvasAdvancedPanel canvasDraft={canvasDraft} onDraftChange={onDraftChange}");
+    expect(canvasSource).toContain("CanvasVideoSettingsContent");
+    expect(canvasSource).not.toContain("<CanvasVideoPanel canvasDraft={canvasDraft} onDraftChange={onDraftChange} />");
+    expect(canvasSource).not.toContain("onToggleHidden={() => onDraftChange({ sizePanelHidden");
+    expect(canvasSource).not.toContain("onToggleHidden={() => onDraftChange({ advancedSettingsOpen");
+  });
+
+  it("persists existing canvas settings fields without relying on local state", () => {
     expect(canvasSource).toContain("<CanvasAdvancedPanel");
-    expect(canvasSource).toContain('aria-label={hidden ? "显示高级设置" : "隐藏高级设置"}');
-    expect(canvasSource).toContain("hidden={!canvasDraft.advancedSettingsOpen}");
-    expect(canvasSource).toContain("advancedSettingsOpen: !canvasDraft.advancedSettingsOpen");
     expect(canvasSource).toContain("CanvasSizePanel");
     expect(canvasSource).not.toContain("const [isAdvancedOpen, setIsAdvancedOpen] = useState");
+    expect(canvasTypesSource).toContain("sizePanelHidden: boolean;");
+    expect(canvasTypesSource).toContain("advancedSettingsOpen: boolean;");
+    expect(canvasGenSource).toContain("sizePanelHidden: input.sizePanelHidden === true");
+    expect(canvasGenSource).toContain("advancedSettingsOpen: input.advancedSettingsOpen === true");
   });
 
   it("uses the generation prompt as the archived image title without an AI title request", () => {
@@ -99,7 +121,7 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain("creationPanelRef");
     expect(canvasSource).toContain("new ResizeObserver(updateHeight)");
     expect(canvasSource).toContain("self-start rounded-3xl border border-border bg-panel");
-    expect(canvasSource).toContain("lockedHeight={creationPanelHeight}");
+    expect(canvasSource).toContain("lockedHeight={isCreationPanelCollapsed ? null : creationPanelHeight}");
     expect(canvasSource).toContain("style={lockedHeight !== null ? { height: `${lockedHeight}px` } : undefined}");
   });
 
@@ -108,11 +130,10 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain('<Copy size={13} />');
     expect(canvasSource).toContain('<CanvasResultActionButton icon={<Download size={18} />}');
     expect(canvasSource).toContain('icon={<Info size={18} />}');
-    expect(canvasSource).toContain('label="查看"');
-    expect(canvasSource).toContain('label="复制"');
-    expect(canvasSource).toContain('aria-label="展开的提示词"');
+    expect(canvasSource).toContain('label={t("查看")}');
+    expect(canvasSource).toContain('label={t("复制")}');
+    expect(canvasSource).toContain('aria-label={t("展开的提示词")}');
     expect(canvasSource).toContain('onCopyImage={onCopyImage}');
-    expect(canvasSource).toContain('label="复制"\n            onClick={onCopy}');
     expect(canvasSource).toContain('className="inline-flex size-10 shrink-0 items-center justify-center rounded-full');
     // 操作按钮固定在右侧中部：降低默认不透明度，悬停/聚焦时提高；展开提示词不改变按钮位置。
     expect(canvasSource).toContain('absolute right-3 top-1/2 z-30 flex -translate-y-1/2');
@@ -120,7 +141,7 @@ describe("CanvasView controls", () => {
     // 大图独立铺满视口居中最大化，与提示词卡片解耦，展开详情时位置与尺寸不变。
     expect(canvasSource).toContain("absolute inset-0 z-0 flex items-center justify-center p-4");
     expect(canvasSource).toContain("block h-auto w-auto max-h-full max-w-full rounded-lg object-contain shadow-2xl");
-    expect(canvasSource).toContain("disabled={!result.saved || !result.imageFileName}");
+    expect(canvasSource).toContain('disabled={result.mediaType === "video" || imageCopyDisabled}');
     expect(canvasSource).not.toContain("<Info size={14} /> 查看提示词");
     expect(canvasSource).not.toContain("复用提示词");
     expect(canvasSource).not.toContain('label="复用"');
@@ -134,20 +155,36 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain("Inbox,");
     // 悬停工具栏：收录按钮夹在导出与复制之间，已收录/收录中分别置灰转圈。
     expect(canvasSource).toContain('icon={archiving ? <LoaderCircle className="animate-spin" size={13} /> : archived ? <Check size={13} /> : <Inbox size={13} />}');
-    expect(canvasSource).toContain('label={archived ? "已收录" : "收录"}');
-    expect(canvasSource).toContain('title={archived ? "已收录到素材库" : archiving ? "正在收录到素材库…" : "收录到素材库"}');
+    expect(canvasSource).toContain('label={archived ? t("已收录") : t("收录")}');
+    expect(canvasSource).toContain('title={archived ? t("已收录") : t("收录到素材库")}');
     // 全屏预览右侧操作栏也有收录按钮，位于导出与复制之间。
     expect(canvasSource).toContain('icon={archivingIndex === index ? <LoaderCircle className="animate-spin" size={18} /> : result.saved ? <Check size={18} /> : <Inbox size={18} />}');
-    // 复制按钮的禁用提示文案改成引导「点击「收录」」而非旧的「开启自动收录」。
-    expect(canvasSource).toContain("未收录到素材库，点击「收录」后可复制");
+    // 未收录也可复制；两个入口均可使用内存中的生成图片。
+    expect(canvasSource).not.toContain("收录后可复制");
+    expect(canvasSource).toContain("onCopyImage(active.imageFileName || active.dataUrl)");
+    expect(canvasSource).toContain("onCopyImage(result.imageFileName || result.dataUrl)");
     // 手动收录处理函数与单张入库链路。
     expect(canvasSource).toContain("async function handleArchiveResult");
     expect(canvasSource).toContain("const savedItems = await onImportGeneratedImages(");
     expect(canvasSource).toContain("imageFileName: savedItem.imageFileName, saved: true");
     // 状态：正在收录的索引，用于按钮转圈/置灰。
     expect(canvasSource).toContain("const [archivingIndex, setArchivingIndex] = useState<number | null>(null);");
-    // 收录按钮把单张生成图传给入库链路（只传当前这一张 dataUrl，不整批）。
-    expect(canvasSource).toContain('[{ dataUrl: result.dataUrl, revisedPrompt: result.revisedPrompt }]');
+    // 单张入库需同时传递生成归属收据及媒体类型，避免丢失账户或把视频当图片。
+    expect(canvasSource).toContain('[{ dataUrl: result.dataUrl, revisedPrompt: result.revisedPrompt, attributionId: result.attributionId, mediaType: result.mediaType }]');
+  });
+
+  it("adds a batch export action beside the generate button", () => {
+    expect(canvasSource).toContain("async function handleArchiveAllResults");
+    expect(canvasSource).toContain("当前没有可导出的生成结果");
+    expect(canvasSource).toContain("生成结果已全部收录到素材库");
+    expect(canvasSource).toContain('aria-label={t("导出到素材库")}');
+    expect(canvasSource).toContain('title={t("导出到素材库")}');
+    expect(canvasSource).toContain("onClick={() => void handleArchiveAllResults()}");
+    expect(canvasSource).toContain("pendingResults.map((result) => ({");
+    expect(canvasSource).toContain("generationMethod: lastModel || selectedModel || canvasDraft.generationProvider");
+    expect(canvasSource).toContain("onGenerationResultsChange(");
+    expect(canvasSource).toContain("isArchivingBatch ||");
+    expect(canvasSource.indexOf('title="导出到素材库"')).toBeLessThan(canvasSource.indexOf("重新生成"));
   });
 
   it("does not show the 归档中 badge when auto-archive is off (results stay preview-only)", () => {
@@ -198,18 +235,41 @@ describe("CanvasView controls", () => {
 
   it("shows elapsed time after model and dimensions in fullscreen metadata", () => {
     expect(canvasSource).toContain("generationElapsedMs={generationElapsedMs}");
-    expect(canvasSource).toContain("<dt>模型：</dt>");
-    expect(canvasSource).toContain("<dt>尺寸：</dt>");
-    expect(canvasSource).toContain("<dt>用时：</dt>");
+    expect(canvasSource).toContain('<dt>{t("模型：")}</dt>');
+    expect(canvasSource).toContain('<dt>{t("尺寸：")}</dt>');
+    expect(canvasSource).toContain('<dt>{t("用时：")}</dt>');
     expect(canvasSource).toContain("{promptOpen ? (");
     expect(canvasSource).toContain("rounded-full bg-primary/10 px-2.5 py-1 tabular-nums text-primary");
-    expect(canvasSource.indexOf('aria-label="展开的提示词"')).toBeLessThan(canvasSource.indexOf("<dt>模型：</dt>"));
+    expect(canvasSource.indexOf('aria-label={t("展开的提示词")}')).toBeLessThan(canvasSource.indexOf('<dt>{t("模型：")}</dt>'));
     // 复制提示词按钮放在卡片顶部，低透明度，不挤占底部元信息。
-    expect(canvasSource).toContain('aria-label="复制提示词"');
-    expect(canvasSource.indexOf('aria-label="复制提示词"')).toBeLessThan(canvasSource.indexOf('aria-label="展开的提示词"'));
+    expect(canvasSource).toContain('aria-label={t("复制提示词")}');
+    expect(canvasSource.indexOf('aria-label={t("复制提示词")}')).toBeLessThan(canvasSource.indexOf('aria-label={t("展开的提示词")}'));
     expect(canvasSource).toContain("opacity-40 transition hover:bg-background/40");
     expect(canvasSource).toContain("handleCopyPrompt()");
     expect(canvasSource).toContain("writeClipboardText(text)");
+  });
+
+  it("shows the prompt actually submitted for the generation, not only the model's rewrite", () => {
+    // 回归：卡片旧实现只读 result.revisedPrompt，而 gpt-image / 豆包网页 / 视频模型都不返回
+    // revised_prompt，于是永远显示「该模型未返回改写后的提示词。」，用户看不到自己用的提示词。
+    expect(canvasSource).not.toContain("该模型未返回改写后的提示词");
+    // 生成时把本次提交的正负提示词快照到结果上。
+    expect(canvasSource).toContain("requestPrompt: cleanPrompt");
+    expect(canvasSource).toContain("requestNegativePrompt: effectiveNegativePrompt");
+    // 卡片以提交的提示词为主体，模型改写版只在与之不同时作为附加区块。
+    expect(canvasSource).toContain('const submittedPrompt = result.requestPrompt?.trim() ?? "";');
+    expect(canvasSource).toContain("const displayPrompt = submittedPrompt || modelRevisedPrompt;");
+    expect(canvasSource).toContain("modelRevisedPrompt !== submittedPrompt");
+    expect(canvasSource).toContain('aria-label={t("模型改写后的提示词")}');
+    // 复制按钮跟随同一份文案，有提示词时不再是死按钮。
+    expect(canvasSource).toContain("disabled={!displayPrompt}");
+    expect(canvasSource).toContain("const text = displayPrompt;");
+    // 手动 / 批量收录读产出这张图时的快照，生成后改草稿不会把错误的提示词写进素材库。
+    expect(canvasSource).toContain("result.requestPrompt?.trim() || canvasDraft.prompt.trim()");
+    expect(canvasSource).toContain("snapshot?.requestPrompt?.trim() || canvasDraft.prompt.trim()");
+    // 快照字段挂在渲染层的 CanvasGenerationResult 上，不污染镜像上游响应的 AiGeneratedImage。
+    expect(canvasTypesSource).toContain("requestPrompt?: string;");
+    expect(canvasTypesSource).toContain("requestNegativePrompt?: string;");
   });
 });
 

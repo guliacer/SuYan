@@ -33,11 +33,14 @@ export const uiErrorMessage: Record<string, string> = {
   AI_SETTINGS_INVALID: "模型配置结构不合法。",
   AI_TRANSLATE_PAYLOAD_INVALID: "AI 翻译参数不合法。",
   EXTERNAL_URL_INVALID: "网页地址不合法，无法打开。",
-  FFMPEG_BINARY_NOT_FOUND: "需要视频运行时（FFmpeg），请先安装后再使用视频功能。",
+  FFMPEG_BINARY_NOT_FOUND: "需要视频依赖（FFmpeg），请先安装后再使用视频功能。",
   MODULE_INSTALL_FAILED: "模块安装失败，依赖校验未通过。",
   ZIP_DATA_MISSING: "分享包缺少 data.json。",
   ZIP_IMAGE_MISSING: "分享包缺少图片文件。",
   ZIP_SCHEMA_INVALID: "分享包数据结构不合法。",
+  ZIP_CORRUPTED: "分享包文件不完整或已损坏，请让发送方重新导出后再导入。",
+  ZIP_READ_FAILED: "读取分享包文件失败，请检查文件是否可访问。",
+  ZIP_EXPORT_FAILED: "导出分享包失败，请检查磁盘空间后重试。",
   AI_SETTINGS_BACKUP_INVALID: "备份文件无效，请选择素言导出的 AI 设置备份文件。",
   AI_SETTINGS_BACKUP_UNSUPPORTED_VERSION: "备份文件版本不受支持，请更新软件后重试。",
   AI_SETTINGS_BACKUP_DECRYPT_FAILED: "备份密码错误或备份文件已损坏。",
@@ -49,6 +52,7 @@ export const uiErrorMessage: Record<string, string> = {
 };
 
 const dynamicFallbackErrorCodes = new Set([
+  "IMAGE_COPY_FAILED",
   "AI_MODELS_REQUEST_FAILED",
   "AI_REMOTE_REQUEST_FAILED",
   "AI_REMOTE_RESPONSE_INVALID",

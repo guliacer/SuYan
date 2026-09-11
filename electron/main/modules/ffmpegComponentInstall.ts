@@ -2,11 +2,14 @@
 // 供 IPC 层调用；对 Renderer 暴露统一的进度/结果形状，隐藏 componentInstaller 内部细节。
 // 安全约束：下载 URL 与验签公钥固定内置于 componentConfig，Renderer 不得指定。
 import { basename } from "node:path";
-import { dialog } from "electron";
+import { shell } from "electron";
+import { dialog } from "../app/fileDialogs";
+import { FFMPEG_COMPONENT_RELEASE_PAGE_URL } from "./componentConfig";
 import {
   installFfmpegFromDownload,
   installFfmpegFromLocal,
   MANIFEST_FILE_NAME,
+  removeInstalledFfmpegComponent,
   SIGNATURE_FILE_NAME,
   type InstallPhase,
 } from "./componentInstaller";
@@ -50,6 +53,19 @@ export async function installFfmpegComponentFromLocal(
   const result = await installFfmpegFromLocal(paths, (phase, message) => onProgress?.({ phase, message }));
   resetFfmpegPathCache();
   return { installed: true, version: result.version };
+}
+
+/** 在系统浏览器打开内置版本对应的 Release 页面；不接受 Renderer 提供的 URL。 */
+export async function openFfmpegComponentDownloadPage(): Promise<{ opened: true }> {
+  await shell.openExternal(FFMPEG_COMPONENT_RELEASE_PAGE_URL);
+  return { opened: true };
+}
+
+/** 删除应用下载的 FFmpeg 组件并清空路径缓存；系统安装的 FFmpeg 不受影响。 */
+export async function removeFfmpegComponent(): Promise<{ removed: boolean }> {
+  const result = await removeInstalledFfmpegComponent();
+  resetFfmpegPathCache();
+  return result;
 }
 
 /** 从用户所选文件中按固定文件名归类出三件套；缺任一件返回 null。 */

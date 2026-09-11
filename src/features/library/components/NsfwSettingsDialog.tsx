@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
+import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
 import { TextArea } from "@/components/ui/TextArea";
 import { TextField } from "@/components/ui/TextField";
 import type {
@@ -26,7 +28,7 @@ import type {
   SaveAiProviderSettingsPayload,
 } from "../types/ai";
 import { aiFeatureActionMeta, normalizeAiRulePresetIds } from "../types/ai";
-import type { NsfwGradingSpeed } from "../types/library";
+import type { NsfwDetectionMode, NsfwGradingSpeed } from "../types/library";
 import {
   buildPublicAiSettingsPayload,
   normalizeActionPreferenceDraft,
@@ -39,6 +41,9 @@ import {
   type StatusFeedbackMessage,
 } from "../utils/statusFeedback";
 import { useAutoSave } from "../hooks/useAutoSave";
+import { useLibraryStore } from "../store/useLibraryStore";
+import { hasBuiltinModuleCapability } from "../utils/moduleRegistry";
+import { NsfwRuntimeInstallBanner } from "./NsfwRuntimeInstallBanner";
 
 type NsfwSettingsDialogProps = {
   aiSettings: PublicAiProviderSettings;
@@ -46,6 +51,7 @@ type NsfwSettingsDialogProps = {
   blurNsfwImages: boolean;
   isBusy: boolean;
   nsfwGradingSpeed: NsfwGradingSpeed;
+  nsfwDetectionMode: NsfwDetectionMode;
   onClose: () => void;
   onGradeAllNsfw: (options?: { force?: boolean }) => void;
   onSaveAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<boolean | string>;
@@ -53,6 +59,7 @@ type NsfwSettingsDialogProps = {
     autoNsfwGrading: boolean;
     blurNsfwImages: boolean;
     nsfwGradingSpeed: NsfwGradingSpeed;
+    nsfwDetectionMode: NsfwDetectionMode;
   }) => Promise<boolean>;
   onNotify?: (message: StatusFeedbackMessage) => void;
 };
@@ -69,21 +76,26 @@ export function NsfwSettingsDialog({
   blurNsfwImages,
   isBusy,
   nsfwGradingSpeed,
+  nsfwDetectionMode,
   onClose,
   onGradeAllNsfw,
   onSaveAiSettings,
   onSave,
   onNotify,
 }: NsfwSettingsDialogProps) {
+  const { t } = useLocale();
   const [autoNsfwGradingDraft, setAutoNsfwGradingDraft] = useState(autoNsfwGrading);
   const [blurNsfwImagesDraft, setBlurNsfwImagesDraft] = useState(blurNsfwImages);
   const [nsfwGradingSpeedDraft, setNsfwGradingSpeedDraft] = useState(nsfwGradingSpeed);
+  const [nsfwDetectionModeDraft, setNsfwDetectionModeDraft] = useState(nsfwDetectionMode);
   const [actionPreferencesDraft, setActionPreferencesDraft] = useState(() => aiSettings.actionPreferences);
   const [ruleEditor, setRuleEditor] = useState<RuleEditorState>({ editingRuleId: null, instructions: "", label: "" });
   const [isRuleEditorOpen, setIsRuleEditorOpen] = useState(false);
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null);
   const [modelSearchDraft, setModelSearchDraft] = useState("");
   const [feedbackText, setFeedbackText] = useState("");
+  const moduleState = useLibraryStore((state) => state.moduleState);
+  const checkNsfwRuntime = useLibraryStore((state) => state.checkNsfwRuntime);
 
   useEffect(() => {
     const text = feedbackText.trim();
@@ -122,8 +134,11 @@ export function NsfwSettingsDialog({
     aiSettings.activeProfileId,
     nsfwAiAction,
   );
+  // API 列表保留全部服务商；没有图片理解模型时在右侧明确显示空状态。
+  const nsfwActionProfiles = aiSettings.profiles;
   const nsfwActionProfile =
-    aiSettings.profiles.find((profile) => profile.id === nsfwActionPreference.profileId) ?? aiSettings.profiles[0];
+    aiSettings.profiles.find((profile) => profile.id === nsfwActionPreference.profileId) ??
+    nsfwActionProfiles[0];
   const nsfwActionAllModels = nsfwActionProfile?.models ?? [];
   const nsfwActionModels = nsfwActionAllModels.filter((model) =>
     model.capabilities.includes(nsfwActionMeta.capability),
@@ -132,8 +147,8 @@ export function NsfwSettingsDialog({
     nsfwActionModels.find((model) => model.id === nsfwActionPreference.modelId) ?? nsfwActionModels[0];
   const normalizedModelSearch = modelSearchDraft.trim().toLowerCase();
   const visibleNsfwActionModels = normalizedModelSearch
-    ? nsfwActionAllModels.filter((model) => normalizeModelSearchText(model).includes(normalizedModelSearch))
-    : nsfwActionAllModels;
+    ? nsfwActionModels.filter((model) => normalizeModelSearchText(model).includes(normalizedModelSearch))
+    : nsfwActionModels;
   const nsfwActionRules = resolveActionRulesForDraft(nsfwAiAction, actionPreferencesDraft[nsfwAiAction]);
   const nsfwActionRulePresetIds = normalizeAiRulePresetIds(
     nsfwAiAction,
@@ -150,8 +165,9 @@ export function NsfwSettingsDialog({
       autoNsfwGrading: autoNsfwGradingDraft,
       blurNsfwImages: blurNsfwImagesDraft,
       nsfwGradingSpeed: nsfwGradingSpeedDraft,
+      nsfwDetectionMode: nsfwDetectionModeDraft,
     }),
-    [autoNsfwGradingDraft, blurNsfwImagesDraft, nsfwGradingSpeedDraft],
+    [autoNsfwGradingDraft, blurNsfwImagesDraft, nsfwGradingSpeedDraft, nsfwDetectionModeDraft],
   );
   const aiSettingsDraftPayload = useMemo(
     () => buildPublicAiSettingsPayload(aiSettings, actionPreferencesDraft),
@@ -196,7 +212,7 @@ export function NsfwSettingsDialog({
     setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
     setIsRuleEditorOpen(false);
     setExpandedRuleId(null);
-    setFeedbackText("NSFW 模型配置已重置，正在自动保存。");
+    setFeedbackText(t("NSFW 模型配置已重置，正在自动保存。"));
   }
 
   function toggleRuleSelection(ruleId: string) {
@@ -215,7 +231,7 @@ export function NsfwSettingsDialog({
       rules,
       rulePresetIds: nextPresetIds,
     });
-    setFeedbackText("规则选择已更新，正在自动保存。");
+    setFeedbackText(t("规则选择已更新，正在自动保存。"));
   }
 
   function clearNsfwRules() {
@@ -224,7 +240,7 @@ export function NsfwSettingsDialog({
       rules: resolveActionRulesForDraft(nsfwAiAction, actionPreferencesDraft[nsfwAiAction]),
       rulePresetIds: [],
     });
-    setFeedbackText("已取消全部规则选择，正在自动保存。");
+    setFeedbackText(t("已取消全部规则选择，正在自动保存。"));
   }
 
   function editRule(rule: AiRulePreset) {
@@ -255,7 +271,7 @@ export function NsfwSettingsDialog({
     const instructions = ruleEditor.instructions.trim();
 
     if (!label || !instructions) {
-      setFeedbackText("请先填写规则名称和规则内容。");
+      setFeedbackText(t("请先填写规则名称和规则内容。"));
       return;
     }
 
@@ -285,7 +301,7 @@ export function NsfwSettingsDialog({
     setRuleEditor({ editingRuleId: null, instructions: "", label: "" });
     setIsRuleEditorOpen(false);
     setExpandedRuleId(ruleId);
-    setFeedbackText(editingRuleId ? "规则已更新，正在自动保存。" : "规则已新增，正在自动保存。");
+    setFeedbackText(editingRuleId ? t("规则已更新，正在自动保存。") : t("规则已新增，正在自动保存。"));
   }
 
   function deleteRule(ruleId: string) {
@@ -312,111 +328,124 @@ export function NsfwSettingsDialog({
       setExpandedRuleId(null);
     }
 
-    setFeedbackText("规则已删除，正在自动保存。");
+    setFeedbackText(t("规则已删除，正在自动保存。"));
   }
 
   return (
-    <AppDialog panelClassName="flex max-h-[92vh] w-full max-w-4xl flex-col" titleId="nsfw-settings-title" onClose={onClose}>
-      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+    <AppDialog
+      panelClassName="flex max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col"
+      titleId="nsfw-settings-title"
+      onClose={onClose}
+    >
+      <header className="flex items-start justify-between gap-3 border-b border-border px-3 py-3 min-[640px]:items-center min-[640px]:px-5 min-[640px]:py-4">
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary-soft text-foreground">
             <Sparkles size={18} />
           </span>
           <div className="min-w-0">
             <h2 className="text-lg font-semibold" id="nsfw-settings-title">
-              内容分级
+              {t("内容分级")}
             </h2>
-            <p className="mt-1 text-sm text-muted">管理自动分级、模糊、规则和批量校正</p>
           </div>
         </div>
         <DialogCloseButton onClick={onClose} />
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overscroll-contain px-5 py-5">
-        <NsfwSettingRow
-          checked={autoNsfwGradingDraft}
-          description="新扫描图片自动分级"
-          icon={<Shield size={16} />}
-          label="自动分级"
-          onChange={setAutoNsfwGradingDraft}
-        />
-        <NsfwSettingRow
-          checked={blurNsfwImagesDraft}
-          description="NSFW 图片默认模糊"
-          icon={<Eye size={16} />}
-          label="NSFW 自动模糊"
-          onChange={setBlurNsfwImagesDraft}
-        />
-        <NsfwSpeedPicker
-          disabled={isBusy}
-          value={nsfwGradingSpeedDraft}
-          onChange={setNsfwGradingSpeedDraft}
-        />
-        <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background px-4 py-3">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">批量分级</p>
-            <p className="mt-1 text-xs leading-5 text-muted">补充分级或重新校正结果。</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button disabled={isBusy} icon={<Play size={15} />} variant="secondary" onClick={() => onGradeAllNsfw()}>
-              补充分级
-            </Button>
-            <Button
+      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto overscroll-contain px-3 py-3 scroll-pb-4 min-[640px]:px-4 min-[640px]:py-4 min-[960px]:px-6 min-[960px]:py-5">
+        {nsfwDetectionModeDraft !== "remote-only" &&
+        !hasBuiltinModuleCapability("nsfw-local-classification", moduleState) ? (
+          <NsfwRuntimeInstallBanner
+            message={t("本地 NSFW 识别模块尚未安装或已停用。需要本地分级时，可按需下载并安装模型；也可以继续使用已配置的远程视觉模型。")}
+            onInstalled={() => {
+              void checkNsfwRuntime();
+            }}
+          />
+        ) : null}
+        <div className="grid gap-4 min-[1120px]:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)] min-[1120px]:items-start">
+          <div className="grid gap-2 rounded-md border border-border bg-background p-3 min-[640px]:p-4 min-[1120px]:col-start-1 min-[1120px]:row-start-1">
+            <NsfwSettingRow
+              checked={autoNsfwGradingDraft}
+              description={t("新扫描图片自动分级")}
+              flat
+              icon={<Shield size={16} />}
+              label={t("自动分级")}
+              onChange={setAutoNsfwGradingDraft}
+            />
+            <div className="h-px bg-border" />
+            <NsfwSettingRow
+              checked={blurNsfwImagesDraft}
+              description={t("NSFW 图片默认模糊")}
+              flat
+              icon={<Eye size={16} />}
+              label={t("NSFW 自动模糊")}
+              onChange={setBlurNsfwImagesDraft}
+            />
+            <div className="h-px bg-border" />
+            <NsfwSpeedPicker
               disabled={isBusy}
-              icon={<RefreshCw size={15} />}
-              variant="ghost"
-              onClick={() => onGradeAllNsfw({ force: true })}
-            >
-              重新校正
-            </Button>
+              flat
+              value={nsfwGradingSpeedDraft}
+              onChange={setNsfwGradingSpeedDraft}
+            />
+            <div className="h-px bg-border" />
+            <NsfwDetectionModePicker
+              disabled={isBusy}
+              flat
+              value={nsfwDetectionModeDraft}
+              onChange={setNsfwDetectionModeDraft}
+            />
+            <div className="h-px bg-border" />
+            <section data-feature-guide="nsfw-batch-actions" className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("批量分级")}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  className="min-h-8 px-2.5 py-1.5 text-xs"
+                  disabled={isBusy}
+                  icon={<Play size={14} />}
+                  variant="secondary"
+                  onClick={() => onGradeAllNsfw()}
+                >
+                  {t("补充分级")}
+                </Button>
+                <Button
+                  className="min-h-8 px-2.5 py-1.5 text-xs"
+                  disabled={isBusy}
+                  icon={<RefreshCw size={14} />}
+                  variant="ghost"
+                  onClick={() => onGradeAllNsfw({ force: true })}
+                >
+                  {t("重新校正")}
+                </Button>
+              </div>
+            </section>
           </div>
-        </section>
-        <section className="grid gap-4 rounded-md border border-border bg-background px-4 py-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">AI 检测引擎</p>
-              <p className="mt-1 text-xs leading-5 text-muted">指定图片 API、模型和判断策略。</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+
+          {nsfwDetectionModeDraft !== "local-only" ? (
+            <section className="overflow-hidden rounded-md border border-border bg-background min-[1120px]:col-start-1 min-[1120px]:row-start-2">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-3 py-3 min-[640px]:px-4">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">{t("AI 检测引擎")}</p>
+              </div>
               <Button
-                className="min-h-9 px-2.5 py-1.5 text-xs"
+                className="min-h-8 px-2.5 py-1.5 text-xs"
                 icon={<X size={14} />}
                 variant="ghost"
                 onClick={resetNsfwActionPreference}
               >
-                重置
+                {t("重置")}
               </Button>
             </div>
-          </div>
 
-          <div className="grid gap-4 rounded-md border border-border bg-panel p-4">
-            <div className="grid gap-2">
-              <p className="text-xs font-semibold text-muted">当前连接</p>
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-3">
-                <div className="min-w-0">
-                  <p className="truncate text-base font-semibold text-foreground">OpenAI Compatible</p>
-                  <p className="mt-1 truncate text-xs text-muted">
-                    {nsfwActionProfile?.name || "未命名 API"} · {nsfwActionProfile?.baseUrl || "未填写接口地址"}
-                  </p>
-                </div>
-                <span className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-                  <span className={`size-2 rounded-full ${getNsfwStatusDotClass(nsfwApiStatus)}`} />
-                  {nsfwApiStatus}
-                </span>
-              </div>
-            </div>
-
-            <div className="border-t border-border" />
-
-            <div className="grid gap-4 min-[820px]:grid-cols-[minmax(260px,0.92fr)_minmax(0,1.08fr)]">
-              <div className="grid min-h-0 gap-3">
+            <div className="grid min-h-[18rem] min-[760px]:grid-cols-[minmax(248px,0.92fr)_minmax(0,1.08fr)]">
+              <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 p-3 min-[640px]:p-4">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">① 选择 AI 服务</p>
-                  <p className="mt-1 text-xs text-muted">左侧切换 API，右侧选择模型。</p>
+                  <p className="text-sm font-semibold text-foreground">{t("① 选择 AI 服务")}</p>
                 </div>
-                <div className="grid max-h-72 gap-2 overflow-y-auto pr-1">
-                  {aiSettings.profiles.length > 0 ? (
-                    aiSettings.profiles.map((profile) => {
+                <div className="grid max-h-72 content-start gap-2 overflow-y-auto pr-1">
+                  {nsfwActionProfiles.length > 0 ? (
+                    nsfwActionProfiles.map((profile) => {
                       const selected = profile.id === nsfwActionProfile?.id;
                       const status = resolveNsfwApiStatus(profile);
                       const visionModelCount = profile.models.filter((model) =>
@@ -426,7 +455,7 @@ export function NsfwSettingsDialog({
                       return (
                         <button
                           aria-pressed={selected}
-                          className={`grid min-h-20 gap-2 rounded-md border px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                          className={`grid min-h-16 gap-1.5 rounded-md border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                             selected
                               ? "border-primary bg-primary-soft text-foreground shadow-elevated"
                               : "border-border bg-background text-muted hover:bg-primary-soft hover:text-foreground"
@@ -450,7 +479,7 @@ export function NsfwSettingsDialog({
                           }}
                         >
                           <span className="flex min-w-0 items-center justify-between gap-2">
-                            <span className="truncate text-sm font-semibold">{profile.name || "未命名 API"}</span>
+                            <span className="truncate text-sm font-semibold">{profile.name || t("未命名 API")}</span>
                             <span
                               className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
                                 selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-panel"
@@ -460,11 +489,11 @@ export function NsfwSettingsDialog({
                             </span>
                           </span>
                           <span className="flex flex-wrap items-center gap-2 text-[11px]">
-                            <span>{profile.models.length} 个模型</span>
-                            <span>{visionModelCount} 个 Vision</span>
+                            <span>{t("{count} 个模型", { count: profile.models.length })}</span>
+                            <span>{t("{count} 个 Vision", { count: visionModelCount })}</span>
                             <span className="flex items-center gap-1 rounded-full border border-border bg-panel px-2 py-0.5">
                               <span className={`size-1.5 rounded-full ${getNsfwStatusDotClass(status)}`} />
-                              {status}
+                              {t(status)}
                             </span>
                           </span>
                         </button>
@@ -472,305 +501,285 @@ export function NsfwSettingsDialog({
                     })
                   ) : (
                     <p className="rounded-md border border-border bg-background px-3 py-4 text-xs text-muted">
-                      暂无 API，请先在模型配置中添加。
+                      {t("暂无 API")}
                     </p>
                   )}
                 </div>
               </div>
 
-              <div className="grid min-h-0 gap-3">
+              <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 border-t border-border p-3 min-[640px]:p-4 min-[760px]:border-l min-[760px]:border-t-0">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">② 选择图片理解模型</p>
-                  <p className="mt-1 text-xs text-muted">仅图片理解模型可选。</p>
+                  <p className="text-sm font-semibold text-foreground">{t("② 选择图片理解模型")}</p>
                 </div>
                 <label className="relative block">
-                  <span className="pointer-events-none absolute left-3 top-1/2 flex -translate-y-1/2 text-muted">
-                    <Search size={15} />
-                  </span>
+                  <Search
+                    aria-hidden="true"
+                    className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-muted"
+                  />
                   <TextField
-                    aria-label="搜索图片理解模型"
-                    className="h-9 rounded-md pl-9"
-                    placeholder="搜索模型..."
+                    aria-label={t("搜索图片理解模型")}
+                    className="h-10 rounded-md pl-10 pr-3"
+                    placeholder={t("搜索模型...")}
                     value={modelSearchDraft}
                     onChange={(event) => setModelSearchDraft(event.target.value)}
                   />
                 </label>
-                {nsfwActionAllModels.length > 0 && nsfwActionModels.length === 0 ? (
-                  <p className="rounded-md border border-warning bg-warning-soft px-3 py-2 text-xs text-warning">
-                    当前 API 没有图片理解模型，无法分级。
-                  </p>
-                ) : null}
-                <div aria-label="选择图片理解模型" className="grid max-h-72 gap-1 overflow-y-auto pr-1" role="radiogroup">
+                <div
+                  aria-label={t("选择图片理解模型")}
+                  className="grid max-h-72 content-start gap-1 overflow-y-auto pr-1"
+                  role="radiogroup"
+                >
                   {visibleNsfwActionModels.length > 0 ? (
                     visibleNsfwActionModels.map((model) => {
-                      const hasVision = model.capabilities.includes(nsfwActionMeta.capability);
-                      const selected = hasVision && model.id === nsfwActionModel?.id;
+                      const selected = model.id === nsfwActionModel?.id;
 
                       return (
                         <button
-                          aria-disabled={!hasVision}
                           aria-checked={selected}
-                          className={`grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-md border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-not-allowed ${
+                          className={`grid min-h-10 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-md border px-3 py-1.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                             selected
                               ? "border-primary bg-primary-soft text-foreground shadow-sm"
-                              : hasVision
-                                ? "border-border bg-panel text-muted hover:bg-primary-soft hover:text-foreground"
-                                : "border-border bg-background/70 text-muted opacity-65"
+                              : "border-border bg-panel text-muted hover:bg-primary-soft hover:text-foreground"
                           }`}
-                          disabled={!hasVision}
                           key={model.id}
                           role="radio"
                           type="button"
-                          onClick={() => {
-                            if (!hasVision) {
-                              return;
-                            }
-
+                          onClick={() =>
                             patchNsfwActionPreference({
                               profileId: nsfwActionProfile?.id,
                               modelId: model.id,
-                            });
-                          }}
+                            })
+                          }
                         >
                           <span
-                            className={`mt-1 flex size-4 items-center justify-center rounded-full border ${
-                              selected ? "border-primary" : hasVision ? "border-muted" : "border-border"
+                            className={`flex size-4 items-center justify-center rounded-full border ${
+                              selected ? "border-primary" : "border-muted"
                             }`}
                           >
                             <span className={`size-2 rounded-full ${selected ? "bg-primary" : "bg-transparent"}`} />
                           </span>
-                          <span className="min-w-0">
-                            <span className="flex min-w-0 items-center justify-between gap-2">
-                              <span className="truncate text-sm font-semibold">{model.label || model.id}</span>
-                              <span
-                                className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] ${
-                                  hasVision
-                                    ? "border-primary bg-primary-soft text-primary"
-                                    : "border-border bg-panel text-muted"
-                                }`}
-                              >
-                                {hasVision ? "图片可选" : "仅文本"}
-                              </span>
-                            </span>
-                            <span className="mt-0.5 block truncate text-xs">{model.id}</span>
-                            <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
-                              <span>Context {resolveModelContextLabel(model)}</span>
-                              {model.capabilities.includes("vision") ? (
-                                <span className="rounded-full border border-border bg-background px-2 py-0.5">图片理解</span>
-                              ) : null}
-                              {model.capabilities.includes("text") ? (
-                                <span className="rounded-full border border-border bg-background px-2 py-0.5">文本生成</span>
-                              ) : null}
-                            </span>
-                          </span>
+                          <span className="truncate text-sm font-semibold">{model.label || model.id}</span>
                         </button>
                       );
                     })
                   ) : (
-                    <p className="rounded-md border border-border bg-background px-3 py-4 text-xs text-muted">
-                      {nsfwActionAllModels.length > 0 ? "没有匹配的模型。" : "当前 API 还没有模型。"}
-                    </p>
+                    <div
+                      className={`rounded-md border px-3 py-4 text-xs leading-5 ${
+                        nsfwActionModels.length > 0
+                          ? "border-border bg-background text-muted"
+                          : "border-warning/35 bg-warning/10 text-foreground"
+                      }`}
+                    >
+                      {nsfwActionModels.length > 0 ? (
+                        t("没有匹配的模型。")
+                      ) : (
+                        <>
+                          <p className="font-medium">{t("当前服务商没有支持图片理解的模型。")}</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            </section>
+          ) : null}
+
+        <div className="grid gap-3 rounded-md border border-border bg-background px-3 py-3 min-[640px]:px-4 min-[640px]:py-4 min-[1120px]:col-start-2 min-[1120px]:row-start-1 min-[1120px]:row-span-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{t("检测规则")}</p>
+              <p className="mt-1 text-xs text-muted">
+                {nsfwActionHasCustomRules ? t("仅使用已勾选规则。") : t("未勾选时使用内置规则。")}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
+                {selectedRuleCount > 0 ? t("已启用 {selected}/{total}", { selected: selectedRuleCount, total: nsfwActionRules.length }) : t("默认规则")}
+              </span>
+              <Button
+                className="min-h-9 px-2.5 py-1.5 text-xs"
+                disabled={!nsfwActionHasCustomRules}
+                icon={<X size={14} />}
+                variant="ghost"
+                onClick={clearNsfwRules}
+              >
+                {t("取消全部选择")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-border bg-panel">
+            <div className="overflow-x-auto">
+              <div className="min-w-[680px]">
+                <div className="grid grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_112px] border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
+                  <span>{t("规则")}</span>
+                  <span>{t("摘要")}</span>
+                  <span className="text-center">{t("操作")}</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {nsfwActionRules.length > 0 ? (
+                    nsfwActionRules.map((rule) => {
+                      const selected = nsfwActionRulePresetIds.includes(rule.id);
+                      const expanded = expandedRuleId === rule.id;
+
+                      return (
+                        <div
+                          className={`border-b border-border/60 text-sm last:border-b-0 ${
+                            selected ? "bg-primary-soft/70" : "bg-panel"
+                          }`}
+                          key={rule.id}
+                        >
+                          <div className="grid min-h-14 grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_112px] items-center px-3 py-2">
+                            <span className="flex min-w-0 items-center gap-3 pr-3">
+                              <button
+                                aria-checked={selected}
+                                aria-label={t("{action}规则 {label}", { action: selected ? t("停用") : t("启用"), label: rule.label })}
+                                className="flex size-8 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
+                                role="checkbox"
+                                type="button"
+                                onClick={() => toggleRuleSelection(rule.id)}
+                              >
+                                <span
+                                  className={`flex size-4 items-center justify-center rounded-[4px] border ${
+                                    selected
+                                      ? "border-primary bg-primary text-primary-foreground"
+                                      : "border-muted bg-panel"
+                                  }`}
+                                >
+                                  {selected ? <Check size={11} /> : null}
+                                </span>
+                              </button>
+                              <span className="min-w-0">
+                                <span className="block truncate font-medium text-foreground">{rule.label}</span>
+                                <span className="mt-0.5 block text-[11px] text-muted">
+                                  {selected ? t("已启用") : t("未启用")}
+                                </span>
+                              </span>
+                            </span>
+                            <button
+                              aria-label={t("{action}规则 {label}详情", { action: expanded ? t("收起") : t("展开"), label: rule.label })}
+                              className="min-w-0 pr-3 text-left text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
+                              type="button"
+                              onClick={() => setExpandedRuleId(expanded ? null : rule.id)}
+                            >
+                              <span className="block truncate">{summarizeRuleInstructions(rule.instructions)}</span>
+                            </button>
+                            <span className="flex items-center justify-center gap-1">
+                              <button
+                                aria-label={t("{action}规则 {label}详情", { action: expanded ? t("收起") : t("展开"), label: rule.label })}
+                                className="flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
+                                type="button"
+                                onClick={() => setExpandedRuleId(expanded ? null : rule.id)}
+                              >
+                                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                              <button
+                                aria-label={t("编辑规则 {label}", { label: rule.label })}
+                                className="flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
+                                type="button"
+                                onClick={() => editRule(rule)}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <IconTooltipButton
+                                ariaLabel={t("删除规则 {label}", { label: rule.label })}
+                                icon={<Trash2 size={14} />}
+                                label={t("删除规则 {label}", { label: rule.label })}
+                                size="sm"
+                                variant="danger"
+                                onClick={() => deleteRule(rule.id)}
+                              />
+                            </span>
+                          </div>
+                          {expanded ? (
+                            <div className="border-t border-border/60 bg-background px-3 py-3">
+                              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-xs leading-5 text-muted">
+                                {rule.instructions}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="px-3 py-6 text-center text-xs text-muted">{t("当前没有可用规则。")}</p>
                   )}
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="grid gap-3 border-t border-border pt-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-foreground">检测规则</p>
-                <p className="mt-1 text-xs text-muted">
-                  {nsfwActionHasCustomRules ? "仅使用已勾选规则。" : "未勾选时使用内置规则。"}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-                  {selectedRuleCount > 0 ? `已启用 ${selectedRuleCount}/${nsfwActionRules.length}` : "默认规则"}
-                </span>
+          <div className="rounded-md border border-border bg-panel">
+            {isRuleEditorOpen ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-foreground">
+                    {ruleEditor.editingRuleId ? t("编辑规则") : t("新建规则")}
+                  </p>
+                </div>
                 <Button
-                  className="min-h-9 px-2.5 py-1.5 text-xs"
-                  disabled={!nsfwActionHasCustomRules}
-                  icon={<X size={14} />}
+                  className="min-h-8 px-2 py-1 text-xs"
+                  icon={<X size={13} />}
                   variant="ghost"
-                  onClick={clearNsfwRules}
+                  onClick={closeRuleEditor}
                 >
-                  取消全部选择
+                  {ruleEditor.editingRuleId ? t("取消编辑") : t("收起")}
                 </Button>
               </div>
-            </div>
+            ) : (
+              <button
+                className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm text-foreground outline-none transition-colors hover:bg-primary-soft focus-visible:ring-2 focus-visible:ring-primary/25"
+                type="button"
+                onClick={openNewRuleEditor}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Plus size={15} />
+                  <span className="font-semibold">{t("新建规则")}</span>
+                </span>
+                <span className="text-xs text-muted">{t("默认收起，需要时再添加")}</span>
+              </button>
+            )}
 
-            <div className="overflow-hidden rounded-md border border-border bg-panel">
-              <div className="overflow-x-auto">
-                <div className="min-w-[680px]">
-                  <div className="grid grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_112px] border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
-                    <span>规则</span>
-                    <span>摘要</span>
-                    <span className="text-center">操作</span>
-                  </div>
-                  <div className="max-h-72 overflow-y-auto">
-                    {nsfwActionRules.length > 0 ? (
-                      nsfwActionRules.map((rule) => {
-                        const selected = nsfwActionRulePresetIds.includes(rule.id);
-                        const expanded = expandedRuleId === rule.id;
-
-                        return (
-                          <div
-                            className={`border-b border-border/60 text-sm last:border-b-0 ${
-                              selected ? "bg-primary-soft/70" : "bg-panel"
-                            }`}
-                            key={rule.id}
-                          >
-                            <div className="grid min-h-14 grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_112px] items-center px-3 py-2">
-                              <span className="flex min-w-0 items-center gap-3 pr-3">
-                                <button
-                                  aria-checked={selected}
-                                  aria-label={`${selected ? "停用" : "启用"}规则 ${rule.label}`}
-                                  className="flex size-8 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
-                                  role="checkbox"
-                                  type="button"
-                                  onClick={() => toggleRuleSelection(rule.id)}
-                                >
-                                  <span
-                                    className={`flex size-4 items-center justify-center rounded-[4px] border ${
-                                      selected
-                                        ? "border-primary bg-primary text-primary-foreground"
-                                        : "border-muted bg-panel"
-                                    }`}
-                                  >
-                                    {selected ? <Check size={11} /> : null}
-                                  </span>
-                                </button>
-                                <span className="min-w-0">
-                                  <span className="block truncate font-medium text-foreground">{rule.label}</span>
-                                  <span className="mt-0.5 block text-[11px] text-muted">
-                                    {selected ? "已启用" : "未启用"}
-                                  </span>
-                                </span>
-                              </span>
-                              <button
-                                aria-label={`${expanded ? "收起" : "展开"}规则 ${rule.label} 详情`}
-                                className="min-w-0 pr-3 text-left text-muted outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
-                                type="button"
-                                onClick={() => setExpandedRuleId(expanded ? null : rule.id)}
-                              >
-                                <span className="block truncate">{summarizeRuleInstructions(rule.instructions)}</span>
-                              </button>
-                              <span className="flex items-center justify-center gap-1">
-                                <button
-                                  aria-label={`${expanded ? "收起" : "展开"}规则 ${rule.label} 详情`}
-                                  className="flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
-                                  type="button"
-                                  onClick={() => setExpandedRuleId(expanded ? null : rule.id)}
-                                >
-                                  {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                </button>
-                                <button
-                                  aria-label={`编辑规则 ${rule.label}`}
-                                  className="flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
-                                  type="button"
-                                  onClick={() => editRule(rule)}
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  aria-label={`删除规则 ${rule.label}`}
-                                  className="flex size-8 items-center justify-center rounded-full text-muted outline-none transition-colors hover:bg-danger-soft hover:text-danger focus-visible:ring-2 focus-visible:ring-danger/25"
-                                  type="button"
-                                  onClick={() => deleteRule(rule.id)}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </span>
-                            </div>
-                            {expanded ? (
-                              <div className="border-t border-border/60 bg-background px-3 py-3">
-                                <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md border border-border bg-panel p-3 text-xs leading-5 text-muted">
-                                  {rule.instructions}
-                                </pre>
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p className="px-3 py-6 text-center text-xs text-muted">当前没有可用规则。</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-md border border-border bg-panel">
-              {isRuleEditorOpen ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-foreground">
-                      {ruleEditor.editingRuleId ? "编辑规则" : "新建规则"}
-                    </p>
-                    <p className="mt-1 text-xs text-muted">保存后会自动加入已启用规则。</p>
-                  </div>
+            {isRuleEditorOpen ? (
+              <div className="grid gap-3 border-t border-border p-3">
+                <label className="grid gap-2 text-xs font-medium text-muted">
+                  {t("规则名称")}
+                  <TextField
+                    placeholder={t("例如：严格安全分级")}
+                    value={ruleEditor.label}
+                    onChange={(event) => setRuleEditor((current) => ({ ...current, label: event.target.value }))}
+                  />
+                </label>
+                <label className="grid gap-2 text-xs font-medium text-muted">
+                  {t("规则内容")}
+                  <TextArea
+                    aria-label={t("NSFW 分级规则内容")}
+                    className="min-h-32"
+                    placeholder={nsfwActionMeta.rulePlaceholder}
+                    resizeMode="vertical"
+                    value={ruleEditor.instructions}
+                    onChange={(event) =>
+                      setRuleEditor((current) => ({ ...current, instructions: event.target.value }))
+                    }
+                  />
+                </label>
+                <div className="flex justify-end">
                   <Button
-                    className="min-h-8 px-2 py-1 text-xs"
-                    icon={<X size={13} />}
-                    variant="ghost"
-                    onClick={closeRuleEditor}
+                    className="min-h-8 px-2.5 py-1.5 text-xs"
+                    disabled={!ruleEditor.label.trim() || !ruleEditor.instructions.trim()}
+                    icon={<Check size={14} />}
+                    variant="primary"
+                    onClick={saveRule}
                   >
-                    {ruleEditor.editingRuleId ? "取消编辑" : "收起"}
+                    {ruleEditor.editingRuleId ? t("保存规则") : t("添加规则")}
                   </Button>
                 </div>
-              ) : (
-                <button
-                  className="flex w-full items-center justify-between gap-3 px-3 py-3 text-left text-sm text-foreground outline-none transition-colors hover:bg-primary-soft focus-visible:ring-2 focus-visible:ring-primary/25"
-                  type="button"
-                  onClick={openNewRuleEditor}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Plus size={15} />
-                    <span className="font-semibold">新建规则</span>
-                  </span>
-                  <span className="text-xs text-muted">默认收起，需要时再添加</span>
-                </button>
-              )}
-
-              {isRuleEditorOpen ? (
-                <div className="grid gap-3 border-t border-border p-3">
-                  <label className="grid gap-2 text-xs font-medium text-muted">
-                    规则名称
-                    <TextField
-                      placeholder="例如：严格安全分级"
-                      value={ruleEditor.label}
-                      onChange={(event) => setRuleEditor((current) => ({ ...current, label: event.target.value }))}
-                    />
-                  </label>
-                  <label className="grid gap-2 text-xs font-medium text-muted">
-                    规则内容
-                    <TextArea
-                      aria-label="NSFW 分级规则内容"
-                      className="min-h-32"
-                      placeholder={nsfwActionMeta.rulePlaceholder}
-                      resizeMode="vertical"
-                      value={ruleEditor.instructions}
-                      onChange={(event) =>
-                        setRuleEditor((current) => ({ ...current, instructions: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <div className="flex justify-end">
-                    <Button
-                      disabled={!ruleEditor.label.trim() || !ruleEditor.instructions.trim()}
-                      icon={<Check size={14} />}
-                      variant="primary"
-                      onClick={saveRule}
-                    >
-                      {ruleEditor.editingRuleId ? "保存规则" : "添加规则"}
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
+              </div>
+            ) : null}
             </div>
           </div>
-        </section>
+        </div>
         {feedbackText ? (
           <p className="rounded-md border border-border bg-panel px-3 py-2 text-sm text-muted">{feedbackText}</p>
         ) : null}
@@ -806,32 +815,6 @@ function normalizeModelSearchText(model: AiProviderModelSettings): string {
   return `${model.label} ${model.id} ${model.capabilities.join(" ")}`.toLowerCase();
 }
 
-function resolveModelContextLabel(model: AiProviderModelSettings | undefined): string {
-  const modelName = getNormalizedModelName(model);
-
-  if (!modelName) {
-    return "--";
-  }
-
-  if (/mini|flash|lite|fast/i.test(modelName)) {
-    return "128K";
-  }
-
-  if (/gemini.*(?:1\.5|2\.0|2\.5|3)|gpt-5|claude.*(?:sonnet|opus)/i.test(modelName)) {
-    return "400K";
-  }
-
-  if (/gpt-4\.1|gpt-4o|o3|o4|qwen.*vl|internvl/i.test(modelName)) {
-    return "200K";
-  }
-
-  return "128K";
-}
-
-function getNormalizedModelName(model: AiProviderModelSettings | undefined): string {
-  return `${model?.label ?? ""} ${model?.id ?? ""}`.trim().toLowerCase();
-}
-
 function getNsfwStatusDotClass(status: string): string {
   if (status === "已启用") {
     return "bg-primary";
@@ -862,26 +845,28 @@ function resolveNsfwApiStatus(profile: PublicAiProviderSettings["profiles"][numb
 
 type NsfwSpeedPickerProps = {
   disabled: boolean;
+  flat?: boolean;
   value: NsfwGradingSpeed;
   onChange: (value: NsfwGradingSpeed) => void;
 };
 
-function NsfwSpeedPicker({ disabled, value, onChange }: NsfwSpeedPickerProps) {
+function NsfwSpeedPicker({ disabled, flat, value, onChange }: NsfwSpeedPickerProps) {
+  const { t } = useLocale();
   return (
-    <div className="rounded-md border border-border bg-background px-4 py-3">
+    <div className={flat ? "px-1 py-2.5" : "rounded-md border border-border bg-background px-3 py-3 min-[640px]:px-4"}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-foreground">分级速度</p>
-          <p className="mt-1 text-xs leading-5 text-muted">速度越高请求越密集，接口限速时切回稳定。</p>
+          <p className="text-sm font-semibold text-foreground">{t("分级速度")}</p>
         </div>
-        <div aria-label="选择 NSFW 分级速度" className="grid grid-cols-3 gap-2" role="radiogroup">
+        </div>
+        <div aria-label={t("选择 NSFW 分级速度")} className="grid grid-cols-3 gap-1.5 min-[520px]:gap-2" role="radiogroup">
           {nsfwGradingSpeedOptions.map((option) => {
             const isSelected = option.value === value;
 
             return (
               <button
                 aria-checked={isSelected}
-                className={`min-w-20 rounded-lg border px-3 py-2 text-left text-xs transition-all hover:-translate-y-0.5 hover:shadow-elevated disabled:cursor-not-allowed disabled:opacity-50 ${
+                className={`min-w-0 rounded-lg border px-2 py-2 text-left text-xs transition-all hover:-translate-y-0.5 hover:shadow-elevated disabled:cursor-not-allowed disabled:opacity-50 min-[520px]:min-w-20 min-[520px]:px-3 ${
                   isSelected
                     ? "border-primary bg-primary-soft text-foreground shadow-elevated"
                     : "border-border bg-panel text-muted hover:bg-primary-soft hover:text-foreground"
@@ -893,27 +878,63 @@ function NsfwSpeedPicker({ disabled, value, onChange }: NsfwSpeedPickerProps) {
                 onClick={() => onChange(option.value)}
               >
                 <span className="block font-semibold">{option.label}</span>
-                <span className="mt-1 block leading-4">{option.concurrency} 路</span>
+                <span className="mt-1 block leading-4">{option.concurrency} {t("路")}</span>
               </button>
             );
           })}
         </div>
-      </div>
     </div>
+  );
+}
+
+type NsfwDetectionModePickerProps = {
+  disabled: boolean;
+  flat?: boolean;
+  value: NsfwDetectionMode;
+  onChange: (value: NsfwDetectionMode) => void;
+};
+
+function NsfwDetectionModePicker({ disabled, flat, value, onChange }: NsfwDetectionModePickerProps) {
+  const { t } = useLocale();
+  return (
+    <label className={flat ? "grid gap-2 px-1 py-2.5" : "grid gap-2 rounded-md border border-border bg-background px-3 py-3"}>
+      <span>
+        <span className="block text-sm font-semibold text-foreground">{t("分级方式")}</span>
+        <span className="mt-1 block text-xs leading-5 text-muted">
+          {t("本地模块安装后优先使用；本地失败时可回退已配置的远程视觉模型。")}
+        </span>
+      </span>
+      <select
+        aria-label={t("选择 NSFW 分级方式")}
+        className="min-h-9 rounded-md border border-border bg-panel px-2 text-sm text-foreground"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(event.target.value as NsfwDetectionMode)}
+      >
+        <option value="local-first">{t("本地优先，失败时回退远程")}</option>
+        <option value="remote-only">{t("仅使用远程视觉模型")}</option>
+        <option value="local-only">{t("仅使用本地模块")}</option>
+      </select>
+    </label>
   );
 }
 
 type NsfwSettingRowProps = {
   checked: boolean;
   description: string;
+  flat?: boolean;
   icon: React.ReactNode;
   label: string;
   onChange: (checked: boolean) => void;
 };
 
-function NsfwSettingRow({ checked, description, icon, label, onChange }: NsfwSettingRowProps) {
+function NsfwSettingRow({ checked, description, flat, icon, label, onChange }: NsfwSettingRowProps) {
   return (
-    <label className="flex min-h-14 items-center justify-between gap-4 rounded-md border border-border bg-background px-4 py-3">
+    <label
+      className={`flex min-h-14 items-center justify-between gap-3 min-[640px]:gap-4 ${
+        flat ? "px-1 py-2.5" : "rounded-md border border-border bg-background px-3 py-3 min-[640px]:px-4"
+      }`}
+    >
       <span className="flex min-w-0 items-start gap-3">
         <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center text-muted">{icon}</span>
         <span className="min-w-0">

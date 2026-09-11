@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocale } from "@/components/LocaleProvider";
 import type { AiSettingsImportPreview } from "../../../types/suyanApi";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
@@ -21,64 +22,77 @@ const modeLabels: Record<ImportMode, string> = {
 };
 
 export function AiSettingsImportDialog({ isBusy, onClose, onPickFile, onApply }: AiSettingsImportDialogProps) {
+  const { t } = useLocale();
   const [password, setPassword] = useState("");
   const [preview, setPreview] = useState<AiSettingsImportPreview | null>(null);
   const [mode, setMode] = useState<ImportMode>("merge");
   const [error, setError] = useState<string | null>(null);
   const [confirmingReplace, setConfirmingReplace] = useState(false);
+  const [activeAction, setActiveAction] = useState<"pick" | "apply" | null>(null);
+  const busy = isBusy || activeAction !== null;
 
   async function handlePickFile() {
+    if (busy) return;
+    setActiveAction("pick");
     setError(null);
-    const result = await onPickFile(password || undefined);
+    try {
+      const result = await onPickFile(password || undefined);
 
-    if (result.error) {
-      setError(result.error);
-      return;
-    }
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
 
-    if (result.preview) {
-      setPreview(result.preview);
-      setMode("merge");
-      setConfirmingReplace(false);
-    }
+      if (result.preview) {
+        setPreview(result.preview);
+        setMode("merge");
+        setConfirmingReplace(false);
+      }
+    } catch {
+      setError(t("读取备份失败，请重新选择文件。"));
+    } finally { setActiveAction(null); }
   }
 
   async function handleApply() {
-    if (!preview) {
+    if (!preview || busy) {
       return;
     }
 
     setError(null);
-    const message = await onApply(preview.token, mode);
+    setActiveAction("apply");
+    try {
+      const message = await onApply(preview.token, mode);
 
-    if (message) {
-      setError(message);
-    }
+      if (message) {
+        setError(message);
+      }
+    } catch {
+      setError(t("导入设置失败，请重试。"));
+    } finally { setActiveAction(null); }
   }
 
   return (
     <AppDialog
-      panelClassName="flex max-h-[min(720px,calc(100vh-64px))] w-full max-w-lg flex-col"
+      panelClassName="flex max-h-full w-full max-w-lg flex-col"
       titleId="ai-settings-import-title"
       onClose={onClose}
     >
       <header className="flex items-start justify-between gap-4 border-b border-border bg-panel px-6 py-5">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold" id="ai-settings-import-title">
-            导入 AI 设置备份
+            {t("导入 AI 设置备份")}
           </h2>
-          <p className="mt-1 text-sm text-muted">选择素言导出的备份文件，先预览再落地导入。</p>
         </div>
         <DialogCloseButton onClick={onClose} />
       </header>
 
       <div className="grid gap-4 px-6 py-5">
+        <p className="text-xs leading-5 text-muted">{t("账户加密备份无需填写密码，但必须联网并登录导出时的同一账户；普通备份无需密码。")}</p>
         <label className="grid gap-2 text-sm font-medium text-muted">
-          备份密码
+          {t("备份密码")}
           <TextField
-            aria-label="备份密码"
+            aria-label={t("备份密码")}
             autoComplete="current-password"
-            placeholder="加密备份需要密码；明文备份可留空"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -87,44 +101,49 @@ export function AiSettingsImportDialog({ isBusy, onClose, onPickFile, onApply }:
 
         {!preview ? (
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={onClose}>
-              取消
+            <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="ghost" onClick={onClose}>
+              {t("取消")}
             </Button>
-            <Button disabled={isBusy} variant="primary" onClick={() => void handlePickFile()}>
-              {isBusy ? "读取中…" : "选择备份文件"}
+            <Button
+              className="min-h-8 px-2.5 py-1.5 text-xs"
+              disabled={busy}
+              variant="primary"
+              onClick={() => void handlePickFile()}
+            >
+              {activeAction === "pick" ? t("选择并读取中…") : t("选择备份文件")}
             </Button>
           </div>
         ) : (
           <>
             <div className="grid gap-2 rounded-xl border border-border bg-panel p-4 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted">文件</span>
+                <span className="text-muted">{t("文件")}</span>
                 <span className="truncate font-medium text-foreground">{preview.fileName}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted">格式版本</span>
+                <span className="text-muted">{t("格式版本")}</span>
                 <span className="font-medium text-foreground">{preview.formatVersion}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted">供应商</span>
-                <span className="font-medium text-foreground">{preview.providerCount} 个（新增 {preview.newProviderCount} 个）</span>
+                <span className="text-muted">{t("供应商")}</span>
+                <span className="font-medium text-foreground">{t("{count} 个（新增 {newCount} 个）", { count: preview.providerCount, newCount: preview.newProviderCount })}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted">模型</span>
-                <span className="font-medium text-foreground">{preview.modelCount} 个</span>
+                <span className="text-muted">{t("模型")}</span>
+                <span className="font-medium text-foreground">{t("{count} 个", { count: preview.modelCount })}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted">含密钥的供应商</span>
-                <span className="font-medium text-foreground">{preview.hasApiKeyProfiles ? "是" : "否"}</span>
+                <span className="text-muted">{t("含密钥的供应商")}</span>
+                <span className="font-medium text-foreground">{preview.hasApiKeyProfiles ? t("是") : t("否")}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-muted">功能偏好</span>
-                <span className="font-medium text-foreground">{preview.actionPreferencesCount} 项</span>
+                <span className="text-muted">{t("功能偏好")}</span>
+                <span className="font-medium text-foreground">{t("{count} 项", { count: preview.actionPreferencesCount })}</span>
               </div>
             </div>
 
             <div className="grid gap-2 text-sm font-medium text-muted">
-              导入方式
+              {t("导入方式")}
               <div className="grid gap-2">
                 {(["merge", "add-new", "replace"] as const).map((value) => (
                   <label
@@ -141,14 +160,7 @@ export function AiSettingsImportDialog({ isBusy, onClose, onPickFile, onApply }:
                       onChange={() => setMode(value)}
                     />
                     <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-foreground">{modeLabels[value]}</span>
-                      <span className="mt-1 block text-xs text-muted">
-                        {value === "merge"
-                          ? "同供应商用备份覆盖，新供应商完整复制，保留未冲突的现有配置。"
-                          : value === "add-new"
-                            ? "只导入当前没有的新供应商，不改变规则与偏好。"
-                            : "用备份完全替换现有配置，导入前需二次确认。"}
-                      </span>
+                      <span className="block text-sm font-semibold text-foreground">{t(modeLabels[value])}</span>
                     </span>
                   </label>
                 ))}
@@ -158,30 +170,38 @@ export function AiSettingsImportDialog({ isBusy, onClose, onPickFile, onApply }:
             {error ? <p className="rounded-lg border border-danger bg-danger-soft px-3 py-2 text-xs text-danger">{error}</p> : null}
 
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setPreview(null)}>
-                重新选择
+              <Button className="min-h-8 px-2.5 py-1.5 text-xs" disabled={busy} variant="ghost" onClick={() => setPreview(null)}>
+                {t("重新选择")}
               </Button>
-              <Button disabled={isBusy} variant="primary" onClick={() => {
-                if (mode === "replace") {
-                  setConfirmingReplace(true);
-                } else {
-                  void handleApply();
-                }
-              }}>
-                {isBusy ? "导入中…" : "开始导入"}
+              <Button
+                className="min-h-8 px-2.5 py-1.5 text-xs"
+                disabled={busy}
+                variant="primary"
+                onClick={() => {
+                  if (mode === "replace") {
+                    setConfirmingReplace(true);
+                  } else {
+                    void handleApply();
+                  }
+                }}
+              >
+                {activeAction === "apply" ? t("导入中…") : t("开始导入")}
               </Button>
             </div>
           </>
         )}
       </div>
 
+      {error && !preview ? <p role="alert" className="px-6 pb-4 text-xs text-danger">{error}</p> : null}
+
       {confirmingReplace && preview ? (
         <ConfirmBubble
-          confirmLabel="确认替换"
-          description="完全替换将清空现有 AI 配置并用备份取代，此操作不可撤销。"
-          isBusy={isBusy}
+          confirmLabel={t("确认替换")}
+          description={t("当前所有 AI 配置将被替换为导入文件中的配置，此操作不可撤销。")}
+          isBusy={busy}
+          busyLabel={activeAction === "apply" ? t("正在替换…") : t("请等待当前操作完成")}
           placement="above"
-          title="完全替换现有配置？"
+          title={t("完全替换现有配置？")}
           onCancel={() => setConfirmingReplace(false)}
           onConfirm={() => void handleApply()}
         />

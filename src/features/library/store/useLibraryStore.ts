@@ -28,6 +28,7 @@ import type {
   AiAnalyzePromptPayload,
   AiGeneratedImage,
   AiFeatureAction,
+  AiModelSelection,
   AiProviderModelCapability,
   AiProviderModelSettings,
   AiOptimizePromptPayload,
@@ -40,7 +41,10 @@ import type {
   PublicAiProviderSettings,
   SaveAiProviderSettingsPayload,
 } from "../types/ai";
-import { buildAiActionInstructions, normalizeAiRecognitionSourcePreferences } from "../types/ai";
+import {
+  buildAiActionInstructions,
+  normalizeAiRecognitionSourcePreferences,
+} from "../types/ai";
 import { buildPublicAiSettingsPayload, updateAiActionModelPreference } from "../utils/aiSettingsDraft";
 import type { CanvasDraftSettings, CanvasGenerationResult, CanvasPhase } from "../types/canvas";
 import type {
@@ -54,12 +58,25 @@ import type {
   MaterialBrowserSortMode,
   NetworkMaterialImportMode,
   NsfwGradingSpeed,
+  NsfwDetectionMode,
   NsfwRating,
   PromptLexiconEntry,
   PromptLexiconKind,
   PromptLexiconSettings,
+  SidebarEntryId,
+  SidebarEntryVisibility,
+  ThemeAccent,
+  ThemeAccentMemoryByPreset,
+  ThemeCustomTheme,
+  ThemeCustomAccentSlot,
   ThemeMode,
+  ThemePreset,
   CategoryWorkspaceState,
+} from "../types/library";
+import type { ArchiveExportAuthorChoice, ExportZipData } from "../../../types/suyanApi";
+import {
+  defaultWorkspaceWidthPercent,
+  normalizeWorkspaceWidthPercent,
 } from "../types/library";
 import type {
   CategoryAssignmentSource,
@@ -80,8 +97,6 @@ import {
   upsertCustomCategoryNode,
 } from "../utils/categoryTaxonomy";
 import {
-  collectUsedTagKeysFromItems,
-  pruneOrphanTagLexiconEntries,
   sanitizeMaterialTags,
 } from "../utils/tagNormalization";
 import { assignItemCategory } from "../utils/categoryMigration";
@@ -94,11 +109,13 @@ import {
   defaultNsfwGradingSpeed,
   getNsfwGradingConcurrency,
 } from "../utils/nsfwGradingSpeed";
+import { defaultNsfwDetectionMode } from "../utils/nsfwDetectionMode";
 import {
   analyzePromptText,
   analyzePromptTags,
   isolateCategoryAnalysisResult,
   normalizeConcretePromptTags,
+  type PromptAnalysisResult,
 } from "../utils/promptAnalysis";
 import {
   buildPromptAnalysisFromRemote,
@@ -113,10 +130,28 @@ import { applyTagConfigurationToItems, type TagConfigurationDraft } from "../uti
 import { getUiErrorMessage } from "../utils/uiMessages";
 import { buildAiErrorPresentation, type AiErrorPresentation } from "../utils/aiErrorPresentation";
 import { reconcileItemsByIdentity } from "../utils/libraryItemIdentity";
-import { applyThemeModeToRoot, finishThemeModeSwitch } from "../utils/themeMode";
+import {
+  applyThemeModeToRoot,
+  DEFAULT_THEME_PRESET,
+  DEFAULT_THEME_ACCENT,
+  DEFAULT_THEME_CUSTOM_ACCENT,
+  DEFAULT_THEME_CUSTOM_ACCENTS,
+  DEFAULT_THEME_OPACITY,
+  DEFAULT_THEME_ACCENT_OPACITY,
+  finishThemeModeSwitch,
+  createDefaultThemeAccentMemory,
+  getDefaultThemeAccentForPreset,
+  isThemeCustomAccentSlot,
+  normalizeThemeCustomTheme,
+  normalizeThemeAccentOpacity,
+  normalizeThemeCustomAccent,
+  normalizeThemeOpacity,
+} from "../utils/themeMode";
 import { isPendingStatusFeedbackText, type StatusFeedbackMessage } from "../utils/statusFeedback";
 import {
   builtinModuleDefinitions,
+  getBuiltinModuleDefinition,
+  isBuiltinModuleEnabled,
   resolveBuiltinModuleState,
   getModuleRuntimeDependencies,
   type BuiltinModuleId,
@@ -124,23 +159,86 @@ import {
   type BuiltinModuleStatePatch,
 } from "../utils/moduleRegistry";
 import { resolveVideoRuntimeStateAfterProbe } from "../utils/moduleManagement";
+import {
+  defaultSidebarEntryVisibility,
+  normalizeSidebarEntryVisibility,
+} from "../utils/sidebarEntries";
+import type { PromptViewSettings } from "../../prompts/types";
+import type { AppLanguage } from "../../../types/locale";
+import { defaultAppLanguage } from "../../../types/locale";
 
 // Settings writes share one JSON file. Serialize them so an autosave from the
 // tag/category workspace cannot finish after a newer custom-entry save and
 // overwrite it with an older snapshot.
 let viewSettingsWriteChain: Promise<void> = Promise.resolve();
+let tagOrganizationRevision = 0;
+let archiveKnowledgeRevision = 0;
+
+export function runTagOrganization<T>(work: () => Promise<T>): Promise<T> {
+  const task = viewSettingsWriteChain.then(async () => {
+    const result = await work();
+    tagOrganizationRevision += 1;
+    return result;
+  });
+  viewSettingsWriteChain = task.then(() => undefined, () => undefined);
+  return task;
+}
+let aiSettingsWriteChain: Promise<void> = Promise.resolve();
+let aiSettingsSaveRevision = 0;
+let aiSettingsFullSaveInFlight = 0;
 let canvasDraftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let materialBrowserScrollSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let workspaceWidthSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function saveLibraryViewSettingsSerialized(
   settings: LibraryViewSettings,
 ): Promise<IpcResult<LibraryViewSettings>> {
-  const task = viewSettingsWriteChain.then(() => window.suyanApi.saveLibraryViewSettings(settings));
+  const revision = tagOrganizationRevision;
+  const knowledgeRevision = archiveKnowledgeRevision;
+  const task = viewSettingsWriteChain.then(() => {
+    const current = useLibraryStore.getState();
+    const next = knowledgeRevision !== archiveKnowledgeRevision ? {
+      ...settings, promptLexicons: current.promptLexicons,
+      categoryWorkspace: buildLibraryViewSettings(current).categoryWorkspace,
+    } : revision !== tagOrganizationRevision ? {
+      ...settings, promptLexicons: { ...settings.promptLexicons!, tags: current.promptLexicons?.tags ?? [] },
+    } : settings;
+    return window.suyanApi.saveLibraryViewSettings(next);
+  });
   viewSettingsWriteChain = task.then(
     () => undefined,
     () => undefined,
   );
   return task;
+}
+
+function saveAiSettingsSerialized(
+  settings: SaveAiProviderSettingsPayload,
+): Promise<IpcResult<PublicAiProviderSettings>> {
+  const task = aiSettingsWriteChain.then(() => window.suyanApi.saveAiSettings(settings));
+  aiSettingsWriteChain = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+function logAiSettingsSaveEvent(
+  event: string,
+  details: {
+    actionPreferenceCount: number;
+    activeProfileId: string;
+    profileCount: number;
+    requestRevision: number;
+    source: "full" | "action" | "recognition-source";
+    action?: AiFeatureAction;
+    modelId?: string;
+    profileId?: string;
+    superseded?: boolean;
+    ok?: boolean;
+  },
+): void {
+  logRendererStartupEvent(`ai-settings:${event}`, details);
 }
 
 type SaveItemOptions = {
@@ -169,7 +267,13 @@ const importOperationTimeoutMs = 65_000;
 
 const inFlightRemoteMaterialDownloads = new Set<string>();
 
+import { normalizeCanvasBackground, type CanvasBackgroundSettings } from "../utils/canvasBackground";
+
 type LibraryState = {
+  language: AppLanguage;
+  setLanguage: (language: AppLanguage) => Promise<boolean>;
+  canvasBackground: CanvasBackgroundSettings;
+  saveCanvasBackground: (patch: Partial<CanvasBackgroundSettings>) => Promise<boolean>;
   items: LibraryItem[];
   libraryRoots: LibraryRoot[];
   selectedItemId: string | null;
@@ -189,12 +293,31 @@ type LibraryState = {
   likedImageIds: string[];
   starredRecommendations: string[];
   webAssistantCustomUrls: string[];
+  /** 网页助手上次选择的平台，持久化。 */
+  webAssistantLastPlatform: string | null;
+  /** 网页助手上次使用的自定义网址，持久化。 */
+  webAssistantLastCustomUrl: string | null;
   generationModelOrder: string[];
   hiddenGenerationModels: string[];
   themeMode: ThemeMode;
+  themePreset: ThemePreset;
+  themeAccent: ThemeAccent;
+  themeCustomAccent: string;
+  themeOpacity: number;
+  themeNavigationOpacity: number;
+  themeBackgroundOpacity: number;
+  themeWorkspaceOpacity: number;
+  themeAccentOpacity: number;
+  themeCustomAccents: [string, string, string];
+  themeAccentMemory: ThemeAccentMemoryByPreset;
+  customTheme: ThemeCustomTheme;
+  workspaceWidthPercent: number;
+  sidebarEntryVisibility: SidebarEntryVisibility;
+  featureGuideCompleted: string[];
   autoNsfwGrading: boolean;
   blurNsfwImages: boolean;
   nsfwGradingSpeed: NsfwGradingSpeed;
+  nsfwDetectionMode: NsfwDetectionMode;
   masonryTileWidth: number;
   materialBrowserCollectionMode: MaterialBrowserCollectionMode;
   materialBrowserGalleryMode: MaterialBrowserGalleryMode;
@@ -204,6 +327,7 @@ type LibraryState = {
   materialBrowserScrollTop: number;
   networkMaterialImportMode: NetworkMaterialImportMode;
   promptLexicons: PromptLexiconSettings | null;
+  promptViewSettings: PromptViewSettings;
   categoryTaxonomy: import("../types/category").CategoryTaxonomy | null;
   categoryInbox: import("../types/category").CategoryInboxItem[];
   categoryCandidates: import("../types/category").CategoryCandidateProposal[];
@@ -230,6 +354,18 @@ type LibraryState = {
   setSelectedItemId: (selectedItemId: string | null) => void;
   clearRecentImportPins: () => void;
   setThemeMode: (themeMode: ThemeMode) => Promise<void>;
+  setThemePreset: (themePreset: ThemePreset) => Promise<void>;
+  setThemeAccent: (themeAccent: ThemeAccent, themeCustomAccent?: string, customAccentSlot?: ThemeCustomAccentSlot) => Promise<void>;
+  setThemeOpacity: (themeOpacity: number) => Promise<void>;
+  setThemeNavigationOpacity: (themeOpacity: number) => Promise<void>;
+  setThemeBackgroundOpacity: (themeOpacity: number) => Promise<void>;
+  setThemeWorkspaceOpacity: (themeOpacity: number) => Promise<void>;
+  setThemeAccentOpacity: (themeAccentOpacity: number) => Promise<void>;
+  setCustomTheme: (patch: Partial<ThemeCustomTheme>) => Promise<void>;
+  setWorkspaceWidthPercent: (workspaceWidthPercent: number) => void;
+  saveSidebarEntryVisibility: (entryId: SidebarEntryId, visible: boolean) => Promise<boolean>;
+  completeFeatureGuide: (guideId: string) => Promise<boolean>;
+  resetFeatureGuides: () => Promise<boolean>;
   saveGenerationModelPreferences: (patch: {
     generationModelOrder?: string[];
     hiddenGenerationModels?: string[];
@@ -238,6 +374,7 @@ type LibraryState = {
     autoNsfwGrading: boolean;
     blurNsfwImages: boolean;
     nsfwGradingSpeed: NsfwGradingSpeed;
+    nsfwDetectionMode: NsfwDetectionMode;
   }) => Promise<boolean>;
   saveNetworkMaterialImportMode: (networkMaterialImportMode: NetworkMaterialImportMode) => Promise<boolean>;
   saveMasonryTileWidth: (masonryTileWidth: number) => Promise<void>;
@@ -248,7 +385,7 @@ type LibraryState = {
   applyImportedAiSettings: (settings: PublicAiProviderSettings) => void;
   saveAiActionModelPreference: (
     action: AiFeatureAction,
-    selection: { profileId: string; modelId: string },
+    selection: AiModelSelection,
   ) => Promise<boolean>;
   saveAiRecognitionSourcePreferences: (preferences: AiRecognitionSourcePreferences) => Promise<boolean>;
   testAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<AiConnectionTestResult>;
@@ -266,6 +403,8 @@ type LibraryState = {
   clearAiErrorDialog: () => void;
   clearAiAnalysisCircuit: () => void;
   openExternalUrl: (url: string, label?: string) => Promise<boolean>;
+  openFfmpegComponentDownloadPage: () => Promise<boolean>;
+  openNsfwModuleDownloadPage: () => Promise<boolean>;
   importImages: () => Promise<void>;
   importManagedLibraryDirectory: () => Promise<void>;
   addAndScanLibraryRoot: () => Promise<void>;
@@ -292,7 +431,9 @@ type LibraryState = {
   importClipboardReferenceImage: (itemId: string) => Promise<boolean>;
   importReferenceImageFromUrl: (itemId: string, url: string) => Promise<boolean>;
   importZip: () => Promise<void>;
-  exportZip: (itemIds?: string[]) => Promise<void>;
+  exportZip: (itemIds?: string[], authorChoice?: ArchiveExportAuthorChoice) => Promise<ExportZipData | null>;
+  syncWorksToAccount: (itemIds: string[], expectedUid: string, force?: boolean) => Promise<boolean>;
+  refreshWorkAuthors: () => Promise<void>;
   saveItem: (itemId: string, patch: Partial<LibraryItem>, options?: SaveItemOptions) => Promise<void>;
   /**
    * Apply the same or per-item patches to many items and persist once.
@@ -345,6 +486,7 @@ type LibraryState = {
   toggleRecommendationStar: (url: string) => Promise<void>;
   addWebAssistantCustomUrl: (url: string) => Promise<void>;
   removeWebAssistantCustomUrl: (url: string) => Promise<void>;
+  saveWebAssistantPrefs: (prefs: { platform: string; customUrl: string | null }) => Promise<void>;
   deleteItems: (itemIds: string[], deleteImages: boolean) => Promise<void>;
   deleteSelected: (deleteImages: boolean) => Promise<void>;
   copyImage: (imageFileName: string) => Promise<void>;
@@ -362,23 +504,92 @@ type LibraryState = {
   cancelCompress: () => Promise<void>;
   moduleState: BuiltinModuleState;
   setModuleState: (patch: BuiltinModuleStatePatch) => Promise<boolean>;
+  removeModule: (moduleId: BuiltinModuleId) => Promise<boolean>;
+  restoreModule: (moduleId: BuiltinModuleId) => Promise<boolean>;
   installModule: (
     moduleId: BuiltinModuleId,
     options?: { source?: "download" | "local" },
   ) => Promise<boolean>;
   /** 实测 video-runtime 二进制是否可用，并同步修正 moduleState。 */
-  checkVideoRuntime: () => Promise<boolean>;
+  checkVideoRuntime: (options?: { force?: boolean }) => Promise<boolean>;
+  /** 实测本地 NSFW 模块是否可用，并同步修正 moduleState。 */
+  checkNsfwRuntime: () => Promise<boolean>;
 };
 
 let themeSwitchRevision = 0;
 let themePersistenceQueue: Promise<void> = Promise.resolve();
 /** 主进程事件订阅（外部库变更 + FFmpeg 安装进度）只挂一次。 */
-let isMainProcessEventSubscribed = false;
-/** checkVideoRuntime 短缓存：避免关键帧/压缩连点时重复 IPC。安装成功后会主动刷新。 */
+let isMainProcessEventSubscribed = false;  /** checkVideoRuntime 短缓存：避免关键帧/压缩连点时重复 IPC。安装成功后会主动刷新；force 时绕过。 */
 let videoRuntimeProbeCache: { installed: boolean; checkedAt: number } | null = null;
 const VIDEO_RUNTIME_PROBE_TTL_MS = 30_000;
 
+type ThemeOpacityKey = "themeNavigationOpacity" | "themeBackgroundOpacity" | "themeWorkspaceOpacity";
+
+async function persistThemeLayerOpacity(
+  key: ThemeOpacityKey,
+  value: number,
+  set: (partial: Partial<LibraryState>) => void,
+  get: () => LibraryState,
+): Promise<void> {
+  const currentState = get();
+  const nextValue = normalizeThemeOpacity(value);
+  if (nextValue === currentState[key]) {
+    return;
+  }
+
+  const revision = ++themeSwitchRevision;
+  const currentThemeMode = currentState.themeMode;
+  const nextPatch: Partial<LibraryState> = {
+    [key]: nextValue,
+    ...(key === "themeNavigationOpacity" ? { themeOpacity: nextValue } : {}),
+  };
+  const applyOptions = {
+    themePreset: currentState.themePreset,
+    themeAccent: currentState.themeAccent,
+    themeCustomAccent: currentState.themeCustomAccent,
+    themeCustomAccents: currentState.themeCustomAccents,
+    themeOpacity: key === "themeNavigationOpacity" ? nextValue : currentState.themeOpacity,
+    themeNavigationOpacity: key === "themeNavigationOpacity" ? nextValue : currentState.themeNavigationOpacity,
+    themeBackgroundOpacity: key === "themeBackgroundOpacity" ? nextValue : currentState.themeBackgroundOpacity,
+    themeWorkspaceOpacity: key === "themeWorkspaceOpacity" ? nextValue : currentState.themeWorkspaceOpacity,
+    themeAccentOpacity: currentState.themeAccentOpacity,
+    customTheme: currentState.customTheme,
+  };
+  applyThemeModeToRoot(currentThemeMode, document.documentElement, applyOptions);
+  set({ ...nextPatch, statusMessage: null });
+
+  themePersistenceQueue = themePersistenceQueue.then(async () => {
+    if (revision !== themeSwitchRevision) return;
+    const result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get(), {
+      [key]: nextValue,
+      ...(key === "themeNavigationOpacity" ? { themeOpacity: nextValue } : {}),
+    }));
+    if (result.ok || revision !== themeSwitchRevision) return;
+
+    const rollbackState = get();
+    applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+      themePreset: rollbackState.themePreset,
+      themeAccent: rollbackState.themeAccent,
+      themeCustomAccent: rollbackState.themeCustomAccent,
+      themeCustomAccents: rollbackState.themeCustomAccents,
+      themeOpacity: currentState.themeOpacity,
+      themeNavigationOpacity: currentState.themeNavigationOpacity,
+      themeBackgroundOpacity: currentState.themeBackgroundOpacity,
+      themeWorkspaceOpacity: currentState.themeWorkspaceOpacity,
+      themeAccentOpacity: rollbackState.themeAccentOpacity,
+      customTheme: rollbackState.customTheme,
+    });
+    set({
+      [key]: currentState[key],
+      ...(key === "themeNavigationOpacity" ? { themeOpacity: currentState.themeOpacity } : {}),
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+  });
+  await themePersistenceQueue;
+}
+
 export const useLibraryStore = create<LibraryState>((set, get) => ({
+  language: defaultAppLanguage,
   items: [],
   libraryRoots: [],
   selectedItemId: null,
@@ -394,12 +605,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   likedImageIds: [],
   starredRecommendations: [],
   webAssistantCustomUrls: [],
+  webAssistantLastPlatform: null,
+  webAssistantLastCustomUrl: null,
   generationModelOrder: [],
   hiddenGenerationModels: [],
   themeMode: "light",
+  themePreset: DEFAULT_THEME_PRESET,
+  themeAccent: DEFAULT_THEME_ACCENT,
+  themeCustomAccent: DEFAULT_THEME_CUSTOM_ACCENT,
+  themeOpacity: DEFAULT_THEME_OPACITY,
+  themeNavigationOpacity: DEFAULT_THEME_OPACITY,
+  themeBackgroundOpacity: DEFAULT_THEME_OPACITY,
+  themeWorkspaceOpacity: DEFAULT_THEME_OPACITY,
+  themeAccentOpacity: DEFAULT_THEME_ACCENT_OPACITY,
+  themeCustomAccents: [...DEFAULT_THEME_CUSTOM_ACCENTS] as [string, string, string],
+  themeAccentMemory: createDefaultThemeAccentMemory(),
+  customTheme: normalizeThemeCustomTheme(undefined),
+  canvasBackground: normalizeCanvasBackground(undefined),
+  workspaceWidthPercent: defaultWorkspaceWidthPercent,
+  sidebarEntryVisibility: { ...defaultSidebarEntryVisibility },
+  featureGuideCompleted: [],
   autoNsfwGrading: false,
   blurNsfwImages: false,
   nsfwGradingSpeed: defaultNsfwGradingSpeed,
+  nsfwDetectionMode: defaultNsfwDetectionMode,
   masonryTileWidth: defaultMasonryTileWidth,
   materialBrowserCollectionMode: "all",
   materialBrowserGalleryMode: "masonry",
@@ -409,6 +638,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   materialBrowserScrollTop: 0,
   networkMaterialImportMode: "download",
   promptLexicons: null,
+  promptViewSettings: {
+    sidebarMode: "expanded",
+    sidebarWidth: 220,
+    viewMode: "grid",
+    sortMode: "updated",
+    cardDensity: "comfortable",
+    todoSidebarVisible: false,
+    todoSidebarWidth: 280,
+  },
   categoryTaxonomy: null,
   categoryInbox: [],
   categoryCandidates: [],
@@ -458,7 +696,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       isMainProcessEventSubscribed = true;
       window.suyanApi.onFfmpegInstallProgress((progress) => {
         if (progress.phase === "done") {
-          set({ statusMessage: successStatus("视频运行时安装完成。") });
+          set({ statusMessage: successStatus("视频依赖安装完成。") });
+          return;
+        }
+        set({ statusMessage: progressStatus(progress.message) });
+      });
+      window.suyanApi.onModuleInstallProgress((progress) => {
+        if (progress.phase === "done") {
+          set({ statusMessage: successStatus(progress.message) });
+          return;
+        }
+        if (progress.phase === "failed") {
+          set({ statusMessage: failureStatus(progress.message) });
           return;
         }
         set({ statusMessage: progressStatus(progress.message) });
@@ -471,6 +720,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (data.importedCount > 0) {
           markRecentImportPins(set, get, previousItemIds);
           scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+          scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
         }
 
         const changes = [
@@ -515,17 +765,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       startupPromptLexiconSync: "skipped",
     });
 
-    // 解绑后视频运行时不再随包分发：启动时用真实二进制可用性校正持久化状态。
+    // 解绑后视频依赖不再随包分发：启动时用真实二进制可用性校正持久化状态。
     void get().checkVideoRuntime();
+    void get().checkNsfwRuntime();
 
-    // Prune orphan tag-lexicon rows after load so cleared/unused labels don't reappear.
-    scheduleIdleWork(() => {
-      void pruneOrphanTagsAfterLoad(set, get).catch(() => undefined);
-    });
+    // The lexicon is a persistent knowledge library, including pending/unused tags.
+    // Existing entries may only be reorganized through the explicit review flow.
 
+    const aiSettingsReadRevision = aiSettingsSaveRevision;
     void window.suyanApi
       .readAiSettings()
       .then((aiSettingsResult) => {
+        if (aiSettingsReadRevision !== aiSettingsSaveRevision) {
+          logAiSettingsSaveEvent("read-skipped", {
+            actionPreferenceCount: aiSettingsResult.ok ? Object.keys(aiSettingsResult.data.actionPreferences ?? {}).length : 0,
+            activeProfileId: aiSettingsResult.ok ? aiSettingsResult.data.activeProfileId : "",
+            profileCount: aiSettingsResult.ok ? aiSettingsResult.data.profiles.length : 0,
+            requestRevision: aiSettingsReadRevision,
+            source: "full",
+            superseded: true,
+            ok: aiSettingsResult.ok,
+          });
+          return;
+        }
+
         if (aiSettingsResult.ok) {
           set({ aiSettings: aiSettingsResult.data });
           return;
@@ -617,7 +880,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       to: themeMode,
     });
 
-    applyThemeModeToRoot(themeMode, document.documentElement, { suppressTransitions: true });
+    applyThemeModeToRoot(themeMode, document.documentElement, {
+      suppressTransitions: true,
+      themePreset: get().themePreset,
+      themeAccent: get().themeAccent,
+      themeCustomAccent: get().themeCustomAccent,
+      themeCustomAccents: get().themeCustomAccents,
+      themeOpacity: get().themeOpacity,
+      themeNavigationOpacity: get().themeNavigationOpacity,
+      themeBackgroundOpacity: get().themeBackgroundOpacity,
+      themeWorkspaceOpacity: get().themeWorkspaceOpacity,
+      themeAccentOpacity: get().themeAccentOpacity,
+      customTheme: get().customTheme,
+    });
 
     set({ themeMode, statusMessage: null });
 
@@ -655,7 +930,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return;
       }
 
-      applyThemeModeToRoot(currentThemeMode, document.documentElement, { suppressTransitions: true });
+      applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+        suppressTransitions: true,
+        themePreset: get().themePreset,
+        themeAccent: get().themeAccent,
+        themeCustomAccent: get().themeCustomAccent,
+        themeCustomAccents: get().themeCustomAccents,
+        themeOpacity: get().themeOpacity,
+        themeNavigationOpacity: get().themeNavigationOpacity,
+        themeBackgroundOpacity: get().themeBackgroundOpacity,
+        themeWorkspaceOpacity: get().themeWorkspaceOpacity,
+        themeAccentOpacity: get().themeAccentOpacity,
+        customTheme: get().customTheme,
+      });
       set({
         themeMode: currentThemeMode,
         statusMessage: errorStatus(result.error.code, result.error.message),
@@ -664,6 +951,462 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     });
 
     await themePersistenceQueue;
+  },
+  setThemePreset: async (themePreset) => {
+    const currentState = get();
+    const currentThemePreset = currentState.themePreset;
+
+    if (currentThemePreset === themePreset) {
+      return;
+    }
+
+    const currentThemeMode = get().themeMode;
+    const nextMemory: ThemeAccentMemoryByPreset = {
+      ...currentState.themeAccentMemory,
+      [currentThemePreset]: {
+        accent: currentState.themeAccent,
+        customAccents: currentState.themeCustomAccents,
+      },
+    };
+    const targetMemory = nextMemory[themePreset] ?? {
+      accent: getDefaultThemeAccentForPreset(themePreset),
+      customAccents: [...DEFAULT_THEME_CUSTOM_ACCENTS] as [string, string, string],
+    };
+    const startedAt = performance.now();
+    const revision = ++themeSwitchRevision;
+
+    logRendererStartupEvent("theme-preset-switch:click", {
+      from: currentThemePreset,
+      to: themePreset,
+    });
+
+    applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+      suppressTransitions: true,
+      themePreset,
+      themeAccent: targetMemory.accent,
+      themeCustomAccent: targetMemory.customAccents[0],
+      themeCustomAccents: targetMemory.customAccents,
+      themeOpacity: currentState.themeOpacity,
+      themeNavigationOpacity: currentState.themeNavigationOpacity,
+      themeBackgroundOpacity: currentState.themeBackgroundOpacity,
+      themeWorkspaceOpacity: currentState.themeWorkspaceOpacity,
+      themeAccentOpacity: currentState.themeAccentOpacity,
+      customTheme: currentState.customTheme,
+    });
+    set({
+      themePreset,
+      themeAccent: targetMemory.accent,
+      themeCustomAccent: targetMemory.customAccents[0],
+      themeCustomAccents: targetMemory.customAccents,
+      themeAccentMemory: nextMemory,
+      statusMessage: null,
+    });
+
+    await waitForThemePaint(currentThemeMode);
+
+    logRendererStartupEvent("theme-preset-switch:first-paint", {
+      durationMs: roundDuration(performance.now() - startedAt),
+      from: currentThemePreset,
+      to: themePreset,
+    });
+
+    if (revision !== themeSwitchRevision) {
+      logRendererStartupEvent("theme-preset-switch:superseded", { to: themePreset });
+      return;
+    }
+
+    themePersistenceQueue = themePersistenceQueue.then(async () => {
+      if (revision !== themeSwitchRevision) {
+        return;
+      }
+
+      const result = await saveLibraryViewSettingsSerialized(
+        buildLibraryViewSettings(get(), {
+          themePreset,
+          themeAccent: targetMemory.accent,
+          themeCustomAccent: targetMemory.customAccents[0],
+          themeCustomAccents: targetMemory.customAccents,
+          themeAccentMemory: nextMemory,
+        }),
+      );
+
+      if (result.ok) {
+        logRendererStartupEvent("theme-preset-switch:persisted", {
+          durationMs: roundDuration(performance.now() - startedAt),
+          to: themePreset,
+        });
+        return;
+      }
+
+      if (revision !== themeSwitchRevision) {
+        return;
+      }
+
+      applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+        suppressTransitions: true,
+        themePreset: currentThemePreset,
+        themeAccent: currentState.themeAccent,
+        themeCustomAccent: currentState.themeCustomAccent,
+        themeCustomAccents: currentState.themeCustomAccents,
+        themeOpacity: get().themeOpacity,
+        themeNavigationOpacity: get().themeNavigationOpacity,
+        themeBackgroundOpacity: get().themeBackgroundOpacity,
+        themeWorkspaceOpacity: get().themeWorkspaceOpacity,
+        themeAccentOpacity: get().themeAccentOpacity,
+        customTheme: get().customTheme,
+      });
+      set({
+        themePreset: currentThemePreset,
+        themeAccent: currentState.themeAccent,
+        themeCustomAccent: currentState.themeCustomAccent,
+        themeCustomAccents: currentState.themeCustomAccents,
+        themeAccentMemory: currentState.themeAccentMemory,
+        statusMessage: errorStatus(result.error.code, result.error.message),
+      });
+      await waitForThemePaint(currentThemeMode);
+    });
+
+    await themePersistenceQueue;
+  },
+  setThemeAccent: async (themeAccent, themeCustomAccent, customAccentSlot) => {
+    const currentState = get();
+    const currentThemeAccent = currentState.themeAccent;
+    const currentThemeCustomAccents = currentState.themeCustomAccents;
+    const slot = isThemeCustomAccentSlot(customAccentSlot)
+      ? customAccentSlot
+      : isThemeCustomAccentSlot(themeAccent)
+        ? themeAccent
+        : themeAccent === "custom"
+          ? "custom1"
+          : null;
+    const nextThemeCustomAccents = [...currentThemeCustomAccents] as [string, string, string];
+    if (slot) {
+      const slotIndex = slot === "custom2" ? 1 : slot === "custom3" ? 2 : 0;
+      nextThemeCustomAccents[slotIndex] = normalizeThemeCustomAccent(
+        themeCustomAccent ?? currentThemeCustomAccents[slotIndex],
+      );
+    }
+    const nextThemeCustomAccent = nextThemeCustomAccents[0];
+    const accentsChanged = nextThemeCustomAccents.some((accent, index) => accent !== currentThemeCustomAccents[index]);
+
+    if (currentThemeAccent === themeAccent && !accentsChanged) {
+      return;
+    }
+
+    const currentThemeMode = get().themeMode;
+    const currentThemePreset = get().themePreset;
+    const nextThemeAccentMemory: ThemeAccentMemoryByPreset = {
+      ...currentState.themeAccentMemory,
+      [currentThemePreset]: {
+        accent: themeAccent,
+        customAccents: nextThemeCustomAccents,
+      },
+    };
+    const startedAt = performance.now();
+    const revision = ++themeSwitchRevision;
+
+    logRendererStartupEvent("theme-accent-switch:click", {
+      from: currentThemeAccent,
+      to: themeAccent,
+    });
+
+    applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+      suppressTransitions: true,
+      themePreset: currentThemePreset,
+      themeAccent,
+      themeCustomAccent: nextThemeCustomAccent,
+      themeCustomAccents: nextThemeCustomAccents,
+      themeOpacity: currentState.themeOpacity,
+      themeNavigationOpacity: currentState.themeNavigationOpacity,
+      themeBackgroundOpacity: currentState.themeBackgroundOpacity,
+      themeWorkspaceOpacity: currentState.themeWorkspaceOpacity,
+      themeAccentOpacity: currentState.themeAccentOpacity,
+      customTheme: currentState.customTheme,
+    });
+    set({
+      themeAccent,
+      themeCustomAccent: nextThemeCustomAccent,
+      themeCustomAccents: nextThemeCustomAccents,
+      themeAccentMemory: nextThemeAccentMemory,
+      statusMessage: null,
+    });
+
+    themePersistenceQueue = themePersistenceQueue.then(async () => {
+      if (revision !== themeSwitchRevision) {
+        return;
+      }
+
+      const result = await saveLibraryViewSettingsSerialized(
+        buildLibraryViewSettings(get(), {
+          themeAccent,
+          themeCustomAccent: nextThemeCustomAccent,
+          themeCustomAccents: nextThemeCustomAccents,
+          themeAccentMemory: nextThemeAccentMemory,
+        }),
+      );
+
+      if (result.ok) {
+        logRendererStartupEvent("theme-accent-switch:persisted", {
+          durationMs: roundDuration(performance.now() - startedAt),
+          to: themeAccent,
+        });
+        return;
+      }
+
+      if (revision !== themeSwitchRevision) {
+        return;
+      }
+
+      applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+        suppressTransitions: true,
+        themePreset: get().themePreset,
+        themeAccent: currentThemeAccent,
+        themeCustomAccent: currentThemeCustomAccents[0],
+        themeCustomAccents: currentThemeCustomAccents,
+        themeOpacity: get().themeOpacity,
+        themeNavigationOpacity: get().themeNavigationOpacity,
+        themeBackgroundOpacity: get().themeBackgroundOpacity,
+        themeWorkspaceOpacity: get().themeWorkspaceOpacity,
+        themeAccentOpacity: get().themeAccentOpacity,
+        customTheme: get().customTheme,
+      });
+      set({
+        themeAccent: currentThemeAccent,
+        themeCustomAccent: currentThemeCustomAccents[0],
+        themeCustomAccents: currentThemeCustomAccents,
+        themeAccentMemory: currentState.themeAccentMemory,
+        statusMessage: errorStatus(result.error.code, result.error.message),
+      });
+    });
+
+    await themePersistenceQueue;
+  },
+  setThemeOpacity: async (themeOpacity) => get().setThemeNavigationOpacity(themeOpacity),
+  setThemeNavigationOpacity: async (themeOpacity) => persistThemeLayerOpacity("themeNavigationOpacity", themeOpacity, set, get),
+  setThemeBackgroundOpacity: async (themeOpacity) => persistThemeLayerOpacity("themeBackgroundOpacity", themeOpacity, set, get),
+  setThemeWorkspaceOpacity: async (themeOpacity) => persistThemeLayerOpacity("themeWorkspaceOpacity", themeOpacity, set, get),
+  setThemeAccentOpacity: async (themeAccentOpacity) => {
+    const currentState = get();
+    const nextThemeAccentOpacity = normalizeThemeAccentOpacity(themeAccentOpacity);
+    if (nextThemeAccentOpacity === currentState.themeAccentOpacity) {
+      return;
+    }
+
+    const revision = ++themeSwitchRevision;
+    const currentThemeMode = currentState.themeMode;
+    applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+      themePreset: currentState.themePreset,
+      themeAccent: currentState.themeAccent,
+      themeCustomAccent: currentState.themeCustomAccent,
+      themeCustomAccents: currentState.themeCustomAccents,
+      themeOpacity: currentState.themeOpacity,
+      themeNavigationOpacity: currentState.themeNavigationOpacity,
+      themeBackgroundOpacity: currentState.themeBackgroundOpacity,
+      themeWorkspaceOpacity: currentState.themeWorkspaceOpacity,
+      themeAccentOpacity: nextThemeAccentOpacity,
+      customTheme: currentState.customTheme,
+    });
+    set({ themeAccentOpacity: nextThemeAccentOpacity, statusMessage: null });
+
+    themePersistenceQueue = themePersistenceQueue.then(async () => {
+      if (revision !== themeSwitchRevision) return;
+      const result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get(), { themeAccentOpacity: nextThemeAccentOpacity }));
+      if (result.ok || revision !== themeSwitchRevision) return;
+
+      applyThemeModeToRoot(currentThemeMode, document.documentElement, {
+        themePreset: get().themePreset,
+        themeAccent: get().themeAccent,
+        themeCustomAccent: get().themeCustomAccent,
+        themeCustomAccents: get().themeCustomAccents,
+        themeOpacity: get().themeOpacity,
+        themeNavigationOpacity: get().themeNavigationOpacity,
+        themeBackgroundOpacity: get().themeBackgroundOpacity,
+        themeWorkspaceOpacity: get().themeWorkspaceOpacity,
+        themeAccentOpacity: currentState.themeAccentOpacity,
+        customTheme: get().customTheme,
+      });
+      set({ themeAccentOpacity: currentState.themeAccentOpacity, statusMessage: errorStatus(result.error.code, result.error.message) });
+    });
+    await themePersistenceQueue;
+  },
+  setCustomTheme: async (patch) => {
+    const currentState = get();
+    const nextCustomTheme = normalizeThemeCustomTheme({ ...currentState.customTheme, ...patch });
+    if (JSON.stringify(nextCustomTheme) === JSON.stringify(currentState.customTheme)) {
+      return;
+    }
+
+    const revision = ++themeSwitchRevision;
+    applyThemeModeToRoot(currentState.themeMode, document.documentElement, {
+      themePreset: currentState.themePreset,
+      themeAccent: currentState.themeAccent,
+      themeCustomAccent: currentState.themeCustomAccent,
+      themeCustomAccents: currentState.themeCustomAccents,
+      themeOpacity: currentState.themeOpacity,
+      themeNavigationOpacity: currentState.themeNavigationOpacity,
+      themeBackgroundOpacity: currentState.themeBackgroundOpacity,
+      themeWorkspaceOpacity: currentState.themeWorkspaceOpacity,
+      themeAccentOpacity: currentState.themeAccentOpacity,
+      customTheme: nextCustomTheme,
+    });
+    set({ customTheme: nextCustomTheme, statusMessage: null });
+
+    themePersistenceQueue = themePersistenceQueue.then(async () => {
+      if (revision !== themeSwitchRevision) return;
+      const result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get(), { customTheme: nextCustomTheme }));
+      if (result.ok || revision !== themeSwitchRevision) return;
+      const rollbackState = get();
+      applyThemeModeToRoot(rollbackState.themeMode, document.documentElement, {
+        themePreset: rollbackState.themePreset,
+        themeAccent: rollbackState.themeAccent,
+        themeCustomAccent: rollbackState.themeCustomAccent,
+        themeCustomAccents: rollbackState.themeCustomAccents,
+        themeOpacity: rollbackState.themeOpacity,
+        themeNavigationOpacity: rollbackState.themeNavigationOpacity,
+        themeBackgroundOpacity: rollbackState.themeBackgroundOpacity,
+        themeWorkspaceOpacity: rollbackState.themeWorkspaceOpacity,
+        themeAccentOpacity: rollbackState.themeAccentOpacity,
+        customTheme: currentState.customTheme,
+      });
+      set({ customTheme: currentState.customTheme, statusMessage: errorStatus(result.error.code, result.error.message) });
+    });
+    await themePersistenceQueue;
+  },
+
+  setLanguage: async (language) => {
+    const currentLanguage = get().language;
+    if (currentLanguage === language) {
+      return true;
+    }
+
+    set({ language, statusMessage: null });
+    const result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get(), { language }));
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({ language: currentLanguage, statusMessage: errorStatus(result.error.code, result.error.message) });
+    return false;
+  },
+
+  saveCanvasBackground: async (patch) => {
+    const previous = get().canvasBackground;
+    const next = normalizeCanvasBackground({ ...previous, ...patch });
+    set({ canvasBackground: next, statusMessage: null });
+    try {
+      const result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get()));
+      if (result.ok) return true;
+      if (get().canvasBackground === next) set({ canvasBackground: previous });
+      set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+    } catch {
+      if (get().canvasBackground === next) set({ canvasBackground: previous });
+      set({ statusMessage: errorStatus("VIEW_SETTINGS_SAVE_FAILED", "画布背景保存失败，请重试。") });
+    }
+    return false;
+  },
+
+  setWorkspaceWidthPercent: (workspaceWidthPercent) => {
+    const nextWorkspaceWidthPercent = normalizeWorkspaceWidthPercent(workspaceWidthPercent);
+
+    if (nextWorkspaceWidthPercent === get().workspaceWidthPercent) {
+      return;
+    }
+
+    set({ workspaceWidthPercent: nextWorkspaceWidthPercent, statusMessage: null });
+
+    if (workspaceWidthSaveTimer) {
+      clearTimeout(workspaceWidthSaveTimer);
+    }
+
+    workspaceWidthSaveTimer = setTimeout(() => {
+      workspaceWidthSaveTimer = null;
+      void saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get()))
+        .then((result) => {
+          if (!result.ok) {
+            set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+          }
+        })
+        .catch(() => {
+          set({ statusMessage: errorStatus("VIEW_SETTINGS_SAVE_FAILED", "工作区宽度自动保存失败，请稍后重试。") });
+        });
+    }, 220);
+  },
+
+  saveSidebarEntryVisibility: async (entryId, visible) => {
+    const currentVisibility = get().sidebarEntryVisibility;
+    const nextVisibility = normalizeSidebarEntryVisibility({
+      ...currentVisibility,
+      [entryId]: visible,
+    });
+
+    if (nextVisibility[entryId] === currentVisibility[entryId]) {
+      return true;
+    }
+
+    set({ sidebarEntryVisibility: nextVisibility, statusMessage: null });
+
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { sidebarEntryVisibility: nextVisibility }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({
+      sidebarEntryVisibility: currentVisibility,
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+    return false;
+  },
+
+  completeFeatureGuide: async (guideId) => {
+    const currentCompleted = get().featureGuideCompleted;
+    if (currentCompleted.includes(guideId)) {
+      return true;
+    }
+
+    const nextCompleted = [...currentCompleted, guideId];
+    set({ featureGuideCompleted: nextCompleted });
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { featureGuideCompleted: nextCompleted }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({
+      featureGuideCompleted: currentCompleted,
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+    return false;
+  },
+
+  resetFeatureGuides: async () => {
+    const currentCompleted = get().featureGuideCompleted;
+    if (currentCompleted.length === 0) {
+      return true;
+    }
+
+    set({ featureGuideCompleted: [] });
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { featureGuideCompleted: [] }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({
+      featureGuideCompleted: currentCompleted,
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+    return false;
   },
 
   saveGenerationModelPreferences: async (patch) => {
@@ -693,11 +1436,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const currentAutoNsfwGrading = get().autoNsfwGrading;
     const currentBlurNsfwImages = get().blurNsfwImages;
     const currentNsfwGradingSpeed = get().nsfwGradingSpeed;
+    const currentNsfwDetectionMode = get().nsfwDetectionMode;
 
     set({
       autoNsfwGrading: settings.autoNsfwGrading,
       blurNsfwImages: settings.blurNsfwImages,
       nsfwGradingSpeed: settings.nsfwGradingSpeed,
+      nsfwDetectionMode: settings.nsfwDetectionMode,
       statusMessage: null,
     });
 
@@ -706,6 +1451,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         autoNsfwGrading: settings.autoNsfwGrading,
         blurNsfwImages: settings.blurNsfwImages,
         nsfwGradingSpeed: settings.nsfwGradingSpeed,
+        nsfwDetectionMode: settings.nsfwDetectionMode,
       }),
     );
 
@@ -718,6 +1464,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       autoNsfwGrading: currentAutoNsfwGrading,
       blurNsfwImages: currentBlurNsfwImages,
       nsfwGradingSpeed: currentNsfwGradingSpeed,
+      nsfwDetectionMode: currentNsfwDetectionMode,
       statusMessage: errorStatus(result.error.code, result.error.message),
     });
     return false;
@@ -836,38 +1583,84 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
   saveAiSettings: async (settings) => {
     const currentAiSettings = get().aiSettings;
+    const requestRevision = ++aiSettingsSaveRevision;
+    aiSettingsFullSaveInFlight += 1;
 
+    logAiSettingsSaveEvent("save-request", {
+      actionPreferenceCount: Object.keys(settings.actionPreferences ?? {}).length,
+      activeProfileId: settings.activeProfileId,
+      profileCount: settings.profiles.length,
+      requestRevision,
+      source: "full",
+    });
     set({ isBusy: true, statusMessage: progressStatus("正在保存 API 设置...") });
 
     try {
-      const result = await window.suyanApi.saveAiSettings(settings);
+      const result = await saveAiSettingsSerialized(settings);
+      const superseded = requestRevision !== aiSettingsSaveRevision;
+
+      logAiSettingsSaveEvent("save-result", {
+        actionPreferenceCount: result.ok ? Object.keys(result.data.actionPreferences ?? {}).length : 0,
+        activeProfileId: result.ok ? result.data.activeProfileId : settings.activeProfileId,
+        ok: result.ok,
+        profileCount: result.ok ? result.data.profiles.length : settings.profiles.length,
+        requestRevision,
+        source: "full",
+        superseded,
+      });
+
+      // A newer model/action save already owns the store state. Never let an
+      // older full-settings response roll it back to a stale snapshot.
+      if (superseded) {
+        return true;
+      }
 
       if (result.ok) {
         set({
           aiSettings: result.data,
           aiErrorDialog: null,
           aiAnalysisCircuitOpen: false,
+          isBusy: false,
           statusMessage: successStatus(result.data.enabled ? "已保存远程模型配置。" : "已关闭远程 AI。"),
         });
-        set({ isBusy: false });
         return true;
       }
 
       const errorMessage = result.error?.message || "API 设置保存失败。";
       set({
         aiSettings: currentAiSettings,
+        isBusy: false,
         statusMessage: errorStatus(result.error.code, errorMessage),
       });
-      set({ isBusy: false });
       return errorMessage;
     } catch (error) {
+      const superseded = requestRevision !== aiSettingsSaveRevision;
+      logAiSettingsSaveEvent("save-result", {
+        actionPreferenceCount: 0,
+        activeProfileId: settings.activeProfileId,
+        ok: false,
+        profileCount: settings.profiles.length,
+        requestRevision,
+        source: "full",
+        superseded,
+      });
+
+      if (superseded) {
+        return true;
+      }
+
       const errorMessage = error instanceof Error ? error.message : "API 设置保存失败。";
       set({
         aiSettings: currentAiSettings,
+        isBusy: false,
         statusMessage: errorStatus("AI_SETTINGS_SAVE_FAILED", errorMessage),
       });
-      set({ isBusy: false });
       return errorMessage;
+    } finally {
+      aiSettingsFullSaveInFlight = Math.max(0, aiSettingsFullSaveInFlight - 1);
+      if (aiSettingsFullSaveInFlight === 0 && get().isBusy) {
+        set({ isBusy: false });
+      }
     }
   },
 
@@ -892,16 +1685,44 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
 
     const previousPreference = currentAiSettings.actionPreferences[action];
+    const requestRevision = ++aiSettingsSaveRevision;
+    const selectionProfileId = selection.profileId;
+    const payload = buildPublicAiSettingsPayload(
+      nextAiSettings,
+      nextAiSettings.actionPreferences,
+      nextAiSettings.recognitionSourcePreferences,
+    );
     set({ aiSettings: nextAiSettings, statusMessage: null });
+    logAiSettingsSaveEvent("save-request", {
+      actionPreferenceCount: Object.keys(payload.actionPreferences ?? {}).length,
+      activeProfileId: payload.activeProfileId,
+      profileCount: payload.profiles.length,
+      action,
+      modelId: selection.modelId,
+      profileId: selectionProfileId,
+      requestRevision,
+      source: "action",
+    });
 
     try {
-      const result = await window.suyanApi.saveAiSettings(
-        buildPublicAiSettingsPayload(
-          nextAiSettings,
-          nextAiSettings.actionPreferences,
-          nextAiSettings.recognitionSourcePreferences,
-        ),
-      );
+      const result = await saveAiSettingsSerialized(payload);
+      const superseded = requestRevision !== aiSettingsSaveRevision;
+      logAiSettingsSaveEvent("save-result", {
+        actionPreferenceCount: result.ok ? Object.keys(result.data.actionPreferences ?? {}).length : 0,
+        activeProfileId: result.ok ? result.data.activeProfileId : payload.activeProfileId,
+        ok: result.ok,
+        profileCount: result.ok ? result.data.profiles.length : payload.profiles.length,
+        action,
+        modelId: selection.modelId,
+        profileId: selectionProfileId,
+        requestRevision,
+        source: "action",
+        superseded,
+      });
+
+      if (superseded) {
+        return true;
+      }
 
       if (result.ok) {
         const latestAiSettings = get().aiSettings;
@@ -924,10 +1745,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const latestAiSettings = get().aiSettings;
       const latestPreference = latestAiSettings.actionPreferences[action];
 
-      if (
-        latestPreference?.profileId === selection.profileId &&
-        latestPreference?.modelId === selection.modelId
-      ) {
+      if (matchesAiModelSelection(latestPreference, selection)) {
         const restoredActionPreferences = { ...latestAiSettings.actionPreferences };
 
         if (previousPreference) {
@@ -949,10 +1767,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const latestAiSettings = get().aiSettings;
       const latestPreference = latestAiSettings.actionPreferences[action];
 
-      if (
-        latestPreference?.profileId === selection.profileId &&
-        latestPreference?.modelId === selection.modelId
-      ) {
+      if (matchesAiModelSelection(latestPreference, selection)) {
         const restoredActionPreferences = { ...latestAiSettings.actionPreferences };
 
         if (previousPreference) {
@@ -979,16 +1794,37 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   saveAiRecognitionSourcePreferences: async (preferences) => {
     const currentAiSettings = get().aiSettings;
     const recognitionSourcePreferences = normalizeAiRecognitionSourcePreferences(preferences);
+    const requestRevision = ++aiSettingsSaveRevision;
     const nextAiSettings: PublicAiProviderSettings = {
       ...currentAiSettings,
       recognitionSourcePreferences,
     };
+    const payload = buildPublicAiSettingsPayload(nextAiSettings, nextAiSettings.actionPreferences, recognitionSourcePreferences);
 
+    logAiSettingsSaveEvent("save-request", {
+      actionPreferenceCount: Object.keys(payload.actionPreferences ?? {}).length,
+      activeProfileId: payload.activeProfileId,
+      profileCount: payload.profiles.length,
+      requestRevision,
+      source: "recognition-source",
+    });
     set({ aiSettings: nextAiSettings, statusMessage: null });
 
-    const result = await window.suyanApi.saveAiSettings(
-      buildPublicAiSettingsPayload(nextAiSettings, nextAiSettings.actionPreferences, recognitionSourcePreferences),
-    );
+    const result = await saveAiSettingsSerialized(payload);
+    const superseded = requestRevision !== aiSettingsSaveRevision;
+    logAiSettingsSaveEvent("save-result", {
+      actionPreferenceCount: result.ok ? Object.keys(result.data.actionPreferences ?? {}).length : 0,
+      activeProfileId: result.ok ? result.data.activeProfileId : payload.activeProfileId,
+      ok: result.ok,
+      profileCount: result.ok ? result.data.profiles.length : payload.profiles.length,
+      requestRevision,
+      source: "recognition-source",
+      superseded,
+    });
+
+    if (superseded) {
+      return true;
+    }
 
     if (result.ok) {
       set({ aiSettings: result.data });
@@ -1056,12 +1892,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   analyzePromptWithAi: async (payload) => {
     const startedAt = Date.now();
+    const aiSettings = get().aiSettings;
     const taxonomy =
       get().categoryTaxonomy ??
       (await import("../utils/categoryTaxonomy")).createEmptyCategoryTaxonomy();
     const { withKnownCategoriesFromTaxonomy, buildTaxonomyCategoryAiResult } = await import("../utils/categoryAiBinding");
     const resolvedPayload = withKnownCategoriesFromTaxonomy(
-      applyAiActionPreference(get().aiSettings, payload.target, withoutNegativePromptForAnalysis(payload)),
+      applyAiActionPreference(aiSettings, payload.target, withoutNegativePromptForAnalysis(payload)),
       taxonomy,
     );
     const runInBackground = payload.runInBackground === true;
@@ -1079,6 +1916,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     };
     const publishAiError = (code: string, message: string) => {
       const presentation = buildAiErrorPresentation(code, message, resolvedPayload.target);
+
+      // 后台批量分析不能打开全局模态框，否则用户切到待办事项等前台工作区后
+      // 仍会被 AI 错误层拦截。后台只保留熔断信号，由批处理自己的进度状态展示结果。
+      if (runInBackground) {
+        if (presentation.shouldStopBackground) {
+          set({ aiAnalysisCircuitOpen: true });
+        }
+        return presentation;
+      }
+
       const currentPresentation = get().aiErrorDialog;
       set({
         aiErrorDialog:
@@ -1122,11 +1969,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return nextTaxonomy;
     };
 
-    const localAnalysis = (): PromptAnalysisRunResult => {
+    const persistTagKnowledge = async (analysis: PromptAnalysisResult): Promise<boolean> => {
+      if (!analysis.tagEntries?.length) return true;
+      const lexicons = get().promptLexicons ?? { categories: [], tags: [] };
+      const incoming = new Map(analysis.tagEntries.map(entry => [entry.label, entry]));
+      const tags = lexicons.tags.map(entry => {
+        const next = incoming.get(entry.label);
+        incoming.delete(entry.label);
+        return next ? { ...entry, ...next } : entry;
+      });
+      tags.push(...incoming.values());
+      try {
+        if (await get().savePromptLexicons({ ...lexicons, tags }, { silent: true })) return true;
+      } catch { /* A failed write must not be reported as a successful tag analysis. */ }
+      const presentation = publishAiError("TAG_KNOWLEDGE_SAVE_FAILED", "标签已识别，但归纳依据保存失败。本次未应用，请检查本地目录权限后重试。");
+      set({ statusMessage: errorStatus(presentation.code, presentation.summary) });
+      return false;
+    };
+
+    const localAnalysis = async (): Promise<PromptAnalysisRunResult> => {
       const base =
         resolvedPayload.target === "prompt-tags" || resolvedPayload.target === "image-tags"
           ? analyzePromptTags(resolvedPayload.prompt, {
               currentCategory: resolvedPayload.category,
+              knownTagEntries: get().promptLexicons?.tags ?? [],
             })
           : analyzePromptText(resolvedPayload.prompt, {
               title: resolvedPayload.title,
@@ -1166,18 +2032,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
 
       if (resolvedPayload.target === "prompt-tags" || resolvedPayload.target === "image-tags") {
+        if (!await persistTagKnowledge(base)) return { ...emptyImageAnalysis(), failed: true };
         return {
-          analysis: {
-            chips: [],
-            sections: [],
-            suggestedTags: normalizeConcretePromptTags(base.suggestedTags, {
-              category: resolvedPayload.category,
-              maxCount: 15,
-            }),
-            suggestedCategories: [],
-            primaryCategory: "未分类",
-            template: "",
-          },
+          analysis: base,
           source: "local",
         };
       }
@@ -1217,7 +2074,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (runInBackground && get().aiAnalysisCircuitOpen) {
       const result = resolvedPayload.target === "image-category" || resolvedPayload.target === "image-tags"
         ? emptyImageAnalysis()
-        : localAnalysis();
+        : await localAnalysis();
       logAiAnalysisDone(false, { reason: "ai-circuit-open", source: result.source });
       return result;
     }
@@ -1235,8 +2092,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (!runInBackground) {
           set({ statusMessage: infoStatus("远程 AI 未配置，已使用本地分析。") });
         }
-        const result = localAnalysis();
-        logAiAnalysisDone(true, { reason: "remote-not-ready", source: result.source });
+        const result = await localAnalysis();
+        logAiAnalysisDone(!result.failed, { reason: result.failed ? "tag-knowledge-save-failed" : "remote-not-ready", source: result.source });
         return result;
       }
 
@@ -1260,7 +2117,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           taxonomy: get().categoryTaxonomy ?? taxonomy,
           knownCategories: resolvedPayload.knownCategories,
           knownTags: get().promptLexicons?.tags?.map((entry) => entry.label) ?? [],
+          knownTagEntries: get().promptLexicons?.tags ?? [],
         });
+
+        if (!await persistTagKnowledge(analysis)) {
+          logAiAnalysisDone(false, { reason: "tag-knowledge-save-failed", source: "remote" });
+          return emptyImageAnalysis();
+        }
 
         if (
           (resolvedPayload.target === "prompt-category" || resolvedPayload.target === "image-category") &&
@@ -1272,7 +2135,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         if (!runInBackground) {
-          set({ statusMessage: successStatus(getAiAnalyzeSuccessText(resolvedPayload.target)) });
+          const noUsefulTags = (resolvedPayload.target === "image-tags" || resolvedPayload.target === "prompt-tags") && analysis.suggestedTags.length === 0;
+          set({ statusMessage: noUsefulTags ? infoStatus("未识别到有检索价值的标签，未新增标签。") : successStatus(getAiAnalyzeSuccessText(resolvedPayload.target)) });
         }
 
         const remoteResult: PromptAnalysisRunResult = {
@@ -1307,7 +2171,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           set({ statusMessage: infoStatus("远程 AI 结果不可用，已使用本地分析。") });
         }
 
-        const fallback = localAnalysis();
+        const fallback = await localAnalysis();
         logAiAnalysisDone(false, { reason: "remote-parse-failed", source: fallback.source });
         return fallback;
       }
@@ -1328,7 +2192,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ statusMessage: infoStatus("远程 AI 暂不可用，已使用本地分析。") });
     }
 
-    const fallback = localAnalysis();
+    const fallback = await localAnalysis();
     logAiAnalysisDone(false, { errorCode: result.error.code, source: fallback.source });
     return fallback;
   },
@@ -1561,6 +2425,31 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ statusMessage: errorStatus(result.error.code, result.error.message) });
     return false;
   },
+
+  openFfmpegComponentDownloadPage: async () => {
+    set({ statusMessage: progressStatus("正在打开视频依赖下载页...") });
+    const result = await window.suyanApi.openFfmpegComponentDownloadPage();
+
+    if (result.ok) {
+      set({ statusMessage: successStatus("已在浏览器打开视频依赖下载页。") });
+      return true;
+    }
+
+    set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+    return false;
+  },
+  openNsfwModuleDownloadPage: async () => {
+    set({ statusMessage: progressStatus("正在打开本地 NSFW 模块下载页...") });
+    const result = await window.suyanApi.openNsfwModuleDownloadPage();
+
+    if (result.ok) {
+      set({ statusMessage: successStatus("已在浏览器打开本地 NSFW 模块下载页。") });
+      return true;
+    }
+
+    set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+    return false;
+  },
   showStatusMessage: (message) =>
     set({
       statusMessage: {
@@ -1602,6 +2491,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           if (result.data.importedCount > 0) {
             markRecentImportPins(set, get, previousItemIds);
             scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+            scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
           }
           set({ statusMessage: finalStatus });
         }
@@ -1636,6 +2526,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
 
       if (!result.data.directoryLabel) {
@@ -1684,6 +2575,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
       const rootsResult = await window.suyanApi.listLibraryRoots();
       if (rootsResult.ok) {
@@ -1716,6 +2608,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
       const rootsResult = await window.suyanApi.listLibraryRoots();
       if (rootsResult.ok) {
@@ -1911,6 +2804,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (result.data.importedCount > 0) {
           markRecentImportPins(set, get, previousItemIds);
           scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+          scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
         }
 
         set({ statusMessage: finalStatus });
@@ -1927,7 +2821,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return [];
     }
 
-    set({ isBusy: true, statusMessage: progressStatus(`正在保存 ${images.length} 张生成图片…`) });
+    const mediaLabel = images.some((image) => image.mediaType === "video") ? "生成视频" : "生成图片";
+    set({ isBusy: true, statusMessage: progressStatus(`正在保存 ${images.length} 个${mediaLabel}…`) });
 
     try {
       const previousItemIds = new Set(get().items.map((item) => item.id));
@@ -1952,11 +2847,42 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       markRecentImportPins(set, get, previousItemIds);
       scheduleLexiconSyncAfterImport(set, get, previousItemIds);
-      set({ statusMessage: successStatus(`已保存 ${savedItems.length} 张生成图片到素材库。`) });
+      scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
+      set({ statusMessage: successStatus(`已保存 ${savedItems.length} 个${mediaLabel}到素材库。`) });
       return savedItems;
     } finally {
       set({ isBusy: false });
     }
+  },
+
+  syncWorksToAccount: async (itemIds, expectedUid, force = false) => {
+    if (get().isBusy) return false;
+    set({ isBusy: true, statusMessage: progressStatus("正在同步作品归属…") });
+    try {
+      const result = await window.suyanApi.syncWorksToAccount({ itemIds, expectedUid, force });
+      if (!result.ok) { set({ statusMessage: errorStatus(result.error.code, result.error.message) }); return false; }
+      if (result.data.canceled) { set({ statusMessage: infoStatus("已取消同步作品。") }); return false; }
+      if (result.data.library) setLibrary(result.data.library, set, get);
+      set({ statusMessage: successStatus(`已关联 ${result.data.changedCount} 张素材，跳过 ${result.data.skippedCount} 张已有作者信息的素材。`) });
+      return true;
+    } catch {
+      set({ statusMessage: errorStatus("WORK_SYNC_FAILED", "同步作品失败，请重试。") });
+      return false;
+    } finally { set({ isBusy: false }); }
+  },
+
+  refreshWorkAuthors: async () => {
+    try {
+      const result = await window.suyanApi.readLibrary();
+      if (!result.ok) return;
+      const byId = new Map(result.data.items.map(item => [item.id, item]));
+      // Refresh author fields only: don't replace in-progress metadata edits.
+      set({ items: get().items.map(item => {
+        const saved = byId.get(item.id);
+        if (!saved || saved.accountOwnerUid !== item.accountOwnerUid) return item;
+        return { ...item, authorName: saved.authorName, authorAvatarUrl: saved.authorAvatarUrl };
+      }) });
+    } catch { /* Keep the existing library usable if refresh fails. */ }
   },
 
   importImageFilesForItem: async (itemId) => {
@@ -1972,6 +2898,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds, result.data.importedItemId);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
 
       set({
@@ -2008,6 +2935,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (!result.data.canceled && result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
 
       set({
@@ -2032,6 +2960,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (result.data.importedCount > 0) {
         markRecentImportPins(set, get, previousItemIds);
         scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+        scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       }
 
       set({ statusMessage: finalStatus });
@@ -2057,6 +2986,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       markRecentImportPins(set, get, previousItemIds, result.data.importedItemId);
       scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+      scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
       set({
         selectedItemId: result.data.importedItemId,
         statusMessage: finalStatus,
@@ -2118,7 +3048,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   generateVideoFrames: async (itemId) => {
     if (!(await get().checkVideoRuntime())) {
       set({
-        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频运行时（FFmpeg）才能生成关键帧，请先安装。"),
+        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频依赖（FFmpeg）才能生成关键帧，请先安装。"),
       });
       return false;
     }
@@ -2159,7 +3089,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   importVideoReferenceImages: async (itemId) => {
     if (!(await get().checkVideoRuntime())) {
       set({
-        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频运行时（FFmpeg）才能导入参考图，请先安装。"),
+        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频依赖（FFmpeg）才能导入参考图，请先安装。"),
       });
       return false;
     }
@@ -2247,48 +3177,67 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   importZip: async () => {
     set({ isBusy: true, statusMessage: progressStatus("正在导入素材包...") });
     const previousItemIds = new Set(get().items.map((item) => item.id));
-    const result = await window.suyanApi.importZip();
-
-    if (result.ok) {
-      setLibrary(result.data.library, set, get);
-      const finalStatus = result.data.canceled
-        ? infoStatus("已取消导入。")
-        : successStatus(`已导入 ${result.data.importedCount} 条素材。`);
-
-      if (!result.data.canceled && result.data.importedCount > 0) {
-        markRecentImportPins(set, get, previousItemIds);
-        scheduleLexiconSyncAfterImport(set, get, previousItemIds);
-      }
-
-      set({
-        statusMessage: finalStatus,
+    try {
+      // Reserve the settings queue until imported knowledge is installed in the store.
+      const task = viewSettingsWriteChain.then(async () => {
+        const result = await window.suyanApi.importZip();
+        if (result.ok && !result.data.canceled && result.data.settings) {
+          const settings = result.data.settings;
+          const workspace = normalizeCategoryWorkspace(settings.categoryWorkspace, settings.promptLexicons);
+          archiveKnowledgeRevision += 1;
+          set({ promptLexicons: settings.promptLexicons, categoryTaxonomy: workspace.taxonomy });
+        }
+        return result;
       });
-    } else {
-      set({ statusMessage: errorStatus(result.error.code, result.error.message) });
-    }
+      viewSettingsWriteChain = task.then(() => undefined, () => undefined);
+      const result = await task;
 
-    set({ isBusy: false });
+      if (result.ok) {
+        setLibrary(result.data.library, set, get);
+        const finalStatus = result.data.canceled
+          ? infoStatus("已取消导入。")
+          : successStatus(`已导入 ${result.data.importedCount} 条素材${result.data.settings ? "，并合并对应的分类与标签库" : ""}。`);
+
+        if (!result.data.canceled && result.data.importedCount > 0) {
+          markRecentImportPins(set, get, previousItemIds);
+          if (!result.data.settings) scheduleLexiconSyncAfterImport(set, get, previousItemIds);
+          scheduleAutoNsfwGradingAfterImport(set, get, previousItemIds);
+        }
+        set({ statusMessage: finalStatus });
+      } else {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+      }
+    } catch {
+      set({ statusMessage: errorStatus("ZIP_IMPORT_FAILED", "分享包导入失败，请重试或查看日志。") });
+    } finally {
+      set({ isBusy: false });
+    }
   },
 
-  exportZip: async (itemIds = []) => {
-    set({ isBusy: true, statusMessage: null });
-    const result = await window.suyanApi.exportZip(itemIds);
+  exportZip: async (itemIds = [], authorChoice) => {
+    set({ statusMessage: null });
+    try {
+      await viewSettingsWriteChain;
+      const result = await window.suyanApi.exportZip(itemIds, authorChoice);
 
-    if (result.ok) {
-      set({
-        statusMessage: result.data.canceled
-          ? infoStatus("已取消分享导出。")
-          : successStatus(
-              result.data.exportedCount > 1
-                ? `已打包分享当前提示词组（${result.data.exportedCount} 张效果图）。`
-                : "已打包分享当前提示词组。",
-            ),
-      });
-    } else {
-      set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+      if (result.ok) {
+        if (result.data.requiresAuthorChoice) return result.data;
+        set({
+          statusMessage: result.data.canceled
+            ? infoStatus("已取消分享导出。")
+            : successStatus(
+                `已导出 ${result.data.exportedCount} 张素材${result.data.categoryCount !== undefined
+                  ? `，包含 ${result.data.categoryCount} 个分类、${result.data.tagCount ?? 0} 个标签` : ""}。`,
+              ),
+        });
+      } else {
+        set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+      }
+      return result.ok ? result.data : null;
+    } catch {
+      set({ statusMessage: errorStatus("ZIP_EXPORT_FAILED", "分享包导出失败，请重试或查看日志。") });
+      return null;
     }
-
-    set({ isBusy: false });
   },
 
   saveItem: async (itemId, patch, options = {}) => {
@@ -2676,7 +3625,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           learningEvents: get().categoryLearningEvents,
         },
       }),
-    );
+    ).catch(() => ({ ok: false as const, error: { code: "LEXICON_SAVE_FAILED", message: "词库保存连接中断，请重试。" } }));
 
     if (result.ok) {
       logRendererStartupEvent("lexicon:save:persisted", {
@@ -2685,9 +3634,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         tagCount: syncedLexicons.tags.length,
         silent,
       });
-      syncLibraryViewSettings(set, result.data, {
-        statusMessage: silent ? null : successStatus("已保存词库。"),
-      });
+      // An older completed request must not replace a newer optimistic lexicon.
+      if (get().promptLexicons === syncedLexicons) {
+        syncLibraryViewSettings(set, result.data, {
+          statusMessage: silent ? null : successStatus("已保存词库。"),
+        });
+      }
       return true;
     }
 
@@ -2696,11 +3648,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       code: result.error.code,
       message: result.error.message,
     });
-    set({
-      promptLexicons: currentPromptLexicons,
-      categoryTaxonomy: currentTaxonomy,
-      statusMessage: errorStatus(result.error.code, result.error.message),
-    });
+    if (get().promptLexicons === syncedLexicons) {
+      set({
+        promptLexicons: currentPromptLexicons,
+        categoryTaxonomy: currentTaxonomy,
+        statusMessage: errorStatus(result.error.code, result.error.message),
+      });
+    }
     return false;
   },
 
@@ -3072,7 +4026,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   exportPromptLexicon: async (kind, items) => {
-    set({ isBusy: true, statusMessage: null });
+    set({ statusMessage: null });
 
     const result = await window.suyanApi.exportPromptLexicon(kind, items);
 
@@ -3082,7 +4036,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           ? infoStatus("已取消导出。")
           : successStatus(`已导出 ${result.data.exportedCount} 条词库记录。`)
         : errorStatus(result.error.code, result.error.message),
-      isBusy: false,
     });
   },
 
@@ -3205,6 +4158,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  saveWebAssistantPrefs: async (prefs) => {
+    set({
+      webAssistantLastPlatform: prefs.platform,
+      webAssistantLastCustomUrl: prefs.customUrl,
+    });
+    void saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get()));
+  },
+
   deleteItems: async (itemIds, deleteImages) => {
     if (itemIds.length === 0) {
       return;
@@ -3267,7 +4228,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   exportImage: async (imageFileName) => {
-    set({ isBusy: true, statusMessage: null });
+    set({ statusMessage: null });
     const result = await window.suyanApi.exportImage(imageFileName);
 
     set({
@@ -3276,7 +4237,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           ? infoStatus("已取消导出。")
           : successStatus("已导出文件。")
         : errorStatus(result.error.code, result.error.message),
-      isBusy: false,
     });
   },
 
@@ -3346,7 +4306,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   compressVideos: async (options, onProgress) => {
     if (!(await get().checkVideoRuntime())) {
       set({
-        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频运行时（FFmpeg）才能压缩视频，请先安装。"),
+        statusMessage: errorStatus("FFMPEG_BINARY_NOT_FOUND", "需要视频依赖（FFmpeg）才能压缩视频，请先安装。"),
       });
       return null;
     }
@@ -3425,16 +4385,127 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return false;
   },
 
+  removeModule: async (moduleId) => {
+    const definition = getBuiltinModuleDefinition(moduleId);
+    if (definition.required) {
+      set({ statusMessage: failureStatus("必需模块不可删除。") });
+      return false;
+    }
+
+    set({ isBusy: true, statusMessage: progressStatus(`正在删除「${definition.label}」...`) });
+    try {
+      if (moduleId === "video-runtime") {
+        const removeResult = await window.suyanApi.removeFfmpegComponent();
+        if (!removeResult.ok) {
+          set({ statusMessage: errorStatus(removeResult.error.code, removeResult.error.message) });
+          return false;
+        }
+
+        // 删除应用受管组件后重新检查。系统 PATH 中已有的 FFmpeg 仍可用，但保持用户选择的停用状态。
+        const availability = await window.suyanApi.checkModuleInstalled("video-runtime").catch(() => null);
+        const isSystemRuntimeAvailable = availability?.ok ? availability.data.installed : false;
+        const saved = await get().setModuleState({
+          "video-runtime": { installed: isSystemRuntimeAvailable, enabled: false },
+        });
+        if (!saved) {
+          return false;
+        }
+
+        videoRuntimeProbeCache = { installed: isSystemRuntimeAvailable, checkedAt: Date.now() };
+        set({
+          statusMessage: successStatus(
+            isSystemRuntimeAvailable
+              ? removeResult.data.removed
+                ? "已移除应用下载的 FFmpeg；系统 FFmpeg 未受影响，视频依赖已停用。"
+                : "未发现应用下载的 FFmpeg；系统 FFmpeg 未受影响，视频依赖已停用。"
+              : "已删除视频依赖（FFmpeg）。",
+          ),
+        });
+        return true;
+      }
+
+      if (moduleId === "nsfw-runtime") {
+        const removeResult = await window.suyanApi.removeNsfwModule();
+        if (!removeResult.ok) {
+          set({ statusMessage: errorStatus(removeResult.error.code, removeResult.error.message) });
+          return false;
+        }
+
+        const saved = await get().setModuleState({
+          "nsfw-runtime": { installed: false, enabled: false },
+        });
+        if (saved) {
+          set({ statusMessage: successStatus("已删除本地 NSFW 识别模块。") });
+        }
+        return saved;
+      }
+
+      const saved = await get().setModuleState({
+        [moduleId]: { installed: false, enabled: false },
+      });
+      if (saved) {
+        set({ statusMessage: successStatus(`已移除「${definition.label}」，可随时恢复。`) });
+      }
+      return saved;
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
+  restoreModule: async (moduleId) => {
+    const definition = getBuiltinModuleDefinition(moduleId);
+    if (definition.required) {
+      set({ statusMessage: failureStatus("必需模块始终可用，无需恢复。") });
+      return false;
+    }
+    if (moduleId === "video-runtime") {
+      set({ statusMessage: infoStatus("请使用视频依赖卡片中的下载或离线导入功能进行安装。") });
+      return false;
+    }
+    set({ isBusy: true, statusMessage: progressStatus(`正在恢复「${definition.label}」...`) });
+    try {
+      if (definition.category === "runtime") {
+        const availability = await window.suyanApi.checkModuleInstalled(moduleId).catch(() => null);
+        const installed = availability?.ok === true && availability.data.installed;
+        if (!installed) {
+          set({
+            statusMessage: failureStatus(`未检测到「${definition.label}」的内置依赖，无法恢复。`),
+          });
+          return false;
+        }
+      }
+
+      const saved = await get().setModuleState({
+        [moduleId]: { installed: true, enabled: true },
+      });
+      if (saved) {
+        set({
+          statusMessage: successStatus(
+            definition.category === "runtime"
+              ? `已校验并启用「${definition.label}」。`
+              : `已恢复并启用「${definition.label}」。`,
+          ),
+        });
+      }
+      return saved;
+    } finally {
+      set({ isBusy: false });
+    }
+  },
+
   installModule: async (moduleId, options) => {
     set({ isBusy: true, statusMessage: progressStatus(`正在安装模块...`) });
 
     try {
-      // video-runtime 走安全的按需组件通道（下载/离线导入，内置验签）；其余模块沿用本地包安装。
       const result =
         moduleId === "video-runtime"
           ? options?.source === "local"
             ? await window.suyanApi.installFfmpegComponentFromLocal()
             : await window.suyanApi.installFfmpegComponentFromDownload()
+          : moduleId === "nsfw-runtime"
+            ? options?.source === "local"
+              ? await window.suyanApi.installModuleFromLocal(moduleId)
+              : await window.suyanApi.installModuleFromDownload(moduleId)
           : await window.suyanApi.installModuleFromLocal(moduleId);
 
       if (!result.ok) {
@@ -3465,7 +4536,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         patch[depId] = { installed: true, enabled: true };
       }
 
-      await get().setModuleState(patch);
+      const saved = await get().setModuleState(patch);
+      if (!saved) {
+        return false;
+      }
       if (moduleId === "video-runtime") {
         videoRuntimeProbeCache = { installed: true, checkedAt: Date.now() };
       }
@@ -3478,9 +4552,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
-  checkVideoRuntime: async () => {
+  checkVideoRuntime: async (options?: { force?: boolean }) => {
     const now = Date.now();
     if (
+      !options?.force &&
       videoRuntimeProbeCache &&
       now - videoRuntimeProbeCache.checkedAt < VIDEO_RUNTIME_PROBE_TTL_MS
     ) {
@@ -3498,11 +4573,39 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // 已装时保留用户 enabled 偏好；二进制消失强制关闭；新装上默认启用。
     const next = resolveVideoRuntimeStateAfterProbe(current, installed);
     if (current.installed !== next.installed || current.enabled !== next.enabled) {
-      await get().setModuleState({ "video-runtime": next });
+      const saved = await get().setModuleState({ "video-runtime": next });
+      if (!saved) {
+        const persisted = get().moduleState["video-runtime"];
+        videoRuntimeProbeCache = { installed: persisted.installed, checkedAt: Date.now() };
+        return persisted.installed;
+      }
     }
     videoRuntimeProbeCache = { installed: next.installed, checkedAt: Date.now() };
     return next.installed;
   },
+
+  checkNsfwRuntime: async () => {
+    const result = await window.suyanApi.checkModuleInstalled("nsfw-runtime").catch(() => null);
+    if (!result?.ok) {
+      return get().moduleState["nsfw-runtime"].installed;
+    }
+
+    const installed = result.data.installed;
+    const current = get().moduleState["nsfw-runtime"];
+    const next = installed
+      ? { installed: true, enabled: current.installed ? current.enabled : true }
+      : { installed: false, enabled: false };
+
+    if (current.installed !== next.installed || current.enabled !== next.enabled) {
+      const saved = await get().setModuleState({ "nsfw-runtime": next });
+      if (!saved) {
+        return get().moduleState["nsfw-runtime"].installed;
+      }
+    }
+
+    return next.installed;
+  },
+
 }));
 
 function buildLibraryViewSettings(
@@ -3510,21 +4613,48 @@ function buildLibraryViewSettings(
   patch: Partial<LibraryViewSettings> = {},
 ): LibraryViewSettings {
   return {
+    language: state.language,
     // referenceImageDataUrl is a session-only base64 blob; strip it before
     // persisting so app settings stay small. promptOrigin is session-only too:
     // a stale origin from a previous run must not silently pull new generations
     // into an old prompt group.
-    canvasDraft: { ...state.canvasDraft, referenceImageDataUrl: "", promptOrigin: null },
+    canvasDraft: {
+      ...state.canvasDraft,
+      // referenceImageDataUrl is a session-only base64 blob; strip it before
+      // persisting so app settings stay small. promptOrigin is session-only too:
+      // a stale origin from a previous run must not silently pull new generations
+      // into an old prompt group.
+      referenceImages: state.canvasDraft.referenceImages.map((image) => ({ ...image, dataUrl: "" })),
+      promptOrigin: null,
+    },
     tagOrder: state.tagOrder,
     likedImageIds: state.likedImageIds,
     starredRecommendations: state.starredRecommendations,
     webAssistantCustomUrls: state.webAssistantCustomUrls,
+    webAssistantLastPlatform: state.webAssistantLastPlatform,
+    webAssistantLastCustomUrl: state.webAssistantLastCustomUrl,
     generationModelOrder: state.generationModelOrder,
     hiddenGenerationModels: state.hiddenGenerationModels,
     themeMode: state.themeMode,
+    themePreset: state.themePreset,
+    themeAccent: state.themeAccent,
+    themeCustomAccent: state.themeCustomAccent,
+    themeOpacity: state.themeOpacity,
+    themeNavigationOpacity: state.themeNavigationOpacity,
+    themeBackgroundOpacity: state.themeBackgroundOpacity,
+    themeWorkspaceOpacity: state.themeWorkspaceOpacity,
+    themeAccentOpacity: state.themeAccentOpacity,
+    themeCustomAccents: state.themeCustomAccents,
+    themeAccentMemory: state.themeAccentMemory,
+    customTheme: state.customTheme,
+    canvasBackground: state.canvasBackground,
+    workspaceWidthPercent: normalizeWorkspaceWidthPercent(state.workspaceWidthPercent),
+    sidebarEntryVisibility: normalizeSidebarEntryVisibility(state.sidebarEntryVisibility),
+    featureGuideCompleted: state.featureGuideCompleted,
     autoNsfwGrading: state.autoNsfwGrading,
     blurNsfwImages: state.blurNsfwImages,
     nsfwGradingSpeed: state.nsfwGradingSpeed,
+    nsfwDetectionMode: state.nsfwDetectionMode,
     masonryTileWidth: normalizeMasonryTileWidth(state.masonryTileWidth),
     materialBrowserCollectionMode: state.materialBrowserCollectionMode,
     materialBrowserGalleryMode: state.materialBrowserGalleryMode,
@@ -3541,6 +4671,7 @@ function buildLibraryViewSettings(
       learningEvents: state.categoryLearningEvents,
     },
     moduleState: state.moduleState,
+    promptViewSettings: patch.promptViewSettings ?? state.promptViewSettings,
     ...patch,
   };
 }
@@ -3550,20 +4681,50 @@ function syncLibraryViewSettings(
   settings: LibraryViewSettings,
   extra: Partial<LibraryState> = {},
 ): void {
-  applyThemeModeToRoot(settings.themeMode);
+  applyThemeModeToRoot(settings.themeMode, document.documentElement, {
+    themePreset: settings.themePreset,
+    themeAccent: settings.themeAccent,
+    themeCustomAccent: settings.themeCustomAccent,
+    themeCustomAccents: settings.themeCustomAccents,
+    themeOpacity: settings.themeOpacity,
+    themeNavigationOpacity: settings.themeNavigationOpacity,
+    themeBackgroundOpacity: settings.themeBackgroundOpacity,
+    themeWorkspaceOpacity: settings.themeWorkspaceOpacity,
+    themeAccentOpacity: settings.themeAccentOpacity,
+    customTheme: settings.customTheme,
+  });
   const workspace = normalizeCategoryWorkspace(settings.categoryWorkspace, settings.promptLexicons);
   set({
+    language: settings.language ?? defaultAppLanguage,
     canvasDraft: settings.canvasDraft,
+    canvasBackground: normalizeCanvasBackground(settings.canvasBackground),
     tagOrder: settings.tagOrder,
     likedImageIds: settings.likedImageIds,
     starredRecommendations: settings.starredRecommendations,
     webAssistantCustomUrls: settings.webAssistantCustomUrls,
+    webAssistantLastPlatform: settings.webAssistantLastPlatform ?? null,
+    webAssistantLastCustomUrl: settings.webAssistantLastCustomUrl ?? null,
     generationModelOrder: settings.generationModelOrder,
     hiddenGenerationModels: settings.hiddenGenerationModels,
     themeMode: settings.themeMode,
+    themePreset: settings.themePreset,
+    themeAccent: settings.themeAccent,
+    themeCustomAccent: settings.themeCustomAccent,
+    themeOpacity: settings.themeOpacity,
+    themeNavigationOpacity: settings.themeNavigationOpacity,
+    themeBackgroundOpacity: settings.themeBackgroundOpacity,
+    themeWorkspaceOpacity: settings.themeWorkspaceOpacity,
+    themeAccentOpacity: settings.themeAccentOpacity,
+    themeCustomAccents: settings.themeCustomAccents,
+    themeAccentMemory: settings.themeAccentMemory,
+    customTheme: settings.customTheme,
+    workspaceWidthPercent: settings.workspaceWidthPercent,
+    sidebarEntryVisibility: normalizeSidebarEntryVisibility(settings.sidebarEntryVisibility),
+    featureGuideCompleted: settings.featureGuideCompleted ?? [],
     autoNsfwGrading: settings.autoNsfwGrading,
     blurNsfwImages: settings.blurNsfwImages,
     nsfwGradingSpeed: settings.nsfwGradingSpeed,
+    nsfwDetectionMode: settings.nsfwDetectionMode,
     masonryTileWidth: settings.masonryTileWidth,
     materialBrowserCollectionMode: settings.materialBrowserCollectionMode,
     materialBrowserGalleryMode: settings.materialBrowserGalleryMode,
@@ -3573,6 +4734,7 @@ function syncLibraryViewSettings(
     materialBrowserScrollTop: settings.materialBrowserScrollTop,
     networkMaterialImportMode: settings.networkMaterialImportMode,
     promptLexicons: settings.promptLexicons,
+    promptViewSettings: settings.promptViewSettings,
     categoryTaxonomy: workspace.taxonomy,
     categoryInbox: workspace.inbox,
     categoryCandidates: workspace.candidates,
@@ -3658,55 +4820,6 @@ function setLibrary(
   set({ items: reconciledItems, selectedItemId });
 }
 
-async function pruneOrphanTagsAfterLoad(
-  set: (partial: Partial<LibraryState>) => void,
-  get: () => LibraryState,
-): Promise<void> {
-  const state = get();
-  const lexicons = state.promptLexicons;
-  if (!lexicons) {
-    return;
-  }
-  const items = state.items;
-  let itemsChanged = false;
-  const nextItems = items.map((item) => {
-    const sanitized = sanitizeMaterialTags(item.tags ?? []);
-    const prev = item.tags ?? [];
-    if (sanitized.length === prev.length && sanitized.every((tag, index) => tag === prev[index])) {
-      return item;
-    }
-    itemsChanged = true;
-    return { ...item, tags: sanitized };
-  });
-  const usedKeys = collectUsedTagKeysFromItems(nextItems);
-  const pruned = pruneOrphanTagLexiconEntries(lexicons.tags ?? [], usedKeys);
-  const tagsChanged = pruned.removedCount > 0;
-  if (!itemsChanged && !tagsChanged) {
-    logRendererStartupEvent("lexicon:orphan-prune", { removedCount: 0, itemsNormalized: 0 });
-    return;
-  }
-  if (itemsChanged) {
-    set({ items: nextItems });
-    const libraryResult = await window.suyanApi.saveLibrary(buildLibraryFile(nextItems));
-    if (libraryResult.ok) {
-      setLibrary(libraryResult.data, set, get);
-    }
-  }
-  if (tagsChanged) {
-    const nextLexicons = { ...lexicons, tags: pruned.entries };
-    set({ promptLexicons: nextLexicons });
-    const settingsResult = await saveLibraryViewSettingsSerialized(
-      buildLibraryViewSettings(get(), { promptLexicons: nextLexicons }),
-    );
-    if (settingsResult.ok) {
-      syncLibraryViewSettings(set, settingsResult.data);
-    }
-  }
-  logRendererStartupEvent("lexicon:orphan-prune", {
-    removedCount: pruned.removedCount,
-    itemsNormalized: itemsChanged ? 1 : 0,
-  });
-}
 async function syncPromptLexiconsFromLibrary(
   set: (partial: Partial<LibraryState>) => void,
   get: () => LibraryState,
@@ -3906,6 +5019,27 @@ function scheduleIdleWork(work: () => void): void {
   window.setTimeout(work, 120);
 }
 
+function scheduleAutoNsfwGradingAfterImport(
+  set: (partial: Partial<LibraryState>) => void,
+  get: () => LibraryState,
+  previousItemIds: ReadonlySet<string>,
+): void {
+  if (!get().autoNsfwGrading) {
+    return;
+  }
+
+  const importedItemIds = get().items
+    .filter((item) => !previousItemIds.has(item.id) && Boolean(item.imageFileName))
+    .map((item) => item.id);
+  if (importedItemIds.length === 0) {
+    return;
+  }
+
+  scheduleIdleWork(() => {
+    void gradeImagesForNsfw(importedItemIds, set, get, { force: false, silent: true }).catch(() => undefined);
+  });
+}
+
 function getKnownCategoriesFromItems(items: readonly LibraryItem[]): string[] {
   return uniqueTags(items.map((item) => item.category ?? "").filter(Boolean));
 }
@@ -3922,18 +5056,31 @@ async function gradeImagesForNsfw(
     return;
   }
 
+  const detectionMode = get().nsfwDetectionMode;
+  const localModuleEnabled =
+    detectionMode !== "remote-only" && isBuiltinModuleEnabled("nsfw-runtime", get().moduleState);
   const safetyPreference = resolveAiActionPreference(get().aiSettings, "image-safety");
-  const remoteAiReadiness = resolveRemoteAiReadiness(
-    get().aiSettings,
-    "NSFW 分级",
-    safetyPreference.profileId,
-    safetyPreference.modelId,
-    "vision",
-  );
+  const remoteAiReadiness =
+    detectionMode === "local-only"
+      ? null
+      : resolveRemoteAiReadiness(
+          get().aiSettings,
+          "NSFW 分级",
+          safetyPreference.profileId,
+          safetyPreference.modelId,
+          "vision",
+        );
 
-  if (!remoteAiReadiness.ready) {
+  if (detectionMode === "local-only" && !localModuleEnabled) {
     if (!options.silent) {
-      set({ statusMessage: remoteAiReadiness.statusMessage });
+      set({ statusMessage: failureStatus("本地 NSFW 识别模块未安装或已停用，请先在模块管理中安装。") });
+    }
+    return;
+  }
+
+  if (!localModuleEnabled && !remoteAiReadiness?.ready) {
+    if (!options.silent) {
+      set({ statusMessage: remoteAiReadiness?.statusMessage ?? failureStatus("没有可用的 NSFW 分级方式。") });
     }
     return;
   }
@@ -3966,7 +5113,15 @@ async function gradeImagesForNsfw(
 
   for (let index = 0; index < targets.length; index += batchSize) {
     const batch = targets.slice(index, index + batchSize);
-    const batchResults = await mapWithConcurrency(batch, concurrency, (item) => analyzeNsfwItem(item, get().aiSettings));
+    const batchResults = await mapWithConcurrency(batch, concurrency, (item) =>
+      analyzeNsfwItem(
+        item,
+        get().aiSettings,
+        detectionMode,
+        localModuleEnabled,
+        remoteAiReadiness?.ready === true,
+      ),
+    );
     const ratings = new Map<string, NsfwRating>();
 
     for (const result of batchResults) {
@@ -4034,8 +5189,25 @@ async function gradeImagesForNsfw(
 async function analyzeNsfwItem(
   item: LibraryItem,
   aiSettings: PublicAiProviderSettings,
+  detectionMode: NsfwDetectionMode,
+  localModuleEnabled: boolean,
+  remoteAiReady: boolean,
 ): Promise<{ itemId: string; rating: NsfwRating } | null> {
   try {
+    if (localModuleEnabled) {
+      const localResult = await window.suyanApi.classifyLocalNsfw(item.id);
+      if (localResult.ok) {
+        return {
+          itemId: item.id,
+          rating: localResult.data.rating,
+        };
+      }
+    }
+
+    if (detectionMode === "local-only" || !remoteAiReady) {
+      return null;
+    }
+
     const payload: AiAnalyzePromptPayload = applyAiActionPreference(aiSettings, "image-safety", {
       target: "image-safety",
       title: item.title,
@@ -4078,6 +5250,17 @@ function applyAiActionPreference<T extends object>(
   };
 }
 
+function matchesAiModelSelection(
+  preference: AiActionPreference | undefined,
+  selection: AiModelSelection,
+): boolean {
+  if (!preference || preference.modelId !== selection.modelId) {
+    return false;
+  }
+
+  return preference.profileId === selection.profileId;
+}
+
 function resolveAiActionPreference(
   settings: PublicAiProviderSettings,
   action: AiFeatureAction,
@@ -4093,6 +5276,7 @@ function resolveAiActionPreference(
     : null;
 
   return {
+    source: preference.source,
     customInstructions: buildAiActionInstructions(action, preference),
     profileId: profile?.id,
     modelId: model?.id,

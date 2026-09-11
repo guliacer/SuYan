@@ -1,5 +1,5 @@
 import {
-  Clipboard,
+  ClipboardPaste,
   Copy,
   Eye,
   EyeOff,
@@ -13,6 +13,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { useLocale } from "@/components/LocaleProvider";
 import { ConfirmBubble } from "@/components/ui/ConfirmBubble";
 import { TextField } from "@/components/ui/TextField";
 import { maskAiBaseUrl } from "../utils/aiBaseUrl";
@@ -26,6 +27,7 @@ import {
 import type { AiSettingsApi } from "./useAiSettings";
 
 export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
+  const { t } = useLocale();
   const {
     activeProfileId,
     canCopySelectedApiKey,
@@ -73,13 +75,11 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
     commitProfileNameEdit,
     confirmModelPicker,
     deleteProfile,
-    handleClearBaseUrl,
     handleCopyApiKey,
     handleCopyBaseUrl,
     handleListModels,
     handleNormalizeBaseUrl,
-    handlePasteApiKey,
-    handlePasteBaseUrl,
+    importClipboardIntoSelectedProfile,
     handleProfileNameKeyDown,
     handleTest,
     handleTestAllProfiles,
@@ -91,16 +91,15 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
   } = api;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-panel shadow-sm">
+    <div data-feature-guide="ai-connections" className="overflow-hidden rounded-2xl border border-border bg-panel shadow-sm">
       <div className="grid gap-0 min-[960px]:grid-cols-[250px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col border-b border-border bg-background px-4 py-5 min-[960px]:border-b-0 min-[960px]:border-r">
+        <aside data-feature-guide="ai-connection-list" className="flex min-h-0 flex-col border-b border-border bg-background px-4 py-5 min-[960px]:border-b-0 min-[960px]:border-r">
           <div className="flex items-center justify-between gap-2 pb-4">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">AI 连接</p>
-              <p className="mt-0.5 text-xs text-muted">服务商与兼容接口</p>
+              <p className="text-sm font-semibold text-foreground">{t("AI 连接")}</p>
             </div>
             <button
-              aria-label="新增 AI 连接"
+              aria-label={t("新增 AI 连接")}
               className="flex size-8 items-center justify-center rounded-full border border-border bg-panel text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
               disabled={isBusy}
               type="button"
@@ -113,10 +112,6 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
             ref={profileListRef}
             className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain pr-1"
           >
-            <div className="flex items-center justify-between text-xs font-semibold text-muted">
-              <span>OpenAI 兼容</span>
-              <span>{profiles.length}</span>
-            </div>
             <div className="grid auto-rows-max gap-1">
             {profiles.map((profile) => {
               const isSelected = profile.id === selectedProfile?.id;
@@ -137,7 +132,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                   data-ai-profile-active={isSelected ? "true" : undefined}
                   draggable={profiles.length > 1}
                   key={profile.id}
-                  title="拖动以调整 API 顺序"
+                  title={t("拖动以调整 API 顺序")}
                   type="button"
                   onClick={() => setSelectedProfileId(profile.id)}
                   onDragStart={(event) => {
@@ -182,13 +177,13 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     <GripVertical aria-hidden="true" className="shrink-0 text-muted/55" size={14} />
-                    <span className="truncate text-sm font-medium">{profile.name || "未命名 API"}</span>
+                    <span className="truncate text-sm font-medium">{profile.name || t("未命名 API")}</span>
                     <span
                       className={`size-2 shrink-0 rounded-full ${
                         isReady ? "bg-progress" : profile.enabled ? "bg-warning" : "bg-border"
                       }`}
                     />
-                    <span className="truncate text-[11px] text-muted">{keyState.willHaveApiKey ? profile.model : "未配置密钥"}</span>
+                    <span className="truncate text-[11px] text-muted">{keyState.willHaveApiKey ? profile.model : t("未配置密钥")}</span>
                     {profile.id === activeProfileId ? <Star className="shrink-0 text-primary" size={12} /> : null}
                   </span>
                 </button>
@@ -201,10 +196,9 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
               className="w-full"
               disabled={isBusy || isTestingAllProfiles || testableProfileCount === 0}
               icon={<Wifi size={16} />}
-              title={testableProfileCount === 0 ? "请先补全接口地址、模型和 API Key" : undefined}
               onClick={() => void handleTestAllProfiles()}
             >
-              {isTestingAllProfiles ? "正在测试全部 API" : "测试全部 API"}
+              {isTestingAllProfiles ? t("正在测试全部 API") : t("测试全部 API")}
             </Button>
           </div>
         </aside>
@@ -214,11 +208,11 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
             <section className="grid gap-2 border-b border-border bg-panel px-6 py-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-muted">当前连接</p>
+                  <p className="text-xs font-medium text-muted">{t("当前连接")}</p>
                   <div className="mt-1 flex flex-wrap items-center gap-2">
                     {editingProfileNameId === selectedProfile.id ? (
                       <TextField
-                        aria-label="编辑 API 名称"
+                        aria-label={t("编辑 API 名称")}
                         autoFocus
                         className="h-9 w-56 bg-background text-base font-semibold"
                         value={selectedProfile.name}
@@ -228,19 +222,18 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                       />
                     ) : (
                       <button
-                        aria-label="编辑 API 名称"
+                        aria-label={t("编辑 API 名称")}
                         className="inline-flex min-w-0 items-center gap-1.5 rounded-lg px-1 py-1 text-left text-lg font-semibold text-foreground outline-none transition-colors hover:bg-primary-soft focus-visible:ring-2 focus-visible:ring-primary/25"
                         type="button"
                         onClick={() => setEditingProfileNameId(selectedProfile.id)}
                       >
-                        <span className="max-w-[min(42vw,280px)] truncate">{selectedProfile.name || "未命名 API"}</span>
+                        <span className="max-w-[min(42vw,280px)] truncate">{selectedProfile.name || t("未命名 API")}</span>
                         <Pencil className="size-4 shrink-0 text-muted" />
                       </button>
                     )}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                      <span className="rounded-full border border-border bg-background px-2.5 py-1">OpenAI 兼容 API</span>
                       <span className="rounded-full border border-border bg-background px-2.5 py-1">
-                        {selectedProfile.model || "未选择模型"}
+                        {selectedProfile.model || t("未选择模型")}
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1">
                         <span
@@ -253,14 +246,14 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                           }`}
                         />
                         {selectedProfile.enabled && hasCompleteConnection
-                          ? "运行正常"
+                          ? t("运行正常")
                           : selectedProfile.enabled
-                            ? "需要补全"
-                            : "已停用"}
+                            ? t("需要补全")
+                            : t("已停用")}
                       </span>
                       {selectedProfile.id === activeProfileId ? (
                         <span className="rounded-full border border-primary bg-primary-soft px-2.5 py-1 text-foreground">
-                          默认连接
+                          {t("默认连接")}
                         </span>
                       ) : null}
                     </div>
@@ -268,6 +261,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                 </div>
 
                 <div
+                  data-feature-guide="ai-connection-actions"
                   className="flex shrink-0 items-center gap-2"
                   ref={(node) => {
                     profileActionsRef.current = node;
@@ -280,13 +274,13 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                     icon={<Wifi size={16} />}
                     onClick={() => void handleTest()}
                   >
-                    测试API
+                    {t("测试API")}
                   </Button>
                   <label className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-background px-3 text-sm font-medium text-foreground">
-                    <span>{selectedProfile.enabled ? "已启用" : "已停用"}</span>
+                    <span>{selectedProfile.enabled ? t("已启用") : t("已停用")}</span>
                     <span className="relative inline-flex h-6 w-11 items-center">
                       <input
-                        aria-label="启用这个 API"
+                        aria-label={t("启用这个 API")}
                         checked={selectedProfile.enabled}
                         className="peer sr-only"
                         type="checkbox"
@@ -300,7 +294,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                   <div className="relative">
                     <button
                       aria-expanded={profileActionsMenuId === selectedProfile.id}
-                      aria-label="更多 API 操作"
+                      aria-label={t("更多 API 操作")}
                       className="flex size-10 items-center justify-center rounded-xl border border-border bg-background text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25"
                       disabled={isBusy}
                       type="button"
@@ -325,7 +319,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                           }}
                         >
                           <Star size={14} />
-                          设为默认
+                          {t("设为默认")}
                         </button>
                         <button
                           className="flex min-h-9 w-full items-center gap-2 px-3 text-left text-danger outline-none transition-colors hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-50"
@@ -337,7 +331,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                           }}
                         >
                           <Trash2 size={14} />
-                          删除连接
+                          {t("删除连接")}
                         </button>
                       </div>
                     ) : null}
@@ -345,12 +339,12 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                     {deleteConfirmProfileId === selectedProfile.id ? (
                       <ConfirmBubble
                         className="right-0 top-full mt-3"
-                        confirmLabel="确认删除"
-                        description="删除后不再出现在快速切换中。"
+                        confirmLabel={t("确认删除")}
+                        description={t("删除后不再出现在快速切换中。")}
                         icon={<Trash2 size={15} />}
                         isBusy={isBusy}
                         placement="below"
-                        title="删除这个 API？"
+                        title={t("删除这个 API？")}
                         onCancel={() => setDeleteConfirmProfileId(null)}
                         onConfirm={() => deleteProfile(selectedProfile.id)}
                       />
@@ -360,13 +354,13 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
               </div>
             </section>
 
-            <section className="grid gap-4 bg-panel px-6 py-5">
+            <section data-feature-guide="ai-connection-credentials" className="grid gap-4 bg-panel px-6 py-5">
               <div className="grid gap-4 min-[820px]:grid-cols-2 min-[820px]:items-start">
                 <label className="grid gap-2 text-sm font-medium text-muted">
-                  接口地址
+                  {t("接口地址")}
                   <div className="grid gap-2 min-[680px]:grid-cols-[minmax(0,1fr)_auto]">
                     <TextField
-                      aria-label="接口地址"
+                      aria-label={t("接口地址")}
                       placeholder="https://api.openai.com/v1"
                       readOnly={!isBaseUrlRevealed}
                       value={isBaseUrlRevealed ? selectedProfile.baseUrl : maskAiBaseUrl(selectedProfile.baseUrl)}
@@ -375,49 +369,33 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                     />
                     <div className="flex shrink-0 flex-wrap gap-2 min-[680px]:items-start">
                       <Button
-                        aria-label="复制接口地址"
+                        aria-label={t("复制接口地址")}
                         disabled={!selectedProfile.baseUrl.trim() || isBusy}
                         icon={<Copy size={15} />}
-                        title="复制接口地址"
+                        title={t("复制接口地址")}
                         variant="secondary"
                         onClick={() => void handleCopyBaseUrl()}
-                      >
-                        复制
-                      </Button>
+                      />
                       <Button
-                        aria-label="粘贴接口地址"
-                        disabled={isBusy}
-                        icon={<Clipboard size={15} />}
-                        title="从剪贴板粘贴接口地址"
-                        variant="secondary"
-                        onClick={() => void handlePasteBaseUrl()}
-                      >
-                        粘贴
-                      </Button>
-                      <Button
-                        aria-label={isBaseUrlRevealed ? "隐藏接口地址" : "展示接口地址"}
+                        aria-label={isBaseUrlRevealed ? t("隐藏接口地址") : t("展示接口地址")}
                         disabled={!selectedProfile.baseUrl.trim() || isBusy}
                         icon={isBaseUrlRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
-                        title={isBaseUrlRevealed ? "隐藏接口地址" : "展示接口地址"}
+                        title={isBaseUrlRevealed ? t("隐藏接口地址") : t("展示接口地址")}
                         variant="ghost"
                         onClick={() =>
                           setRevealedBaseUrlProfileId((currentId) =>
                             currentId === selectedProfile.id ? null : selectedProfile.id,
                           )
                         }
-                      >
-                        {isBaseUrlRevealed ? "隐藏" : "展示"}
-                      </Button>
+                      />
                       <Button
-                        aria-label="删除接口地址"
-                        disabled={!selectedProfile.baseUrl.trim() || isBusy}
-                        icon={<Trash2 size={15} />}
-                        title="删除接口地址"
-                        variant="ghost"
-                        onClick={handleClearBaseUrl}
-                      >
-                        删除
-                      </Button>
+                        aria-label={t("快速导入")}
+                        disabled={isBusy}
+                        icon={<ClipboardPaste size={15} />}
+                        title={t("快速导入接口、API Key和模型")}
+                        variant="secondary"
+                        onClick={() => void importClipboardIntoSelectedProfile()}
+                      />
                     </div>
                   </div>
                 </label>
@@ -428,13 +406,13 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                     <TextField
                       aria-label="API Key"
                       className="font-mono"
-                      placeholder={selectedApiKeyState?.willHaveApiKey ? "已配置 API Key" : "未配置 API Key"}
+                      placeholder={selectedApiKeyState?.willHaveApiKey ? t("已配置 API Key") : t("未配置 API Key")}
                       readOnly={!isApiKeyRevealed}
                       type={isApiKeyRevealed ? "text" : "password"}
                       value={
                         isApiKeyRevealed
                           ? selectedProfile.apiKey || revealedApiKey
-                          : selectedApiKeyPreview || (selectedProfile.clearApiKey ? "保存后清除密钥" : "未配置密钥")
+                          : selectedApiKeyPreview || (selectedProfile.clearApiKey ? t("保存后清除密钥") : t("未配置密钥"))
                       }
                       onChange={(event) => {
                         patchProfile(selectedProfile.id, {
@@ -447,80 +425,36 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                       <Button
                         disabled={!canCopySelectedApiKey || isBusy}
                         icon={<Copy size={15} />}
-                        title="复制 API Key"
+                        title={t("复制 API Key")}
                         variant="secondary"
                         onClick={() => void handleCopyApiKey()}
-                      >
-                        复制
-                      </Button>
+                      />
                       <Button
-                        aria-label="粘贴 API Key"
-                        disabled={isBusy}
-                        icon={<Clipboard size={15} />}
-                        title="从剪贴板粘贴 API Key"
-                        variant="secondary"
-                        onClick={() => void handlePasteApiKey()}
-                      >
-                        粘贴
-                      </Button>
-                      <Button
-                        aria-label={isApiKeyRevealed ? "隐藏 API Key" : "展示 API Key"}
+                        aria-label={isApiKeyRevealed ? t("隐藏 API Key") : t("展示 API Key")}
                         disabled={!canCopySelectedApiKey || isBusy}
                         icon={isApiKeyRevealed ? <EyeOff size={15} /> : <Eye size={15} />}
-                        title={isApiKeyRevealed ? "隐藏 API Key" : "展示 API Key"}
+                        title={isApiKeyRevealed ? t("隐藏 API Key") : t("展示 API Key")}
                         variant="ghost"
                         onClick={() => void handleToggleApiKeyVisibility()}
-                      >
-                        {isApiKeyRevealed ? "隐藏" : "展示"}
-                      </Button>
-                      <div className="relative" ref={clearActionRef}>
-                        <Button
-                          disabled={(!selectedProfile.hasApiKey && !selectedProfile.apiKey.trim()) || isBusy}
-                          icon={<Trash2 size={15} />}
-                          variant="ghost"
-                          onClick={() => setClearConfirmProfileId(selectedProfile.id)}
-                        >
-                          清除
-                        </Button>
-                        {clearConfirmProfileId === selectedProfile.id ? (
-                          <ConfirmBubble
-                            className="right-0 top-full mt-3"
-                            confirmLabel="确认清除"
-                            description="保存后移除已保存密钥。"
-                            icon={<Trash2 size={15} />}
-                            isBusy={isBusy}
-                            placement="below"
-                            title="清除 API Key？"
-                            onCancel={() => setClearConfirmProfileId(null)}
-                            onConfirm={() => {
-                              patchProfile(selectedProfile.id, {
-                                apiKey: "",
-                                apiKeyPreview: "",
-                                clearApiKey: true,
-                                enabled: false,
-                              });
-                              setRevealedApiKeyProfileId(null);
-                              setRevealedApiKeys((current) => {
-                                const next = { ...current };
-                                delete next[selectedProfile.id];
-                                return next;
-                              });
-                              setClearConfirmProfileId(null);
-                            }}
-                          />
-                        ) : null}
-                      </div>
+                      />
+                      <Button
+                        aria-label={t("快速导入")}
+                        disabled={isBusy}
+                        icon={<ClipboardPaste size={15} />}
+                        title={t("快速导入接口、API Key和模型")}
+                        variant="secondary"
+                        onClick={() => void importClipboardIntoSelectedProfile()}
+                      />
                     </div>
                   </div>
                 </label>
               </div>
             </section>
 
-            <section className="grid gap-4 rounded-xl border border-border bg-background p-4">
+            <section data-feature-guide="ai-model-list" className="grid gap-4 rounded-xl border border-border bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">模型列表</p>
-                  <p className="mt-1 text-xs text-muted">为当前供应商选择可用模型，并配置模型能力。</p>
+                  <p className="text-sm font-semibold text-foreground">{t("模型列表")}</p>
                 </div>
                 <Button
                   disabled={isBusy || !canQueryModels(selectedProfile)}
@@ -528,17 +462,17 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                   variant="secondary"
                   onClick={() => void handleListModels()}
                 >
-                  查询模型
+                  {t("查询模型")}
                 </Button>
               </div>
 
               <div className="overflow-hidden rounded-md border border-border bg-panel">
                 <div className="overflow-x-auto">
                   <div className="min-w-[620px]">
-                    <div className="grid grid-cols-[minmax(220px,1fr)_190px_96px] border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
-                      <span>模型</span>
-                      <span>能力</span>
-                      <span className="text-center">状态</span>
+                    <div className="grid grid-cols-[minmax(220px,1fr)_260px_96px] border-b border-border bg-background px-3 py-2 text-xs font-semibold text-foreground">
+                      <span>{t("模型")}</span>
+                      <span>{t("能力")}</span>
+                      <span className="text-center">{t("状态")}</span>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
                       {selectedProfile.models.map((model) => (
@@ -561,8 +495,8 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
 
               <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                 <TextField
-                  aria-label="手动添加模型"
-                  placeholder="手动输入模型 ID"
+                  aria-label={t("手动添加模型")}
+                  placeholder={t("手动输入模型 ID")}
                   value={manualModelDraft}
                   onChange={(event) => setManualModelDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -573,7 +507,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                   }}
                 />
                 <Button disabled={isBusy || !manualModelDraft.trim()} icon={<Plus size={15} />} onClick={addManualModel}>
-                  添加
+                  {t("添加")}
                 </Button>
               </div>
 

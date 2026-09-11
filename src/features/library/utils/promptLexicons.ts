@@ -5,10 +5,7 @@ import type {
 } from "../types/library";
 import { photographyCategoryDefinitions } from "./photographyCategories";
 import { buildSystemCategoryId } from "./categoryId";
-import {
-  buildPromptAnalysisFromSavedCapsules,
-  omitNegativeAnalysisSections,
-} from "./promptAnalysis";
+import { normalizeTagKnowledge, proposeTagGroup } from "./tagKnowledge";
 import {
   promptSectionMeta,
   promptSplitSectionOrder,
@@ -330,22 +327,6 @@ function collectPromptLexiconReferences(
       addLexiconLabelKey(references.tagLabelKeys, tag);
       addLexiconLabelKey(references.categoryLabelKeys, tag);
     }
-
-    const savedCapsuleAnalysis = buildPromptAnalysisFromSavedCapsules(`${item.prompt}\n${item.negativePrompt}`, {
-      title: item.title,
-      tags: item.tags,
-      currentCategory: item.category ?? undefined,
-      knownCategories,
-    });
-    const visibleAnalysis = savedCapsuleAnalysis ? omitNegativeAnalysisSections(savedCapsuleAnalysis) : null;
-
-    if (!visibleAnalysis) {
-      continue;
-    }
-
-    for (const category of visibleAnalysis.suggestedCategories) {
-      addLexiconLabelKey(references.categoryLabelKeys, category);
-    }
   }
 
   return references;
@@ -370,6 +351,7 @@ function shouldKeepTagEntry(
   references: PromptLexiconReferenceKeys,
   defaultTagLabelKeys: ReadonlySet<string>,
 ): boolean {
+  if (entry.groupLocked || entry.reviewStatus || entry.aliases?.length) return true;
   const labelKey = normalizeLexiconLabelKey(entry.label);
 
   if (defaultTagLabelKeys.has(labelKey) || references.tagLabelKeys.has(labelKey)) {
@@ -420,11 +402,12 @@ function applyTagLabelsToWorkingSet(workingSet: TagLexiconWorkingSet, tagLabels:
 
     const nextEntry: PromptImageLexiconEntry = {
       id: createTagLexiconId(tagLabel, workingSet.usedIds),
-      group: getPromptTagGroup(tagLabel),
+      group: proposeTagGroup(tagLabel, getPromptTagGroup(tagLabel)),
       label: tagLabel,
       description: aiTagDescription,
       parentId: null,
       imageFileName: null,
+      reviewStatus: proposeTagGroup(tagLabel, getPromptTagGroup(tagLabel)) === "待归纳" ? "pending" : "accepted",
     };
     workingSet.tags.push(nextEntry);
     workingSet.existingEntriesByLabel.set(labelKey, nextEntry);
@@ -456,7 +439,25 @@ export function getPromptSectionGroup(key: string): string {
   return promptSectionGroupByKey[key as PromptSplitSectionKey] ?? "文本与补充";
 }
 
+// label -> group 是纯函数，但内部会跑整套 splitPromptToTemplate 解析。
+// 渲染路径按标签反复调用同一批 label，缓存后启动阶段不再重复解析。
+// 键的取值范围由用户词库里的去重 label 决定，不会无界增长。
+const promptTagGroupCache = new Map<string, string>();
+
 export function getPromptTagGroup(label: string, fallbackGroup = defaultTagLexiconGroupLabel): string {
+  const cacheKey = `${label}\u0000${fallbackGroup}`;
+  const cached = promptTagGroupCache.get(cacheKey);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const resolved = resolvePromptTagGroup(label, fallbackGroup);
+  promptTagGroupCache.set(cacheKey, resolved);
+  return resolved;
+}
+
+function resolvePromptTagGroup(label: string, fallbackGroup: string): string {
   const exactSectionKey = resolveExactPromptTagSectionKey(label);
 
   if (exactSectionKey && exactSectionKey !== "negative" && exactSectionKey !== "other" && exactSectionKey !== "color") {
@@ -716,11 +717,12 @@ function normalizeImageLexiconEntries(
 
     const normalizedEntry: PromptImageLexiconEntry = {
       id: getUniqueLexiconId(entry.id, usedIds, "image"),
-      group: options.kind === "tag" ? getPromptTagGroup(label, entry.group) : entry.group.trim(),
+      group: entry.group.trim(),
       label,
       description: entry.description.trim(),
       parentId: options.kind === "tag" ? null : entry.parentId?.trim() || null,
       imageFileName: entry.imageFileName?.trim() || null,
+      ...normalizeTagKnowledge(entry),
     };
 
     if (options.kind === "tag") {
@@ -747,6 +749,13 @@ function normalizeImageLexiconEntries(
 }
 
 function mergeImageLexiconEntry(targetEntry: PromptImageLexiconEntry, duplicateEntry: PromptImageLexiconEntry): void {
+  if (duplicateEntry.aliases?.length) targetEntry.aliases = [...new Set([...(targetEntry.aliases ?? []), ...duplicateEntry.aliases])];
+  if (!targetEntry.groupLocked && duplicateEntry.groupLocked) {
+    targetEntry.group = duplicateEntry.group;
+    targetEntry.groupLocked = true;
+    targetEntry.reviewStatus = duplicateEntry.reviewStatus;
+  }
+  if (!targetEntry.analysis && duplicateEntry.analysis) targetEntry.analysis = duplicateEntry.analysis;
   if (!targetEntry.description && duplicateEntry.description) {
     targetEntry.description = duplicateEntry.description;
   }

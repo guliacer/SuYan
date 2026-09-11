@@ -23,11 +23,14 @@ import {
   Download,
   Eye,
   EyeOff,
+  Film,
   ImagePlus,
   Info,
   Inbox,
   LoaderCircle,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings2,
   SlidersHorizontal,
   Sparkles,
@@ -37,13 +40,16 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
+import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
+import { useLocale } from "@/components/LocaleProvider";
+import { CanvasArtworkReveal, CanvasMotionBackdrop, canvasRevealDurationMs } from "./CanvasBackdrop";
 import type {
   AiImageGenerationData,
   AiImageGenerationFormat,
   AiImageGenerationPayload,
   AiImageGenerationQuality,
   AiOptimizePromptPayload,
-  AiProviderModelCapability,
   PublicAiProviderSettings,
 } from "../types/ai";
 import type {
@@ -52,11 +58,13 @@ import type {
   CanvasDraftSettings,
   CanvasGenerationResult,
   CanvasPhase,
+  CanvasReferenceImage,
   CanvasSizeMode,
   DoubaoWebCanvasStatus,
 } from "../types/canvas";
 import type { LibraryItem } from "../types/library";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { getCanvasWaitingDelay, pickCanvasWaitingMessage } from "../utils/canvasWaitingMessages";
 import {
   canvasAspectRatioOptions,
   buildCanvasImageGenerationPayload,
@@ -95,7 +103,7 @@ type CanvasViewProps = {
       categoryId?: string | null;
       genreIds?: string[];
       categoryConfidence?: number | null;
-      categorySource?: "system" | "user" | "ai" | null;
+      categorySource?: "system" | "user" | "ai" | "local" | null;
     },
   ) => Promise<LibraryItem[]>;
   onOpenAiSettings: () => void;
@@ -104,6 +112,7 @@ type CanvasViewProps = {
     action: "image-generation",
     selection: { profileId: string; modelId: string },
   ) => Promise<boolean>;
+  onFullscreenPreviewChange: (open: boolean) => void;
   onNotify: (message: StatusFeedbackMessage) => void;
 };
 
@@ -130,22 +139,23 @@ const sizeModeOptions: Array<{ value: CanvasSizeMode; label: string }> = [
 const baseResolutionOptions: Array<{ value: CanvasBaseResolution; label: string }> = [
   { value: "1k", label: "1K" },
   { value: "2k", label: "2K" },
+  { value: "3k", label: "3K" },
   { value: "4k", label: "4K" },
 ];
 const maxPromptHistory = 40;
 const typingHistoryWindowMs = 900;
-/** REVEAL 揭示动画时长，与 tokens.css 的 canvas-reveal 对齐。 */
-const revealPhaseMs = 500;
+/** REVEAL 文案阶段；实际作品动效另等媒体加载完成后播放。 */
+const revealPhaseMs = canvasRevealDurationMs;
 
-function formatElapsedDuration(elapsedMs: number): string {
+function formatElapsedDuration(elapsedMs: number, t: (text: string) => string): string {
   const totalSeconds = Math.max(0, elapsedMs) / 1000;
   if (totalSeconds < 60) {
     const precision = totalSeconds < 10 ? 1 : 0;
-    return `${totalSeconds.toFixed(precision)} 秒`;
+    return `${totalSeconds.toFixed(precision)} ${t("秒")}`;
   }
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.round(totalSeconds % 60);
-  return `${minutes} 分 ${String(seconds).padStart(2, "0")} 秒`;
+  return `${minutes} ${t("分")} ${String(seconds).padStart(2, "0")} ${t("秒")}`;
 }
 
 export function CanvasView({
@@ -165,22 +175,27 @@ export function CanvasView({
   onOpenAiSettings,
   onOptimizePrompt,
   onSaveAiActionModelPreference,
+  onFullscreenPreviewChange,
   onNotify,
 }: CanvasViewProps) {
+  const { t } = useLocale();
   const positivePromptRef = useRef<HTMLTextAreaElement>(null);
   const negativePromptRef = useRef<HTMLTextAreaElement>(null);
   const creationPanelRef = useRef<HTMLDivElement | null>(null);
   const promptHistoryRef = useRef<Record<PromptField, string[]>>({ positive: [], negative: [] });
   const lastTypingRef = useRef<{ field: PromptField; at: number } | null>(null);
   const configMenuRef = useRef<HTMLDivElement | null>(null);
+  const configMenuScrollRef = useRef<HTMLDivElement | null>(null);
+  const selectedConfigOptionRef = useRef<HTMLButtonElement | null>(null);
   const referenceImageFileRef = useRef<HTMLInputElement | null>(null);
   const referenceImagePopoverRef = useRef<HTMLDivElement | null>(null);
-  const referenceImageHydrationRef = useRef("");
+  const hydratedFilesRef = useRef<Set<string>>(new Set());
+  const latestImagesRef = useRef(canvasDraft.referenceImages);
+  latestImagesRef.current = canvasDraft.referenceImages;
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
   const doubaoWebCanvasHostRef = useRef<HTMLDivElement | null>(null);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationStartedAtRef = useRef<number | null>(null);
-  const [historyRevision, setHistoryRevision] = useState(0);
   const [optimizingField, setOptimizingField] = useState<PromptField | null>(null);
   // 生成相关状态提到 store：切到素材库卸载本组件后，再切回时新实例若读取局部
   // state 会丢失「创作中」而回退成上一张图。store 让生成态跨视图保留
@@ -193,6 +208,7 @@ export function CanvasView({
   const setThinkingKeywords = useLibraryStore((state) => state.setCanvasThinkingKeywords);
   const [errorText, setErrorText] = useState("");
   const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
+  const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
   const [isReferenceImagePopoverOpen, setIsReferenceImagePopoverOpen] = useState(false);
   const [isImportingReferenceImage, setIsImportingReferenceImage] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
@@ -214,21 +230,58 @@ export function CanvasView({
   const [doubaoStage, setDoubaoStage] = useState<"idle" | "loading" | "login" | "ready">("idle");
 
   const imageGenerationPreference = aiSettings.actionPreferences["image-generation"];
-  const activeProfile = useMemo(
-    () =>
-      aiSettings.profiles.find((profile) => profile.id === imageGenerationPreference?.profileId && profile.enabled) ??
-      aiSettings.profiles.find((profile) => profile.id === aiSettings.activeProfileId) ??
-      aiSettings.profiles[0],
-    [aiSettings.activeProfileId, aiSettings.profiles, imageGenerationPreference?.profileId],
+  const activeProfile = useMemo(() => {
+    const preferredProfile = imageGenerationPreference?.profileId
+      ? aiSettings.profiles.find((profile) => profile.id === imageGenerationPreference.profileId)
+      : null;
+    const fallbackProfile =
+      aiSettings.profiles.find((profile) => profile.id === aiSettings.activeProfileId) ?? aiSettings.profiles[0];
+
+    return preferredProfile ?? fallbackProfile;
+  }, [aiSettings.activeProfileId, aiSettings.profiles, imageGenerationPreference?.profileId]);
+  const selectedModel =
+    imageGenerationPreference?.modelId || activeProfile?.model || aiSettings.model;
+  useLayoutEffect(() => {
+    if (!isConfigMenuOpen) return;
+    const menu = configMenuScrollRef.current;
+    const selected = selectedConfigOptionRef.current;
+    if (!menu || !selected) return;
+
+    // Only scroll this menu; scrollIntoView can also move the canvas page.
+    // Run before paint on every opening, using both provider and model identity.
+    const menuBounds = menu.getBoundingClientRect();
+    const selectedBounds = selected.getBoundingClientRect();
+    menu.scrollTop += selectedBounds.top - menuBounds.top - menu.clientTop
+      - (menu.clientHeight - selectedBounds.height) / 2;
+  }, [isConfigMenuOpen, activeProfile?.id, selectedModel, aiSettings.profiles]);
+  const selectedGenerationModel = activeProfile?.models.find((model) => model.id === selectedModel);
+  const isVideoModel = Boolean(
+    selectedGenerationModel?.capabilities.includes("video-generation") ||
+      /^(?:agnes-video-v2\.0|agnes-video-2\.5(?:-flash)?)$/i.test(selectedModel.trim()),
   );
-  const selectedModel = imageGenerationPreference?.modelId || activeProfile?.model || aiSettings.model;
-  const hasUsableApi = Boolean(activeProfile?.enabled && activeProfile.hasApiKey && selectedModel);
+  const hasUsableApi = Boolean(
+    activeProfile?.enabled &&
+      activeProfile.baseUrl &&
+      activeProfile.hasApiKey &&
+      (selectedGenerationModel?.capabilities.includes("image-generation") || isVideoModel),
+  );
+  const hasPendingResults = results.some((result) => !result.saved);
   const isDoubaoWeb = canvasDraft.generationProvider === "doubao-web";
   // 仅在需要登录时，豆包登录弹窗才覆盖右侧画布宿主；登录后转入后台、恢复原生画布。
   const doubaoLoginVisible = isDoubaoWeb && doubaoStage === "login";
+  const isCreationPanelCollapsed = canvasDraft.creationPanelCollapsed;
+
+  function toggleCreationPanel() {
+    setIsConfigMenuOpen(false);
+    setIsReferenceImagePopoverOpen(false);
+    setIsMoreMenuOpen(false);
+    onDraftChange({ creationPanelCollapsed: !isCreationPanelCollapsed });
+  }
 
   // 右侧结果区沿用创作面板的实际高度，避免竖图的固有高度把网格行向下撑开。
   useLayoutEffect(() => {
+    // A hidden panel must not replace the last expanded measurement with zero.
+    if (isCreationPanelCollapsed) return;
     const panel = creationPanelRef.current;
     if (!panel) {
       return;
@@ -243,50 +296,60 @@ export function CanvasView({
     const observer = new ResizeObserver(updateHeight);
     observer.observe(panel);
     return () => observer.disconnect();
-  }, []);
+  }, [isCreationPanelCollapsed]);
 
   useEffect(() => {
-    const fileName = canvasDraft.referenceImageFileName.trim();
-    if (!fileName || canvasDraft.referenceImageDataUrl) {
-      referenceImageHydrationRef.current = "";
-      return;
-    }
-    if (referenceImageHydrationRef.current === fileName) {
+    const images = canvasDraft.referenceImages;
+    const pending = images.filter((img) => img.fileName && !img.dataUrl && !hydratedFilesRef.current.has(img.fileName));
+    if (pending.length === 0) {
       return;
     }
 
-    referenceImageHydrationRef.current = fileName;
+    for (const img of pending) {
+      hydratedFilesRef.current.add(img.fileName);
+    }
+
     let disposed = false;
-    void window.suyanApi.readCanvasReferenceImage(fileName).then((result) => {
-      if (disposed || canvasDraft.referenceImageFileName !== fileName) {
+    void Promise.allSettled(
+      pending.map((img) =>
+        window.suyanApi.readCanvasReferenceImage(img.fileName).then((result) => {
+          if (disposed) {
+            return null;
+          }
+          if (!result.ok) {
+            onDraftChange({
+              referenceImages: latestImagesRef.current.filter((r) => r.fileName !== img.fileName),
+            });
+            onNotify({ type: "error", text: t("参考图 \"{name}\" 加载失败：{error}", { name: img.title || img.fileName, error: result.error.message }) });
+            return null;
+          }
+          return { fileName: img.fileName, dataUrl: result.data.dataUrl, title: img.title || result.data.title };
+        }),
+      ),
+    ).then((settled) => {
+      if (disposed) {
         return;
       }
-      if (!result.ok) {
-        onDraftChange({
-          referenceImageDataUrl: "",
-          referenceImageFileName: "",
-          referenceImageTitle: "",
-        });
-        onNotify({ type: "error", text: result.error.message });
+      const patches: Array<{ fileName: string; dataUrl: string; title: string }> = [];
+      for (const s of settled) {
+        if (s.status === "fulfilled" && s.value) {
+          patches.push(s.value);
+        }
+      }
+      if (patches.length === 0) {
         return;
       }
-      onDraftChange({
-        referenceImageDataUrl: result.data.dataUrl,
-        referenceImageFileName: result.data.fileName,
-        referenceImageTitle: canvasDraft.referenceImageTitle || result.data.title,
+      const next = latestImagesRef.current.map((r) => {
+        const patch = patches.find((p) => p.fileName === r.fileName);
+        return patch ? { ...r, dataUrl: patch.dataUrl, title: patch.title } : r;
       });
+      onDraftChange({ referenceImages: next });
     });
 
     return () => {
       disposed = true;
     };
-  }, [
-    canvasDraft.referenceImageDataUrl,
-    canvasDraft.referenceImageFileName,
-    canvasDraft.referenceImageTitle,
-    onDraftChange,
-    onNotify,
-  ]);
+  }, [canvasDraft.referenceImages, onDraftChange, onNotify]);
 
   // 进入 / 离开豆包模式：加载豆包页并判定登录态，登录成功后转 ready（后台生成）。
   useEffect(() => {
@@ -407,10 +470,10 @@ export function CanvasView({
 
   useEffect(() => {
     // 详情卡片把效果图传送到画布后，画布首次挂载时自动展开参考图弹窗。
-    if (canvasDraft.referenceImageDataUrl) {
+    if (canvasDraft.referenceImages.length > 0) {
       setIsReferenceImagePopoverOpen(true);
     }
-  }, [canvasDraft.referenceImageDataUrl]);
+  }, [canvasDraft.referenceImages.length]);
 
   useEffect(() => {
     if (!isReferenceImagePopoverOpen) {
@@ -442,8 +505,13 @@ export function CanvasView({
   useEffect(() => {
     if (previewIndex !== null && previewIndex >= results.length) {
       setPreviewIndex(null);
+      onFullscreenPreviewChange(false);
     }
-  }, [previewIndex, results.length]);
+  }, [onFullscreenPreviewChange, previewIndex, results.length]);
+
+  useEffect(() => {
+    return () => onFullscreenPreviewChange(false);
+  }, [onFullscreenPreviewChange]);
 
   useEffect(() => {
     if (!isMoreMenuOpen) {
@@ -504,6 +572,7 @@ export function CanvasView({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setPreviewIndex(null);
+        onFullscreenPreviewChange(false);
         return;
       }
       if (event.key === "ArrowLeft") {
@@ -515,7 +584,7 @@ export function CanvasView({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [previewIndex, results.length]);
+  }, [onFullscreenPreviewChange, previewIndex, results.length]);
 
   function getFieldText(field: PromptField): string {
     return field === "positive" ? canvasDraft.prompt : canvasDraft.negativePrompt;
@@ -533,7 +602,6 @@ export function CanvasView({
     if (shouldRecord) {
       const history = promptHistoryRef.current[field];
       promptHistoryRef.current[field] = [...history, currentText].slice(-maxPromptHistory);
-      setHistoryRevision((revision) => revision + 1);
     }
     lastTypingRef.current = source === "typing" ? { field, at: now } : null;
     onDraftChange(field === "positive" ? { prompt: nextText } : { negativePrompt: nextText });
@@ -543,42 +611,41 @@ export function CanvasView({
     const history = promptHistoryRef.current[field];
     const previousText = history.at(-1);
     if (previousText === undefined) {
-      onNotify({ type: "info", text: field === "positive" ? "正向提示词暂无可返回的上一步。" : "负向提示词暂无可返回的上一步。" });
+      onNotify({ type: "info", text: field === "positive" ? t("正向提示词暂无可返回的上一步。") : t("负向提示词暂无可返回的上一步。") });
       return;
     }
 
     promptHistoryRef.current[field] = history.slice(0, -1);
     lastTypingRef.current = null;
     onDraftChange(field === "positive" ? { prompt: previousText } : { negativePrompt: previousText });
-    setHistoryRevision((revision) => revision + 1);
-    onNotify({ type: "success", text: "已返回上一步。" });
+    onNotify({ type: "success", text: t("已返回上一步。") });
   }
 
   async function copyFieldText(field: PromptField): Promise<void> {
     const text = getFieldText(field);
     if (!text) {
-      onNotify({ type: "info", text: "文本框为空，没有可复制的内容。" });
+      onNotify({ type: "info", text: t("文本框为空，没有可复制的内容。") });
       return;
     }
 
     const result = await window.suyanApi.writeClipboardText(text);
     if (result.ok) {
-      onNotify({ type: "success", text: field === "positive" ? "已复制正向提示词。" : "已复制负向提示词。" });
+      onNotify({ type: "success", text: field === "positive" ? t("已复制正向提示词。") : t("已复制负向提示词。") });
       return;
     }
-    onNotify({ type: "error", text: "复制失败，请检查系统剪贴板权限。" });
+    onNotify({ type: "error", text: t("复制失败，请检查系统剪贴板权限。") });
   }
 
   async function pasteFieldText(field: PromptField): Promise<void> {
     const result = await window.suyanApi.readClipboardText();
     if (!result.ok) {
-      onNotify({ type: "error", text: "读取剪贴板失败，请检查系统剪贴板权限。" });
+      onNotify({ type: "error", text: t("读取剪贴板失败，请检查系统剪贴板权限。") });
       return;
     }
 
     const pastedText = result.data.text;
     if (!pastedText) {
-      onNotify({ type: "info", text: "剪贴板中没有文本内容。" });
+      onNotify({ type: "info", text: t("剪贴板中没有文本内容。") });
       return;
     }
 
@@ -589,13 +656,13 @@ export function CanvasView({
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(pastedText.length, pastedText.length);
     });
-    onNotify({ type: "success", text: "已从剪贴板粘贴。" });
+    onNotify({ type: "success", text: t("已从剪贴板粘贴。") });
   }
 
   async function optimizeFieldText(field: PromptField): Promise<void> {
     const text = getFieldText(field).trim();
     if (!text) {
-      onNotify({ type: "info", text: "请先输入需要优化的提示词。" });
+      onNotify({ type: "info", text: t("请先输入需要优化的提示词。") });
       return;
     }
     if (optimizingField) {
@@ -618,35 +685,43 @@ export function CanvasView({
 
   function clearFieldText(field: PromptField): void {
     if (!getFieldText(field)) {
-      onNotify({ type: "info", text: "文本框已经是空的。" });
+      onNotify({ type: "info", text: t("文本框已经是空的。") });
       return;
     }
     updateFieldText(field, "", "action");
-    onNotify({ type: "success", text: field === "positive" ? "已清空正向提示词。" : "已清空负向提示词。" });
+    onNotify({ type: "success", text: field === "positive" ? t("已清空正向提示词。") : t("已清空负向提示词。") });
   }
 
   function handlePickReferenceImage(event: React.ChangeEvent<HTMLInputElement>): void {
-    const file = event.target.files?.[0];
-    if (!file) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) {
       return;
     }
 
     setIsImportingReferenceImage(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result ?? "");
-      if (!dataUrl) {
-        onNotify({ type: "error", text: "读取图片失败。" });
+    let pending = 0;
+    const onFinish = () => {
+      pending -= 1;
+      if (pending <= 0) {
         setIsImportingReferenceImage(false);
-        return;
       }
-      void persistReferenceImage(dataUrl, file.name, "已添加参考图。");
     };
-    reader.onerror = () => {
-      setIsImportingReferenceImage(false);
-      onNotify({ type: "error", text: "读取图片失败。" });
-    };
-    reader.readAsDataURL(file);
+    for (const file of files) {
+      pending += 1;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result ?? "");
+        if (dataUrl) {
+          void persistReferenceImage(dataUrl, file.name, files.length > 1 ? t("已添加 {count} 张参考图。", { count: files.length }) : t("已添加参考图。"), false);
+        }
+        onFinish();
+      };
+      reader.onerror = () => {
+        onNotify({ type: "error", text: t("读取图片“{name}”失败。", { name: file.name }) });
+        onFinish();
+      };
+      reader.readAsDataURL(file);
+    }
     event.target.value = "";
   }
 
@@ -655,13 +730,13 @@ export function CanvasView({
     try {
       const result = await window.suyanApi.readClipboardImage();
       if (!result.ok) {
-        onNotify({ type: "error", text: "剪切板中没有可用图片。" });
+        onNotify({ type: "error", text: t("剪贴板中没有可用图片。") });
         return;
       }
       await persistReferenceImage(
         result.data.dataUrl,
         "剪贴板图片.png",
-        "已从剪贴板添加参考图。",
+        t("已从剪贴板添加参考图。"),
         false,
       );
     } finally {
@@ -669,14 +744,12 @@ export function CanvasView({
     }
   }
 
-  function handleRemoveReferenceImage(): void {
-    const fileName = canvasDraft.referenceImageFileName;
-    onDraftChange({ referenceImageDataUrl: "", referenceImageFileName: "", referenceImageTitle: "" });
-    setIsReferenceImagePopoverOpen(false);
+  function handleRemoveReferenceImage(fileName: string): void {
+    onDraftChange({ referenceImages: canvasDraft.referenceImages.filter((r) => r.fileName !== fileName) });
     if (fileName) {
       void window.suyanApi.removeCanvasReferenceImage(fileName);
     }
-    onNotify({ type: "info", text: "已移除参考图。" });
+    onNotify({ type: "info", text: t("已移除参考图。") });
   }
 
   async function persistReferenceImage(
@@ -689,20 +762,17 @@ export function CanvasView({
       setIsImportingReferenceImage(true);
     }
     try {
-      const result = await window.suyanApi.saveCanvasReferenceImage(
-        dataUrl,
-        sourceFileName,
-        canvasDraft.referenceImageFileName,
-      );
+      const result = await window.suyanApi.saveCanvasReferenceImage(dataUrl, sourceFileName);
       if (!result.ok) {
         onNotify({ type: "error", text: result.error.message });
         return;
       }
-      onDraftChange({
-        referenceImageDataUrl: result.data.dataUrl,
-        referenceImageFileName: result.data.fileName,
-        referenceImageTitle: result.data.title,
-      });
+      const entry: CanvasReferenceImage = {
+        dataUrl: result.data.dataUrl,
+        fileName: result.data.fileName,
+        title: result.data.title,
+      };
+      onDraftChange({ referenceImages: [...latestImagesRef.current, entry] });
       onNotify({ type: "success", text: successMessage });
     } finally {
       if (manageBusyState) {
@@ -714,12 +784,12 @@ export function CanvasView({
   async function handleGenerate() {
     const cleanPrompt = canvasDraft.prompt.trim();
     if (!cleanPrompt) {
-      setErrorText("请先写下你想生成的画面。");
+      setErrorText(t("请先写下你想生成的画面。"));
       return;
     }
     if (!isDoubaoWeb && !hasUsableApi) {
-      setErrorText("请先在模型配置中启用一个配置，并填写 API Key。");
-      onNotify({ type: "error", text: "还没有可用的图像生成配置，请先打开模型配置。" });
+      setErrorText(t("请先在模型配置中启用一个配置，并填写 API Key。"));
+      onNotify({ type: "error", text: t("还没有可用的图像生成配置，请先打开模型配置。") });
       onOpenAiSettings();
       return;
     }
@@ -732,8 +802,8 @@ export function CanvasView({
       const status = await onRefreshDoubaoWebCanvasAuth();
       if (!status?.authenticated) {
         setDoubaoStage("login");
-        setErrorText("请先在画布内完成豆包登录，登录后会自动切回原生画布。");
-        onNotify({ type: "info", text: "请先在画布内完成豆包登录。" });
+        setErrorText(t("请先在画布内完成豆包登录，登录后会自动切回原生画布。"));
+        onNotify({ type: "info", text: t("请先在画布内完成豆包登录。") });
         return;
       }
     }
@@ -765,6 +835,7 @@ export function CanvasView({
       const data = await onGenerate(buildCanvasImageGenerationPayload(canvasDraft, {
         apiProfileId: activeProfile?.id,
         apiModelId: selectedModel,
+        mediaType: isVideoModel ? "video" : "image",
         prompt: cleanPrompt,
         negativePrompt: effectiveNegativePrompt,
       }));
@@ -774,13 +845,20 @@ export function CanvasView({
         return;
       }
       if (data.images.length === 0) {
-        setErrorText("接口没有返回可保存的图片，请检查模型和接口地址。");
+        setErrorText(t("接口没有返回可保存的{media}，请检查模型和接口地址。", { media: isVideoModel ? t("视频") : t("图片") }));
         // 接口返回但无图：这种是配置/接口问题，清成空态更明确；旧预览保留意义不大。
         setPhase("empty");
         return;
       }
 
-      const previewResults: CanvasGenerationResult[] = data.images.map((image) => ({ ...image, saved: false }));
+      // 快照本次真正提交的提示词：模型未返回 revised_prompt 时，预览卡片才有东西可显示；
+      // 生成后用户继续编辑草稿也不会让已有结果显示成另一段提示词。
+      const previewResults: CanvasGenerationResult[] = data.images.map((image) => ({
+        ...image,
+        saved: false,
+        requestPrompt: cleanPrompt,
+        requestNegativePrompt: effectiveNegativePrompt,
+      }));
       onLastGenerationModelChange(data.model);
       onGenerationResultsChange(previewResults);
       // 阶段三：REVEAL —— 结果就位后播 ~500ms 揭示动画，随后进入 CREATED。
@@ -822,7 +900,7 @@ export function CanvasView({
         );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "生成图片失败，请稍后重试。";
+      const message = error instanceof Error ? error.message : t("生成图片失败，请稍后重试。");
       setErrorText(message);
       onNotify({ type: "error", text: message });
       // 新请求失败：保留上一批可见的预览结果，而不是清成空态；
@@ -839,19 +917,23 @@ export function CanvasView({
     }
   }
 
-  function handleDownloadResult(result: CanvasGenerationResult, index: number): void {
+  const exportingResultRef = useRef(false);
+  async function handleDownloadResult(result: CanvasGenerationResult, _index: number): Promise<void> {
+    if (exportingResultRef.current) return;
+    exportingResultRef.current = true;
+    onNotify({ type: "info", text: t("请选择作品保存位置。") });
     try {
-      const link = document.createElement("a");
-      link.href = result.dataUrl;
-      const ext = /^data:image\/(\w+)/.exec(result.dataUrl)?.[1] ?? "png";
-      link.download = `suyan-canvas-${Date.now()}-${index + 1}.${ext}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      onNotify({ type: "success", text: "已开始下载。" });
+      const response = await window.suyanApi.exportImage(result.saved && result.imageFileName ? result.imageFileName : {
+        dataUrl: result.dataUrl, attributionId: result.attributionId, mediaType: result.mediaType,
+        prompt: result.requestPrompt ?? result.revisedPrompt ?? "",
+        negativePrompt: result.requestNegativePrompt ?? "",
+        generationMethod: lastModel,
+      });
+      if (!response.ok) onNotify({ type: "error", text: response.error.message });
+      else onNotify({ type: response.data.canceled ? "info" : "success", text: response.data.canceled ? t("已取消导出。") : t("作品已导出。") });
     } catch {
-      onNotify({ type: "error", text: "下载失败，图片已自动保存到素材库。" });
-    }
+      onNotify({ type: "error", text: t("导出失败，请重试。生成结果仍保留在画布中。") });
+    } finally { exportingResultRef.current = false; }
   }
 
   /**
@@ -863,7 +945,7 @@ export function CanvasView({
    */
   async function handleArchiveResult(result: CanvasGenerationResult, index: number): Promise<void> {
     if (result.saved) {
-      onNotify({ type: "info", text: "这张图已收录到素材库。" });
+      onNotify({ type: "info", text: t("这张图已收录到素材库。") });
       return;
     }
     if (archivingIndex === index) {
@@ -871,13 +953,15 @@ export function CanvasView({
     }
     setArchivingIndex(index);
     try {
-      const cleanPrompt = canvasDraft.prompt.trim();
-      const effectiveNegativePrompt = canvasDraft.negativePrompt.trim();
+      // 收录用产出这张图时的提示词快照，而不是当前草稿：生成后改了草稿再点收录，
+      // 落库的提示词必须仍是这张图真正用的那一段。
+      const cleanPrompt = result.requestPrompt?.trim() || canvasDraft.prompt.trim();
+      const effectiveNegativePrompt = result.requestNegativePrompt?.trim() ?? canvasDraft.negativePrompt.trim();
       const origin = canvasDraft.promptOrigin;
       const inheritsOrigin = shouldInheritCanvasPromptOrigin(origin, cleanPrompt, effectiveNegativePrompt);
       // 单张收录：只把这一张图交给入库链路，savedItems 期望返回 1 条。
       const savedItems = await onImportGeneratedImages(
-        [{ dataUrl: result.dataUrl, revisedPrompt: result.revisedPrompt }],
+        [{ dataUrl: result.dataUrl, revisedPrompt: result.revisedPrompt, attributionId: result.attributionId, mediaType: result.mediaType }],
         {
           title: cleanPrompt,
           prompt: cleanPrompt,
@@ -906,54 +990,147 @@ export function CanvasView({
               : existing,
           ),
         );
-        onNotify({ type: "success", text: "已收录到素材库。" });
+        onNotify({ type: "success", text: t("已收录到素材库。") });
       } else {
-        onNotify({ type: "error", text: "收录失败，请稍后重试。" });
+        onNotify({ type: "error", text: t("收录失败，请稍后重试。") });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "收录失败，请稍后重试。";
+      const message = error instanceof Error ? error.message : t("收录失败，请稍后重试。");
       onNotify({ type: "error", text: message });
     } finally {
       setArchivingIndex(null);
     }
   }
 
+  /**
+   * 将当前画布中尚未收录的生成结果一次性写入素材库，并回填每张结果的正式文件名。
+   * 已收录结果会跳过，避免用户重复点击导出时产生重复素材。
+   */
+  async function handleArchiveAllResults(): Promise<void> {
+    if (isArchivingBatch || archivingIndex !== null) {
+      return;
+    }
+
+    const pendingResults = results.filter((result) => !result.saved);
+    if (pendingResults.length === 0) {
+      onNotify({
+        type: "info",
+        text: results.length === 0 ? t("当前没有可导出的生成结果。") : t("生成结果已全部收录到素材库。"),
+      });
+      return;
+    }
+
+    setIsArchivingBatch(true);
+    try {
+      // 整批共用同一次生成的提示词快照（results 每次生成整体替换，同批同源）；
+      // 缺快照时才回退到当前草稿。
+      const snapshot = pendingResults[0];
+      const cleanPrompt = snapshot?.requestPrompt?.trim() || canvasDraft.prompt.trim();
+      const effectiveNegativePrompt = snapshot?.requestNegativePrompt?.trim() ?? canvasDraft.negativePrompt.trim();
+      const origin = canvasDraft.promptOrigin;
+      const inheritsOrigin = shouldInheritCanvasPromptOrigin(origin, cleanPrompt, effectiveNegativePrompt);
+      const savedItems = await onImportGeneratedImages(
+        pendingResults.map((result) => ({
+          dataUrl: result.dataUrl,
+          attributionId: result.attributionId,
+          revisedPrompt: result.revisedPrompt,
+          ...(result.mediaType ? { mediaType: result.mediaType } : {}),
+        })),
+        {
+          title: cleanPrompt,
+          prompt: cleanPrompt,
+          negativePrompt: effectiveNegativePrompt,
+          generationMethod: lastModel || selectedModel || canvasDraft.generationProvider,
+          ...(inheritsOrigin && origin
+            ? {
+                tags: origin.tags,
+                category: origin.category,
+                categoryId: origin.categoryId,
+                genreIds: origin.genreIds,
+                categoryConfidence: origin.categoryConfidence,
+                categorySource: origin.categorySource,
+              }
+            : {}),
+        },
+      );
+
+      if (savedItems.length !== pendingResults.length || savedItems.some((item) => !item.imageFileName)) {
+        throw new Error(`导出不完整：应保存 ${pendingResults.length} 个生成结果，实际保存 ${savedItems.length} 个。`);
+      }
+
+      let savedIndex = 0;
+      onGenerationResultsChange(
+        results.map((result) => {
+          if (result.saved) {
+            return result;
+          }
+          const savedItem = savedItems[savedIndex];
+          savedIndex += 1;
+          return {
+            ...result,
+            imageFileName: savedItem.imageFileName,
+            saved: true,
+          };
+        }),
+      );
+      onNotify({ type: "success", text: t("已导出 {count} 个生成结果到素材库。", { count: pendingResults.length }) });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("导出失败，请稍后重试。");
+      onNotify({ type: "error", text: message });
+    } finally {
+      setIsArchivingBatch(false);
+    }
+  }
+
   return (
     <section className="mx-auto w-full max-w-[min(100%,1400px)] px-3 py-4 min-[640px]:px-5 min-[900px]:px-6 min-[1024px]:px-8 min-[1440px]:px-10 min-[1024px]:py-6">
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="canvas-page-heading mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
+          <div className="mb-2 inline-flex items-center gap-2 text-xs font-medium tracking-wide text-muted">
             <Sparkles size={14} />
-            AI 创意画布
+            {t("创意画布")}
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">把灵感变成画面</h1>
-          <p className="mt-1 text-sm text-muted">
-            {isDoubaoWeb
-              ? canvasDraft.autoArchiveEnabled
-                ? "在画布内使用豆包网页生成图片，结果会自动归档到素材库。"
-                : "在画布内使用豆包网页生成图片；开启右侧「收录素材」后结果才归档入库。"
-              : canvasDraft.autoArchiveEnabled
-                ? "使用你自己的 OpenAI 兼容 API 生成图片，结果会自动归档到素材库。"
-                : "使用你自己的 OpenAI 兼容 API 生成图片；开启右侧「收录素材」后结果才归档入库。"}
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("把灵感变成画面")}</h1>
         </div>
       </div>
 
-      <div className="grid items-stretch gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <div className="self-start rounded-3xl border border-border bg-panel p-4 shadow-sm min-[640px]:p-5" ref={creationPanelRef}>
+      <div
+        className={`canvas-layout relative grid items-stretch gap-4 ${isCreationPanelCollapsed ? "" : "lg:grid-cols-[380px_minmax(0,1fr)]"}`}
+        data-sidebar-collapsed={isCreationPanelCollapsed}
+      >
+        <div className="canvas-sidebar-toggle">
+          <IconTooltipButton
+            aria-controls="canvas-creation-panel"
+            aria-expanded={!isCreationPanelCollapsed}
+            data-feature-guide="canvas-creation-panel-toggle"
+            icon={isCreationPanelCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            label={isCreationPanelCollapsed ? t("展开创作侧栏") : t("收起创作侧栏")}
+            onClick={toggleCreationPanel}
+            tooltipAlign={isCreationPanelCollapsed ? "start" : "end"}
+            variant="ghost"
+          />
+        </div>
+        <div
+          id="canvas-creation-panel"
+          aria-label={t("创作参数")}
+          role="region"
+          hidden={isCreationPanelCollapsed}
+          inert={isCreationPanelCollapsed}
+          className="self-start rounded-3xl border border-border bg-panel p-4 min-[640px]:p-5"
+          ref={creationPanelRef}
+        >
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-foreground">创作</h2>
-              <p className="mt-1 text-xs text-muted">描述你想要的画面，内容会自动记忆。</p>
+              <h2 className="font-semibold text-foreground">{t("创作")}</h2>
             </div>
-            <WandSparkles className="text-primary" size={20} />
+            <span className="size-9 shrink-0" aria-hidden="true" />
           </div>
 
           <div className="flex items-center justify-between gap-3">
-            <label className="text-xs font-medium text-muted" htmlFor="canvas-prompt">提示词</label>
+            <label className="text-xs font-medium text-muted" htmlFor="canvas-prompt">{t("描述你想创作的画面")}</label>
             <button
               aria-expanded={!canvasDraft.positivePromptHidden}
-              aria-label={canvasDraft.positivePromptHidden ? "显示正向提示词" : "隐藏正向提示词"}
+              aria-label={canvasDraft.positivePromptHidden ? t("显示正向提示词") : t("隐藏正向提示词")}
               className="inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               onClick={() => onDraftChange({ positivePromptHidden: !canvasDraft.positivePromptHidden })}
               type="button"
@@ -966,7 +1143,7 @@ export function CanvasView({
             <PromptTextField
               field="positive"
               label=""
-              placeholder="描述主体、场景、光线、镜头和风格…"
+              placeholder={t("描述主体、场景、光线、镜头和风格…")}
               textareaRef={positivePromptRef}
               value={canvasDraft.prompt}
               height={canvasDraft.positivePromptHeight}
@@ -981,7 +1158,7 @@ export function CanvasView({
               onPaste={() => void pasteFieldText("positive")}
               onUndo={() => undoFieldChange("positive")}
               actionRows={
-                <div className="mt-2 flex items-stretch gap-1.5" aria-label="提示词操作">
+                <div data-feature-guide="canvas-prompt-actions" className="mt-2 flex items-stretch gap-1.5" aria-label={t("提示词操作")}>
                   <button
                     className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-2 text-xs font-semibold text-primary transition hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={optimizingField !== null}
@@ -989,7 +1166,16 @@ export function CanvasView({
                     type="button"
                   >
                     {optimizingField === "positive" ? <LoaderCircle className="animate-spin" size={14} /> : <WandSparkles size={14} />}
-                    {optimizingField === "positive" ? "优化中…" : "优化提示词"}
+                    {optimizingField === "positive" ? t("优化中…") : t("优化")}
+                  </button>
+                  <button
+                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-2 text-xs font-medium text-foreground transition hover:border-primary/45 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={optimizingField !== null}
+                    onClick={() => void pasteFieldText("positive")}
+                    type="button"
+                  >
+                    <ClipboardPaste size={14} />
+                    {t("粘贴")}
                   </button>
                   <button
                     aria-expanded={isReferenceImagePopoverOpen}
@@ -998,12 +1184,12 @@ export function CanvasView({
                     type="button"
                   >
                     <ImagePlus size={14} />
-                    添加参考图
+                    {t("参考图")}
                   </button>
                   <div className="relative" ref={moreMenuRef}>
                     <button
                       aria-expanded={isMoreMenuOpen}
-                      aria-label="更多提示词操作"
+                      aria-label={t("更多提示词操作")}
                       className="inline-flex size-9 items-center justify-center rounded-xl border border-border bg-background text-muted transition hover:border-primary/45 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                       data-more-menu-toggle="true"
                       onClick={() => setIsMoreMenuOpen((open) => !open)}
@@ -1013,10 +1199,9 @@ export function CanvasView({
                     </button>
                     {isMoreMenuOpen ? (
                       <div className="absolute bottom-full right-0 z-30 mb-2 w-36 overflow-hidden rounded-xl border border-border bg-panel p-1 shadow-elevated">
-                        <PromptMoreMenuItem icon={<Copy size={14} />} label="复制" onClick={() => { setIsMoreMenuOpen(false); void copyFieldText("positive"); }} />
-                        <PromptMoreMenuItem icon={<ClipboardPaste size={14} />} label="粘贴" onClick={() => { setIsMoreMenuOpen(false); void pasteFieldText("positive"); }} />
-                        <PromptMoreMenuItem disabled={!promptHistoryRef.current.positive.length} icon={<Undo2 size={14} />} label="撤销" onClick={() => { setIsMoreMenuOpen(false); undoFieldChange("positive"); }} />
-                        <PromptMoreMenuItem icon={<Trash2 size={14} />} label="清空" onClick={() => { setIsMoreMenuOpen(false); clearFieldText("positive"); }} tone="danger" />
+                        <PromptMoreMenuItem icon={<Copy size={14} />} label={t("复制")} onClick={() => { setIsMoreMenuOpen(false); void copyFieldText("positive"); }} />
+                        <PromptMoreMenuItem disabled={!promptHistoryRef.current.positive.length} icon={<Undo2 size={14} />} label={t("撤销")} onClick={() => { setIsMoreMenuOpen(false); undoFieldChange("positive"); }} />
+                        <PromptMoreMenuItem icon={<Trash2 size={14} />} label={t("清空")} onClick={() => { setIsMoreMenuOpen(false); clearFieldText("positive"); }} tone="danger" />
                       </div>
                     ) : null}
                   </div>
@@ -1024,22 +1209,26 @@ export function CanvasView({
               }
               floatingOverlay={
                 <>
-                  {canvasDraft.referenceImageDataUrl ? (
+                  {canvasDraft.referenceImages.length > 0 ? (
                     <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-end">
-                      <div className="pointer-events-auto relative overflow-hidden rounded-lg border border-border/80 bg-background/95 shadow-lg backdrop-blur-sm">
-                        <img
-                          alt={canvasDraft.referenceImageTitle || "参考图"}
-                          className="max-h-20 w-auto max-w-[120px] object-contain"
-                          src={canvasDraft.referenceImageDataUrl}
-                        />
-                        <button
-                          aria-label="移除参考图"
-                          className="absolute right-0.5 top-0.5 flex size-5 items-center justify-center rounded-full bg-background/90 text-muted shadow-sm transition hover:text-danger"
-                          onClick={handleRemoveReferenceImage}
-                          type="button"
-                        >
-                          <X size={11} />
-                        </button>
+                      <div className="pointer-events-auto relative flex max-w-[260px] flex-wrap gap-1 rounded-lg border border-border/80 bg-background/95 p-1 shadow-lg backdrop-blur-sm">
+                        {canvasDraft.referenceImages.map((image) => (
+                          <div key={image.fileName} className="relative overflow-hidden rounded-md">
+                            <img
+                              alt={image.title || t("参考图")}
+                              className="max-h-14 w-auto max-w-[80px] object-contain"
+                              src={image.dataUrl}
+                            />
+                            <button
+                              aria-label={t("移除参考图")}
+                              className="absolute right-0 top-0 flex size-4 items-center justify-center rounded-full bg-background/90 text-muted shadow-sm transition hover:text-danger"
+                              onClick={() => handleRemoveReferenceImage(image.fileName)}
+                              type="button"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ) : null}
@@ -1047,8 +1236,7 @@ export function CanvasView({
                     <CanvasReferenceImagePopover
                       innerRef={referenceImagePopoverRef}
                       isImporting={isImportingReferenceImage}
-                      referenceImageDataUrl={canvasDraft.referenceImageDataUrl}
-                      referenceImageTitle={canvasDraft.referenceImageTitle}
+                      referenceImages={canvasDraft.referenceImages}
                       onClose={() => setIsReferenceImagePopoverOpen(false)}
                       onImportFromClipboard={() => void handlePasteReferenceImage()}
                       onImportFromLocal={() => referenceImageFileRef.current?.click()}
@@ -1062,16 +1250,17 @@ export function CanvasView({
           <input
             accept="image/*"
             className="hidden"
+            multiple
             onChange={handlePickReferenceImage}
             ref={referenceImageFileRef}
             type="file"
           />
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <label className="text-xs font-medium text-muted" htmlFor="canvas-negative-prompt">负向提示词（可选）</label>
+            <label className="text-xs font-medium text-muted" htmlFor="canvas-negative-prompt">{t("负向提示词（可选）")}</label>
             <button
               aria-expanded={!canvasDraft.negativePromptHidden}
-              aria-label={canvasDraft.negativePromptHidden ? "显示负向提示词" : "隐藏负向提示词"}
+              aria-label={canvasDraft.negativePromptHidden ? t("显示负向提示词") : t("隐藏负向提示词")}
               className="inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               onClick={() => onDraftChange({ negativePromptHidden: !canvasDraft.negativePromptHidden })}
               type="button"
@@ -1085,7 +1274,7 @@ export function CanvasView({
               field="negative"
               iconOnlyActions
               label=""
-              placeholder="不希望出现的内容…"
+              placeholder={t("不希望出现的内容…")}
               textareaRef={negativePromptRef}
               value={canvasDraft.negativePrompt}
               canUndo={promptHistoryRef.current.negative.length > 0}
@@ -1100,18 +1289,10 @@ export function CanvasView({
             />
           ) : null}
 
-          <CanvasSizePanel
+          <CanvasGenerationSettingsButton
             canvasDraft={canvasDraft}
-            onDraftChange={onDraftChange}
-            hidden={canvasDraft.sizePanelHidden}
-            onToggleHidden={() => onDraftChange({ sizePanelHidden: !canvasDraft.sizePanelHidden })}
-          />
-
-          <CanvasAdvancedPanel
-            canvasDraft={canvasDraft}
-            hidden={!canvasDraft.advancedSettingsOpen}
-            onDraftChange={onDraftChange}
-            onToggleHidden={() => onDraftChange({ advancedSettingsOpen: !canvasDraft.advancedSettingsOpen })}
+            isVideoModel={isVideoModel}
+            onOpen={() => setIsGenerationSettingsOpen(true)}
           />
 
           {isDoubaoWeb ? (
@@ -1127,7 +1308,7 @@ export function CanvasView({
             />
           ) : null}
 
-          <div className="relative mt-4" ref={configMenuRef}>
+          <div data-feature-guide="canvas-model-config" className="relative mt-4" ref={configMenuRef}>
             <button
               aria-expanded={isConfigMenuOpen}
               className="w-full rounded-2xl border border-border/80 bg-background/70 p-3 text-left text-xs text-muted transition hover:border-primary/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
@@ -1135,65 +1316,65 @@ export function CanvasView({
               type="button"
             >
               <div className="flex items-center justify-between gap-3">
-                <span>当前配置</span>
+                <span>{t("当前配置")}</span>
                 <span className="flex items-center gap-1.5">
                   <span className={hasUsableApi ? "text-success" : "text-danger"}>
-                    {hasUsableApi ? "可用" : "待配置"}
+                    {hasUsableApi ? t("可用") : t("待配置")}
                   </span>
                   <ChevronDown className={`transition-transform ${isConfigMenuOpen ? "rotate-180" : ""}`} size={14} />
                 </span>
               </div>
               <div className="mt-2 truncate text-foreground">
-                {`${activeProfile?.name ?? "未选择配置"} · ${selectedModel || "未选择模型"}`}
+                {`${activeProfile?.name ?? t("未选择配置")} · ${selectedModel || t("未选择模型")}`}
               </div>
             </button>
 
             {isConfigMenuOpen ? (
-              <div className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto rounded-2xl border border-border bg-panel p-2 shadow-elevated">
-                <p className="px-2 pb-1.5 pt-1 text-xs font-medium text-muted">画布默认模型</p>
+              <div ref={configMenuScrollRef} className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-72 overflow-y-auto rounded-2xl border border-border bg-panel p-2 shadow-elevated">
+                <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] items-center gap-2 border-b border-border/70 px-2 pb-2 text-[11px] font-semibold text-muted">
+                  <span>{t("服务商")}</span>
+                  <span>{t("模型")}</span>
+                </div>
                 {(() => {
                   const imageGenerationProfiles = aiSettings.profiles
                     .filter((profile) => profile.enabled)
                     .map((profile) => ({
                       profile,
-                      models: (profile.models.length > 0
-                        ? profile.models
-                        : [{ id: profile.model, label: profile.model, capabilities: [] as AiProviderModelCapability[] }]
-                      ).filter((model) => model.capabilities.includes("image-generation")),
+                      models: profile.models.filter((model) =>
+                        model.capabilities.includes("image-generation") || model.capabilities.includes("video-generation"),
+                      ),
                     }))
                     .filter((entry) => entry.models.length > 0);
 
                   if (imageGenerationProfiles.length === 0) {
-                    return (
-                      <p className="px-2 py-3 text-xs text-muted">
-                        暂无生图模型，请在模型配置中为模型勾选「生图模型」能力。
-                      </p>
-                    );
+                    return null;
                   }
 
-                  return imageGenerationProfiles.map(({ profile, models }) => (
-                    <div key={profile.id}>
-                      <p className="px-2 pb-1 pt-2 text-xs font-semibold text-foreground">{profile.name}</p>
-                      {models.map((model) => {
-                        const isSelected = profile.id === activeProfile?.id && model.id === selectedModel;
-                        return (
-                          <button
-                            className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-primary/5 ${isSelected ? "bg-primary/10 text-primary" : "text-foreground"}`}
-                            key={model.id}
-                            onClick={() => {
-                              onDraftChange({ generationProvider: "api" });
-                              void onSaveAiActionModelPreference("image-generation", { profileId: profile.id, modelId: model.id });
-                              setIsConfigMenuOpen(false);
-                            }}
-                            type="button"
-                          >
+                  return imageGenerationProfiles.flatMap(({ profile, models }) =>
+                    models.map((model) => {
+                      const isSelected = profile.id === activeProfile?.id && model.id === selectedModel;
+                      return (
+                        <button
+                          className={`grid min-h-10 w-full grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] items-center gap-2 rounded-lg px-2.5 text-left text-xs transition hover:bg-primary/5 ${isSelected ? "bg-primary/10 text-primary" : "text-foreground"}`}
+                          key={`${profile.id}:${model.id}`}
+                          ref={isSelected ? selectedConfigOptionRef : undefined}
+                          aria-current={isSelected ? "true" : undefined}
+                          onClick={() => {
+                            onDraftChange({ generationProvider: "api" });
+                            void onSaveAiActionModelPreference("image-generation", { profileId: profile.id, modelId: model.id });
+                            setIsConfigMenuOpen(false);
+                          }}
+                          type="button"
+                        >
+                          <span className="min-w-0 truncate font-medium">{profile.name || t("未命名 API")}</span>
+                          <span className="flex min-w-0 items-center justify-between gap-2">
                             <span className="truncate">{model.label || model.id}</span>
-                            {isSelected ? <Check size={14} /> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ));
+                            {isSelected ? <Check className="shrink-0" size={14} /> : null}
+                          </span>
+                        </button>
+                      );
+                    }),
+                  );
                 })()}
                 <div className="mt-2 border-t border-border/70 pt-2">
                   <button
@@ -1205,7 +1386,7 @@ export function CanvasView({
                     type="button"
                   >
                     <Settings2 size={14} />
-                    打开完整模型配置
+                    {t("打开完整模型配置")}
                   </button>
                 </div>
               </div>
@@ -1214,10 +1395,10 @@ export function CanvasView({
 
           {errorText ? <p className="mt-3 rounded-xl bg-danger/10 px-3 py-2 text-xs leading-5 text-danger">{errorText}</p> : null}
 
-          <div className="mt-4 flex items-center gap-2">
+          <div data-feature-guide="canvas-generation-actions" className="mt-4 flex items-center gap-2">
             <button
               aria-checked={canvasDraft.autoArchiveEnabled}
-              aria-label={canvasDraft.autoArchiveEnabled ? "关闭：生成后自动收录到素材库" : "开启：生成后自动收录到素材库"}
+              aria-label={canvasDraft.autoArchiveEnabled ? t("关闭：生成后自动收录到素材库") : t("开启：生成后自动收录到素材库")}
               className={`inline-flex size-9 shrink-0 items-center justify-center rounded-xl border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
                 canvasDraft.autoArchiveEnabled
                   ? "border-primary/50 bg-primary/10 text-primary hover:bg-primary/15"
@@ -1225,14 +1406,14 @@ export function CanvasView({
               }`}
               onClick={() => onDraftChange({ autoArchiveEnabled: !canvasDraft.autoArchiveEnabled })}
               role="switch"
-              title={canvasDraft.autoArchiveEnabled ? "已开启：生成结果自动收录到素材库" : "点击开启：生成结果自动收录到素材库（关闭则仅预览，不落盘）"}
+              title={t("自动收录到素材库")}
               type="button"
             >
               {canvasDraft.autoArchiveEnabled ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
             </button>
             <button
               aria-checked={canvasDraft.notificationEnabled}
-              aria-label={canvasDraft.notificationEnabled ? "关闭完成提醒" : "开启完成提醒"}
+              aria-label={canvasDraft.notificationEnabled ? t("关闭完成提醒") : t("开启完成提醒")}
               className={`inline-flex size-9 shrink-0 items-center justify-center rounded-xl border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
                 canvasDraft.notificationEnabled
                   ? "border-primary/50 bg-primary/10 text-primary hover:bg-primary/15"
@@ -1240,22 +1421,50 @@ export function CanvasView({
               }`}
               onClick={() => onDraftChange({ notificationEnabled: !canvasDraft.notificationEnabled })}
               role="switch"
-              title={canvasDraft.notificationEnabled ? "已开启：生成完成或失败后通知手机" : "点击开启：生成完成或失败后通知手机（需 TapRelay 服务在 1122 端口运行）"}
+              title={t("生成完成后通知手机")}
               type="button"
             >
               {canvasDraft.notificationEnabled ? <Bell size={16} /> : <BellOff size={16} />}
             </button>
             <Button
+              aria-label={t("导出到素材库")}
+              className="shrink-0"
+              disabled={
+                isGenerating ||
+                isBusy ||
+                optimizingField !== null ||
+                isArchivingBatch ||
+                archivingIndex !== null ||
+                !hasPendingResults
+              }
+              icon={isArchivingBatch ? <LoaderCircle className="animate-spin" size={16} /> : <Inbox size={16} />}
+              onClick={() => void handleArchiveAllResults()}
+              title={t("导出到素材库")}
+              variant="secondary"
+            >
+              {t("导出")}
+            </Button>
+            <Button
+              aria-label={t("生成图像")}
               className="flex-1"
               disabled={isGenerating || isBusy || optimizingField !== null}
               icon={isGenerating ? <LoaderCircle className="animate-spin" size={17} /> : <Sparkles size={17} />}
               onClick={() => void handleGenerate()}
               variant="primary"
             >
-              {phase === "thinking" ? "理解中…" : phase === "generating" ? "创作中…" : results.length > 0 ? "重新生成" : "生成图像"}
+              {phase === "thinking" ? t("理解中…") : phase === "generating" ? t("创作中…") : results.length > 0 ? t("重新生成") : isVideoModel ? t("生成视频") : t("生成图像")}
             </Button>
           </div>
         </div>
+
+        {isGenerationSettingsOpen ? (
+          <CanvasGenerationSettingsDialog
+            canvasDraft={canvasDraft}
+            isVideoModel={isVideoModel}
+            onClose={() => setIsGenerationSettingsOpen(false)}
+            onDraftChange={onDraftChange}
+          />
+        ) : null}
 
         <CreativeCanvas
           webCanvasEnabled={isDoubaoWeb}
@@ -1266,10 +1475,13 @@ export function CanvasView({
           lastModel={lastModel}
           results={results}
           thinkingKeywords={thinkingKeywords}
-          blurPreviewSrc={canvasDraft.referenceImageDataUrl}
+          blurPreviewSrc={canvasDraft.referenceImages[0]?.dataUrl || ""}
           generationElapsedMs={generationElapsedMs}
-          lockedHeight={creationPanelHeight}
-          onOpenPreview={(index) => setPreviewIndex(index)}
+          lockedHeight={isCreationPanelCollapsed ? null : creationPanelHeight}
+          onOpenPreview={(index) => {
+            setPreviewIndex(index);
+            onFullscreenPreviewChange(true);
+          }}
           onDownload={handleDownloadResult}
           onCopyImage={onCopyImage}
           onArchive={handleArchiveResult}
@@ -1286,7 +1498,10 @@ export function CanvasView({
           lastModel={lastModel}
           onPrev={() => setPreviewIndex((i) => (i === null ? i : (i - 1 + results.length) % results.length))}
           onNext={() => setPreviewIndex((i) => (i === null ? i : (i + 1) % results.length))}
-          onClose={() => setPreviewIndex(null)}
+          onClose={() => {
+            setPreviewIndex(null);
+            onFullscreenPreviewChange(false);
+          }}
           generationElapsedMs={generationElapsedMs}
           onDownload={() => handleDownloadResult(results[previewIndex], previewIndex)}
           onCopyImage={onCopyImage}
@@ -1301,24 +1516,23 @@ export function CanvasView({
 type CanvasReferenceImagePopoverProps = {
   innerRef: RefObject<HTMLDivElement | null>;
   isImporting: boolean;
-  referenceImageDataUrl: string;
-  referenceImageTitle: string;
+  referenceImages: CanvasReferenceImage[];
   onClose: () => void;
   onImportFromClipboard: () => void;
   onImportFromLocal: () => void;
-  onRemove: () => void;
+  onRemove: (fileName: string) => void;
 };
 
 function CanvasReferenceImagePopover({
   innerRef,
   isImporting,
-  referenceImageDataUrl,
-  referenceImageTitle,
+  referenceImages,
   onClose,
   onImportFromClipboard,
   onImportFromLocal,
   onRemove,
 }: CanvasReferenceImagePopoverProps) {
+  const { t } = useLocale();
   return (
     <div
       ref={innerRef}
@@ -1328,10 +1542,10 @@ function CanvasReferenceImagePopover({
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
           <ImagePlus size={14} />
-          参考图
+          {t("参考图")} ({referenceImages.length})
         </span>
         <button
-          aria-label="关闭"
+          aria-label={t("关闭")}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-background hover:text-foreground"
           type="button"
           onClick={onClose}
@@ -1340,26 +1554,35 @@ function CanvasReferenceImagePopover({
         </button>
       </div>
 
-      {referenceImageDataUrl ? (
-        <div className="relative overflow-hidden rounded-lg border border-border bg-background/60 p-1">
-          <img
-            alt={referenceImageTitle || "参考图"}
-            className="max-h-40 w-full rounded-md object-contain"
-            decoding="async"
-            src={referenceImageDataUrl}
-          />
-          <button
-            aria-label="删除参考图"
-            className="absolute right-2 top-2 inline-flex size-6 items-center justify-center rounded-full bg-background/90 text-muted shadow-sm transition hover:text-danger"
-            type="button"
-            onClick={onRemove}
-          >
-            <Trash2 size={13} />
-          </button>
+      {referenceImages.length > 0 ? (
+        <div className="grid max-h-48 grid-cols-2 gap-2 overflow-y-auto rounded-lg border border-border bg-background/60 p-2">
+          {referenceImages.map((image) => (
+            <div key={image.fileName} className="relative overflow-hidden rounded-md border border-border/60">
+              <img
+                alt={image.title || t("参考图")}
+                className="aspect-square w-full rounded-md object-cover"
+                decoding="async"
+                src={image.dataUrl}
+              />
+              {image.title ? (
+                <div className="absolute bottom-0 left-0 right-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-[10px] text-white">
+                  {image.title}
+                </div>
+              ) : null}
+              <button
+                aria-label={t("删除参考图")}
+                className="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded-full bg-background/90 text-muted shadow-sm transition hover:text-danger"
+                type="button"
+                onClick={() => onRemove(image.fileName)}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-border bg-background/60 px-3 py-5 text-center text-xs text-muted">
-          还没有参考图，可从剪贴板或本地文件添加。
+          {/* 无参考图 */}
         </div>
       )}
 
@@ -1371,7 +1594,7 @@ function CanvasReferenceImagePopover({
           onClick={onImportFromClipboard}
         >
           <ClipboardPaste size={13} />
-          {isImporting ? "导入中..." : "粘贴剪贴板"}
+          {t("粘贴剪贴板")}
         </button>
         <button
           className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-primary bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary-strong disabled:cursor-not-allowed disabled:opacity-40"
@@ -1380,9 +1603,10 @@ function CanvasReferenceImagePopover({
           onClick={onImportFromLocal}
         >
           <ImagePlus size={13} />
-          {isImporting ? "导入中..." : "本地上传"}
+          {t("本地上传")}
         </button>
       </div>
+      {isImporting ? <p role="status" className="text-xs text-muted">{t("正在添加参考图，请稍候…")}</p> : null}
     </div>
   );
 }
@@ -1432,30 +1656,34 @@ function PromptTextField({
   iconOnlyActions = false,
   onHeightChange,
 }: PromptTextFieldProps) {
+  const { t } = useLocale();
   const textareaId = field === "positive" ? "canvas-prompt" : "canvas-negative-prompt";
   return (
     <div className={label ? "" : "mt-2"}>
-      {label ? <label className="mb-2 block text-xs font-medium text-muted" htmlFor={textareaId}>{label}</label> : null}
-      <div className="relative">
-        <textarea
-          className={`${field === "positive" ? "min-h-48" : "min-h-20"} w-full resize-y rounded-2xl border border-border bg-background px-3 py-3 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20`}
-          id={textareaId}
-          onChange={(event) => onChange(event.target.value)}
-           onPointerUp={(event) => onHeightChange?.(Math.round(event.currentTarget.getBoundingClientRect().height))}
-          placeholder={placeholder}
-          ref={textareaRef}
-          value={value}
-           style={height === undefined ? undefined : { height: `${height}px` }}
-        />
-        {floatingOverlay}
+      <div data-feature-guide={field === "positive" ? "canvas-prompt-editor" : undefined}>
+        {label ? <label className="mb-2 block text-xs font-medium text-muted" htmlFor={textareaId}>{label}</label> : null}
+        <div className="relative">
+          <textarea
+            className={`${field === "positive" ? "min-h-48" : "min-h-20"} w-full resize-y rounded-2xl border border-border bg-background px-3 py-3 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20`}
+            data-feature-guide={field === "positive" ? "canvas-prompt-resize" : undefined}
+            id={textareaId}
+            onChange={(event) => onChange(event.target.value)}
+             onPointerUp={(event) => onHeightChange?.(Math.round(event.currentTarget.getBoundingClientRect().height))}
+            placeholder={placeholder}
+            ref={textareaRef}
+            value={value}
+             style={height === undefined ? undefined : { height: `${height}px` }}
+          />
+          {floatingOverlay}
+        </div>
       </div>
       {actionRows ?? (
-        <div className="mt-2 grid grid-cols-5 gap-1.5" aria-label={`${label || "负向提示词"}操作`}>
-          <PromptActionButton icon={<Copy size={14} />} iconOnly={iconOnlyActions} label="复制" onClick={onCopy} />
-          <PromptActionButton icon={<ClipboardPaste size={14} />} iconOnly={iconOnlyActions} label="粘贴" onClick={onPaste} />
-          <PromptActionButton disabled={disabled} icon={isOptimizing ? <LoaderCircle className="animate-spin" size={14} /> : <WandSparkles size={14} />} iconOnly={iconOnlyActions} label={isOptimizing ? "优化中" : "优化"} onClick={onOptimize} />
-          <PromptActionButton disabled={!canUndo} icon={<Undo2 size={14} />} iconOnly={iconOnlyActions} label="返回" onClick={onUndo} />
-          <PromptActionButton icon={<Trash2 size={14} />} iconOnly={iconOnlyActions} label="清空" onClick={onClear} tone="danger" />
+        <div className="mt-2 grid grid-cols-5 gap-1.5" aria-label={`${label || t("负向提示词")}${t("操作")}`}>
+          <PromptActionButton icon={<Copy size={14} />} iconOnly={iconOnlyActions} label={t("复制")} onClick={onCopy} />
+          <PromptActionButton icon={<ClipboardPaste size={14} />} iconOnly={iconOnlyActions} label={t("粘贴")} onClick={onPaste} />
+          <PromptActionButton disabled={disabled} icon={isOptimizing ? <LoaderCircle className="animate-spin" size={14} /> : <WandSparkles size={14} />} iconOnly={iconOnlyActions} label={isOptimizing ? t("优化中") : t("优化")} onClick={onOptimize} />
+          <PromptActionButton disabled={!canUndo} icon={<Undo2 size={14} />} iconOnly={iconOnlyActions} label={t("返回")} onClick={onUndo} />
+          <PromptActionButton icon={<Trash2 size={14} />} iconOnly={iconOnlyActions} label={t("清空")} onClick={onClear} tone="danger" />
         </div>
       )}
       {extraActions}
@@ -1474,9 +1702,10 @@ type PromptActionButtonProps = {
 };
 
 function PromptActionButton({ ariaExpanded, disabled = false, icon, iconOnly = false, label, onClick, tone = "default" }: PromptActionButtonProps) {
+  const { t } = useLocale();
   return (
     <button
-      aria-label={label === "返回" ? "撤销最近一次更改" : label}
+      aria-label={label === t("返回") ? t("撤销最近一次更改") : label}
       className={`inline-flex min-h-8 min-w-0 items-center justify-center gap-1 rounded-lg border text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45 ${
         iconOnly ? "size-8 px-0 py-0" : "px-1.5 py-1.5"
       } ${
@@ -1488,7 +1717,7 @@ function PromptActionButton({ ariaExpanded, disabled = false, icon, iconOnly = f
       data-reference-image-toggle={ariaExpanded === undefined ? undefined : "true"}
       disabled={disabled}
       onClick={onClick}
-      title={label === "返回" ? "撤销最近一次更改" : label}
+      title={label === t("返回") ? t("撤销最近一次更改") : label}
       type="button"
     >
       <span className="shrink-0">{icon}</span>
@@ -1499,178 +1728,311 @@ function PromptActionButton({ ariaExpanded, disabled = false, icon, iconOnly = f
 
 type CanvasSizePanelProps = {
   canvasDraft: CanvasDraftSettings;
-  hidden: boolean;
   onDraftChange: (patch: Partial<CanvasDraftSettings>) => void;
-  onToggleHidden: () => void;
 };
 
-function CanvasSizePanel({ canvasDraft, hidden, onDraftChange, onToggleHidden }: CanvasSizePanelProps) {
+type CanvasGenerationSettingsButtonProps = {
+  canvasDraft: CanvasDraftSettings;
+  isVideoModel: boolean;
+  onOpen: () => void;
+};
+
+function CanvasGenerationSettingsButton({
+  canvasDraft,
+  isVideoModel,
+  onOpen,
+}: CanvasGenerationSettingsButtonProps) {
+  const { t } = useLocale();
+  const summary = formatCanvasGenerationSettingsSummary(canvasDraft, isVideoModel, t);
+
+  return (
+    <button
+      aria-haspopup="dialog"
+      data-feature-guide="canvas-generation-settings"
+      className="mt-4 flex w-full items-center justify-between gap-3 rounded-2xl border border-border/80 bg-background/70 px-3 py-2.5 text-left text-xs text-muted transition hover:border-primary/45 hover:bg-primary/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+      onClick={onOpen}
+      type="button"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <SlidersHorizontal size={15} className="shrink-0 text-primary" />
+        <span className="font-semibold text-foreground">{isVideoModel ? t("视频参数") : t("图像参数")}</span>
+        <span className="min-w-0 truncate font-semibold text-foreground">{summary}</span>
+      </span>
+      <ChevronDown className="-rotate-90 shrink-0 text-muted" size={14} />
+    </button>
+  );
+}
+
+type CanvasGenerationSettingsDialogProps = {
+  canvasDraft: CanvasDraftSettings;
+  isVideoModel: boolean;
+  onDraftChange: (patch: Partial<CanvasDraftSettings>) => void;
+  onClose: () => void;
+};
+
+function CanvasGenerationSettingsDialog({
+  canvasDraft,
+  isVideoModel,
+  onDraftChange,
+  onClose,
+}: CanvasGenerationSettingsDialogProps) {
+  const { t } = useLocale();
+  const titleId = "canvas-generation-settings-title";
   const resolvedSizeLabel = getCanvasGenerationSizeLabel(resolveCanvasGenerationSize(canvasDraft));
 
   return (
-    <section className="mt-5 border-t border-border/70 pt-4" aria-labelledby="canvas-size-heading">
+    <AppDialog
+      onClose={onClose}
+      panelClassName="flex max-h-[min(720px,calc(100vh-72px))] w-full max-w-xl flex-col"
+      titleId={titleId}
+    >
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-5 py-4">
+        <div className="min-w-0">
+          <p className="inline-flex items-center gap-2 text-xs font-medium text-primary">
+            <SlidersHorizontal size={14} />
+            {t("画布参数")}
+          </p>
+          <h2 className="mt-1 text-lg font-semibold text-foreground" id={titleId}>
+            {t("生成设置")}
+          </h2>
+        </div>
+        <DialogCloseButton onClick={onClose} />
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {isVideoModel ? (
+          <CanvasVideoSettingsContent canvasDraft={canvasDraft} onDraftChange={onDraftChange} />
+        ) : (
+          <div className="space-y-5">
+            <CanvasSizePanel canvasDraft={canvasDraft} onDraftChange={onDraftChange} />
+            <CanvasAdvancedPanel canvasDraft={canvasDraft} onDraftChange={onDraftChange} />
+          </div>
+        )}
+
+        <div className="mt-5 rounded-2xl border border-border/70 bg-background/70 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-medium text-muted">{t("实际分辨率")}</span>
+            <span className="font-semibold tabular-nums text-foreground">{isVideoModel ? canvasDraft.videoSize : resolvedSizeLabel}</span>
+          </div>
+        </div>
+      </div>
+
+      <footer className="flex shrink-0 justify-end border-t border-border/70 px-5 py-4">
+        <Button onClick={onClose} variant="primary">{t("完成")}</Button>
+      </footer>
+    </AppDialog>
+  );
+}
+
+function CanvasVideoSettingsContent({
+  canvasDraft,
+  onDraftChange,
+}: {
+  canvasDraft: CanvasDraftSettings;
+  onDraftChange: (patch: Partial<CanvasDraftSettings>) => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <section className="rounded-2xl border border-primary/25 bg-primary/5 p-4">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+        <Film size={14} className="text-primary" />
+        {t("视频参数")}
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="flex min-w-0 flex-col gap-1 text-[11px] text-muted">
+          {t("时长")}
+          <select
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+            value={canvasDraft.videoSeconds}
+            onChange={(event) => onDraftChange({ videoSeconds: Number(event.target.value) })}
+          >
+            {[4, 5, 6, 8, 10, 12].map((seconds) => <option key={seconds} value={seconds}>{seconds} {t("秒")}</option>)}
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-col gap-1 text-[11px] text-muted">
+          {t("分辨率")}
+          <select
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+            value={canvasDraft.videoSize}
+            onChange={(event) => onDraftChange({ videoSize: event.target.value as CanvasDraftSettings["videoSize"] })}
+          >
+            <option value="720P">720P</option>
+            <option value="960P">960P</option>
+            <option value="2K">2K</option>
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-col gap-1 text-[11px] text-muted">
+          {t("画幅")}
+          <select
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+            value={canvasDraft.aspectRatio}
+            onChange={(event) => onDraftChange({ aspectRatio: event.target.value as CanvasAspectRatio })}
+          >
+            {canvasAspectRatioOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="mt-2 text-[11px] leading-5 text-muted">{t("参考图会自动按首尾帧模式发送；超过两张时使用参考图模式。")}</p>
+    </section>
+  );
+}
+
+function CanvasSizePanel({ canvasDraft, onDraftChange }: CanvasSizePanelProps) {
+  const { t } = useLocale();
+  const resolvedSizeLabel = getCanvasGenerationSizeLabel(resolveCanvasGenerationSize(canvasDraft));
+
+  return (
+    <section aria-labelledby="canvas-size-heading">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <h3 className="text-xs font-semibold text-foreground" id="canvas-size-heading">比例</h3>
+            <h3 className="text-xs font-semibold text-foreground" id="canvas-size-heading">{t("比例")}</h3>
             <span className="text-[11px] font-medium tabular-nums text-primary">{resolvedSizeLabel}</span>
           </div>
-          <p className="mt-1 text-xs text-muted">所选比例会换算为上方显示的实际请求像素。</p>
         </div>
-        <button
-          aria-expanded={!hidden}
-          aria-label={hidden ? "显示尺寸设置" : "隐藏尺寸设置"}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-          onClick={onToggleHidden}
-          type="button"
-        >
-          {hidden ? <Eye size={14} /> : <EyeOff size={14} />}
-        </button>
       </div>
 
-      {hidden ? null : (
+      <div className="grid grid-cols-3 gap-1 rounded-xl bg-background p-1">
+        {sizeModeOptions.map((option) => (
+          <button
+            className={`min-h-8 rounded-lg px-2 text-xs font-medium transition ${canvasDraft.sizeMode === option.value ? "bg-panel text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
+            key={option.value}
+            onClick={() => onDraftChange({ sizeMode: option.value })}
+            type="button"
+          >
+            {t(option.label)}
+          </button>
+        ))}
+      </div>
+
+      {canvasDraft.sizeMode !== "auto" ? (
         <>
-          <div className="grid grid-cols-3 gap-1 rounded-xl bg-background p-1">
-            {sizeModeOptions.map((option) => (
-              <button
-                className={`min-h-8 rounded-lg px-2 text-xs font-medium transition ${canvasDraft.sizeMode === option.value ? "bg-panel text-foreground shadow-sm" : "text-muted hover:text-foreground"}`}
-                key={option.value}
-                onClick={() => onDraftChange({ sizeMode: option.value })}
-                type="button"
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          {canvasDraft.sizeMode !== "auto" ? (
+          {canvasDraft.sizeMode === "ratio" ? (
             <>
-              {canvasDraft.sizeMode === "ratio" ? (
-                <>
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-medium text-muted">基准分辨率</p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {baseResolutionOptions.map((option) => (
-                        <ResolutionButton
-                          active={canvasDraft.baseResolution === option.value}
-                          key={option.value}
-                          label={option.label}
-                          onClick={() => onDraftChange({ baseResolution: option.value })}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-medium text-muted">图像比例</p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {canvasAspectRatioOptions.map((option) => (
-                        <button
-                          aria-pressed={canvasDraft.aspectRatio === option.value}
-                          className={`flex min-h-14 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs transition ${canvasDraft.aspectRatio === option.value ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted hover:border-primary/45 hover:text-foreground"}`}
-                          key={option.value}
-                          onClick={() => onDraftChange({ aspectRatio: option.value })}
-                          type="button"
-                        >
-                          <span className={`block border ${canvasDraft.aspectRatio === option.value ? "border-primary" : "border-muted"} ${getAspectIconClass(option.value)}`} aria-hidden="true" />
-                          <span>{option.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="mt-4">
-                  <p className="mb-2 text-xs font-medium text-muted">自定义宽高</p>
-                  <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-                    <DimensionInput label="宽度" value={canvasDraft.customWidth} onChange={(customWidth) => onDraftChange({ customWidth })} />
-                    <span className="pb-2.5 text-xs text-muted">×</span>
-                    <DimensionInput label="高度" value={canvasDraft.customHeight} onChange={(customHeight) => onDraftChange({ customHeight })} />
-                  </div>
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-medium text-muted">{t("基准分辨率")}</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {baseResolutionOptions.map((option) => (
+                    <ResolutionButton
+                      active={canvasDraft.baseResolution === option.value}
+                      key={option.value}
+                      label={t(option.label)}
+                      onClick={() => onDraftChange({ baseResolution: option.value })}
+                    />
+                  ))}
                 </div>
-              )}
-            </>
-          ) : null}
+              </div>
 
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-medium text-muted">{t("图像比例")}</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {canvasAspectRatioOptions.map((option) => (
+                    <button
+                      aria-pressed={canvasDraft.aspectRatio === option.value}
+                      className={`flex min-h-14 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs transition ${canvasDraft.aspectRatio === option.value ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted hover:border-primary/45 hover:text-foreground"}`}
+                      key={option.value}
+                      onClick={() => onDraftChange({ aspectRatio: option.value })}
+                      type="button"
+                    >
+                      <span className={`block border ${canvasDraft.aspectRatio === option.value ? "border-primary" : "border-muted"} ${getAspectIconClass(option.value)}`} aria-hidden="true" />
+                      <span>{t(option.label)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-muted">{t("自定义宽高")}</p>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                <DimensionInput label={t("宽度")} value={canvasDraft.customWidth} onChange={(customWidth) => onDraftChange({ customWidth })} />
+                <span className="pb-2.5 text-xs text-muted">×</span>
+                <DimensionInput label={t("高度")} value={canvasDraft.customHeight} onChange={(customHeight) => onDraftChange({ customHeight })} />
+              </div>
+            </div>
+          )}
         </>
-      )}
+      ) : null}
     </section>
   );
 }
 
 type CanvasAdvancedPanelProps = {
   canvasDraft: CanvasDraftSettings;
-  hidden: boolean;
   onDraftChange: (patch: Partial<CanvasDraftSettings>) => void;
-  onToggleHidden: () => void;
 };
 
-function CanvasAdvancedPanel({ canvasDraft, hidden, onDraftChange, onToggleHidden }: CanvasAdvancedPanelProps) {
+function CanvasAdvancedPanel({ canvasDraft, onDraftChange }: CanvasAdvancedPanelProps) {
+  const { t } = useLocale();
   return (
-    <section className="mt-4 border-t border-border/70 pt-4" aria-labelledby="canvas-advanced-heading">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <section className="border-t border-border/70 pt-4" aria-labelledby="canvas-advanced-heading">
+      <div className="mb-3 flex items-center gap-3">
         <div className="min-w-0">
           <h3 className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground" id="canvas-advanced-heading">
             <SlidersHorizontal size={13} />
-            高级设置
+            {t("高级设置")}
           </h3>
-          <p className="mt-1 text-xs text-muted">控制输出背景、质量、格式与张数。</p>
         </div>
-        <button
-          aria-expanded={!hidden}
-          aria-label={hidden ? "显示高级设置" : "隐藏高级设置"}
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-          onClick={onToggleHidden}
-          type="button"
-        >
-          {hidden ? <Eye size={14} /> : <EyeOff size={14} />}
-        </button>
       </div>
 
-      {hidden ? null : (
-        <div className="grid grid-cols-2 gap-3">
-          <CanvasSelect
-            label="透明背景"
-            onChange={(value) => onDraftChange({
-              transparentBackground: value === "on",
-              outputFormat: value === "on" && canvasDraft.outputFormat === "jpeg" ? "png" : canvasDraft.outputFormat,
-            })}
-            options={[
-              { value: "off", label: "不透明" },
-              { value: "on", label: "透明" },
-            ]}
-            value={canvasDraft.transparentBackground ? "on" : "off"}
-          />
-          <CanvasSelect label="质量" onChange={(value) => onDraftChange({ quality: value as AiImageGenerationQuality })} options={qualityOptions} value={canvasDraft.quality} />
-          <CanvasSelect
-            label="格式"
-            onChange={(value) => onDraftChange({ outputFormat: value as AiImageGenerationFormat })}
-            options={formatOptions.map((option) => ({ ...option, disabled: canvasDraft.transparentBackground && option.value === "jpeg" }))}
-            value={canvasDraft.outputFormat}
-          />
-          <label className="grid gap-1.5 text-xs font-medium text-muted">
-            张数
-            <select
-              className="h-10 rounded-xl border border-border bg-background px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-              onChange={(event) => onDraftChange({ count: Number(event.target.value) })}
-              value={canvasDraft.count}
-            >
-              {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} 张</option>)}
-            </select>
-          </label>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-3">
+        <CanvasSelect
+          label={t("透明背景")}
+          onChange={(value) => onDraftChange({
+            transparentBackground: value === "on",
+            outputFormat: value === "on" && canvasDraft.outputFormat === "jpeg" ? "png" : canvasDraft.outputFormat,
+          })}
+          options={[
+            { value: "off", label: t("不透明") },
+            { value: "on", label: t("透明") },
+          ]}
+          value={canvasDraft.transparentBackground ? "on" : "off"}
+        />
+        <CanvasSelect label={t("质量")} onChange={(value) => onDraftChange({ quality: value as AiImageGenerationQuality })} options={qualityOptions} value={canvasDraft.quality} />
+        <CanvasSelect
+          label={t("格式")}
+          onChange={(value) => onDraftChange({ outputFormat: value as AiImageGenerationFormat })}
+          options={formatOptions.map((option) => ({ ...option, disabled: canvasDraft.transparentBackground && option.value === "jpeg" }))}
+          value={canvasDraft.outputFormat}
+        />
+        <label className="grid gap-1.5 text-xs font-medium text-muted">
+          {t("张数")}
+          <select
+            className="h-10 rounded-xl border border-border bg-background px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+            onChange={(event) => onDraftChange({ count: Number(event.target.value) })}
+            value={canvasDraft.count}
+          >
+            {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value} {t("张")}</option>)}
+          </select>
+        </label>
+      </div>
     </section>
   );
 }
 
+function formatCanvasGenerationSettingsSummary(canvasDraft: CanvasDraftSettings, isVideoModel: boolean, t: (text: string) => string): string {
+  if (isVideoModel) {
+    return `${canvasDraft.videoSeconds}${t("秒")} · ${canvasDraft.videoSize} · ${canvasDraft.aspectRatio}`;
+  }
+
+  const qualityLabel = t(qualityOptions.find((option) => option.value === canvasDraft.quality)?.label ?? "自动");
+  const sizeLabel = canvasDraft.sizeMode === "custom"
+    ? `${canvasDraft.customWidth}×${canvasDraft.customHeight}`
+    : canvasDraft.sizeMode === "auto"
+      ? t("自动尺寸")
+      : `${canvasDraft.baseResolution.toUpperCase()} · ${canvasDraft.aspectRatio}`;
+
+  return `${qualityLabel.replace(t("质量"), "")} · ${sizeLabel} · ${canvasDraft.count}${t("张")}`;
+}
+
 function ResolutionButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  const { t } = useLocale();
   return (
     <button
       aria-pressed={active}
       className={`min-h-10 rounded-xl border text-sm font-medium transition ${active ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted hover:border-primary/45 hover:text-foreground"}`}
       onClick={onClick}
-      title={`${label} 基准分辨率`}
+      title={t("{label} 基准分辨率", { label: t(label) })}
       type="button"
     >
       {label}
@@ -1809,33 +2171,34 @@ function DoubaoWebOptionsPanel({
   onToggleModelHidden,
   onToggleStyleHidden,
 }: DoubaoWebOptionsPanelProps) {
-  const modelLabel = doubaoModelOptions.find((option) => option.value === model)?.label ?? "跟随网页默认";
-  const styleLabel = doubaoStyleOptions.find((option) => option.value === style)?.label ?? "跟随网页默认";
+  const { t } = useLocale();
+  const modelLabel = t(doubaoModelOptions.find((option) => option.value === model)?.label ?? "跟随网页默认");
+  const styleLabel = t(doubaoStyleOptions.find((option) => option.value === style)?.label ?? "跟随网页默认");
 
   return (
     <section className="mt-5 space-y-4 border-t border-border/70 pt-4" aria-labelledby="canvas-doubao-heading">
-      <h3 className="sr-only" id="canvas-doubao-heading">豆包模型与风格</h3>
+      <h3 className="sr-only" id="canvas-doubao-heading">{t("豆包模型与风格")}</h3>
 
       <DoubaoOptionCard
-        title="豆包模型"
+        title={t("豆包模型")}
         currentValue={modelLabel}
         hidden={modelHidden}
         onToggleHidden={onToggleModelHidden}
         options={doubaoModelOptions}
         value={model}
         onChange={onModelChange}
-        showEyeLabel={modelHidden ? "显示模型选项" : "隐藏模型选项"}
+        showEyeLabel={modelHidden ? t("显示模型选项") : t("隐藏模型选项")}
       />
 
       <DoubaoOptionCard
-        title="豆包风格"
+        title={t("豆包风格")}
         currentValue={styleLabel}
         hidden={styleHidden}
         onToggleHidden={onToggleStyleHidden}
         options={doubaoStyleOptions}
         value={style}
         onChange={onStyleChange}
-        showEyeLabel={styleHidden ? "显示风格选项" : "隐藏风格选项"}
+        showEyeLabel={styleHidden ? t("显示风格选项") : t("隐藏风格选项")}
       />
     </section>
   );
@@ -1862,6 +2225,7 @@ function DoubaoOptionCard({
   onChange,
   showEyeLabel,
 }: DoubaoOptionCardProps) {
+  const { t } = useLocale();
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-3">
@@ -1896,7 +2260,7 @@ function DoubaoOptionCard({
                 onClick={() => onChange(option.value)}
                 type="button"
               >
-                {option.label}
+                {t(option.label)}
               </button>
             );
           })}
@@ -1906,7 +2270,7 @@ function DoubaoOptionCard({
   );
 }
 
-function CreativeCanvas({
+export function CreativeCanvas({
   webCanvasEnabled,
   webCanvasLoginVisible,
   webCanvasLoading,
@@ -1925,43 +2289,45 @@ function CreativeCanvas({
   archivingIndex,
   archivingBatch,
 }: CreativeCanvasProps) {
+  const { t } = useLocale();
   const isBusyPhase = phase === "thinking" || phase === "generating";
   const subtitle = webCanvasLoginVisible
-    ? "请在下方完成豆包登录，登录后会自动切回画布"
+    ? t("请在下方完成豆包登录，登录后会自动切回画布")
     : webCanvasLoading
-      ? "正在连接豆包网页画布…"
+      ? t("正在连接豆包网页画布…")
       : phase === "thinking"
-        ? "正在理解你的想法…"
+        ? t("正在理解你的想法…")
         : phase === "generating"
           ? webCanvasEnabled
-            ? "豆包正在后台生成…"
-            : "AI 正在创作中…"
+            ? t("豆包正在后台生成…")
+            : t("AI 正在创作中…")
           : results.length > 0
             ? lastModel
-              ? `模型：${lastModel}`
-              : `已生成 ${results.length} 张`
+              ? t("模型：{model}", { model: lastModel })
+              : t("已生成 {count} 张", { count: results.length })
             : webCanvasEnabled
-              ? "豆包已就绪 · 作品会出现在这里"
-              : "作品会出现在这里";
+              ? t("豆包已就绪 · 作品会出现在这里")
+              : t("作品会出现在这里");
 
   return (
     <div
-      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border bg-panel/70 p-4 shadow-sm min-[640px]:p-5"
+      data-feature-guide="canvas-output"
+      className="canvas-workspace relative flex h-full min-h-0 flex-col overflow-hidden rounded-3xl border border-border/50 p-4 min-[640px]:p-5"
       style={lockedHeight !== null ? { height: `${lockedHeight}px` } : undefined}
     >
-      <div className="relative z-10 mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h2 className="font-semibold text-foreground">创意画布</h2>
-          <p className="mt-1 text-xs text-muted">{subtitle}</p>
+      <div className="canvas-workspace-heading relative z-10 mb-4 flex shrink-0 items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="font-semibold text-foreground">{t("创意画布")}</h2>
+          <p className="mt-1 truncate text-xs text-muted" title={subtitle}>{subtitle}</p>
         </div>
         {results.length > 0 && !isBusyPhase ? (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 whitespace-nowrap text-[11px]">
             {generationElapsedMs !== null ? (
               <span className="rounded-full bg-primary/10 px-2.5 py-1 tabular-nums text-primary">
-                用时 {formatElapsedDuration(generationElapsedMs)}
+                {t("用时 {duration}", { duration: formatElapsedDuration(generationElapsedMs, t) })}
               </span>
             ) : null}
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">已生成 {results.length} 张</span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{t("已生成 {count} 张", { count: results.length })}</span>
           </div>
         ) : null}
       </div>
@@ -1970,7 +2336,7 @@ function CreativeCanvas({
       <div className="relative flex min-h-0 flex-1 flex-col">
         {webCanvasLoading ? (
             <div className="flex min-h-0 flex-1 items-center justify-center rounded-2xl border border-border/70 bg-background/50 text-xs text-muted">
-            正在连接豆包网页画布…
+            {t("正在连接豆包网页画布…")}
           </div>
         ) : isBusyPhase ? (
           <CanvasGeneratingStage phase={phase} keywords={thinkingKeywords} blurPreviewSrc={blurPreviewSrc} />
@@ -1979,6 +2345,7 @@ function CreativeCanvas({
         ) : (
           <CanvasResultStage
              results={results}
+             lastModel={lastModel}
              reveal={phase === "reveal"}
              onOpenPreview={onOpenPreview}
              onDownload={onDownload}
@@ -1992,12 +2359,12 @@ function CreativeCanvas({
         {webCanvasEnabled ? (
           <div
             ref={webCanvasHostRef}
-            aria-label="豆包网页画布"
+            aria-label={t("豆包网页画布")}
             className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-2xl"
           >
             {webCanvasLoginVisible ? (
               <div className="flex h-full items-center justify-center text-xs text-muted pointer-events-none">
-                正在加载豆包登录…
+                {t("正在加载豆包登录…")}
               </div>
             ) : null}
           </div>
@@ -2008,59 +2375,15 @@ function CreativeCanvas({
 }
 
 function CanvasEmptyStage() {
+  const { t } = useLocale();
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-gradient-to-b from-panel/60 to-background/40 px-6 py-8 text-center">
-      <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <Sparkles size={28} />
+    <CanvasMotionBackdrop blurPreviewSrc="" mode="empty" className="flex min-h-0 flex-1 px-6 py-8 text-center">
+      <div className="canvas-empty-content flex flex-1 flex-col items-center justify-center gap-4">
+        <Sparkles className="text-primary/55" size={30} strokeWidth={1.3} />
+        <h3 className="font-medium text-foreground">{t("留一片空白，给你的想象")}</h3>
+        <p className="max-w-60 text-xs leading-6 text-muted">{t("从一个想法开始，作品会在这里与你见面。")}</p>
       </div>
-      <h3 className="font-medium text-foreground">想创作点什么？</h3>
-      <p className="mt-2 max-w-md text-sm leading-6 text-muted">写一句画面描述，或添加一张参考图，用你自己的 API 生成第一张作品。结果会保留原图顺序，并自动归档到素材库。</p>
-    </div>
-  );
-}
-
-const generatingSubsteps = ["解析画面结构…", "勾勒主体与光线…", "精修细节…", "合成中…"] as const;
-
-type CanvasMotionStyle = CSSProperties & {
-  "--canvas-ambient-delay": string;
-  "--canvas-breathe-delay": string;
-  "--canvas-dot-delay": string;
-  "--canvas-prism-delay": string;
-  "--canvas-aurora-delay": string;
-  "--canvas-flare-delay": string;
-};
-
-function randomPhaseDelay(periodSeconds: number): string {
-  return `-${(Math.random() * periodSeconds).toFixed(2)}s`;
-}
-
-function CanvasMotionBackdrop({
-  blurPreviewSrc,
-  className,
-  children,
-}: {
-  blurPreviewSrc: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  const [motionStyle] = useState<CanvasMotionStyle>(() => ({
-    "--canvas-ambient-delay": randomPhaseDelay(28),
-    "--canvas-breathe-delay": randomPhaseDelay(21),
-    "--canvas-dot-delay": randomPhaseDelay(42),
-    "--canvas-prism-delay": randomPhaseDelay(19),
-    "--canvas-aurora-delay": randomPhaseDelay(37),
-    "--canvas-flare-delay": randomPhaseDelay(29),
-  }));
-
-  return (
-    <div className={`canvas-glass ${className ?? ""}`} style={motionStyle}>
-      <div className="canvas-ambient-glow" aria-hidden="true" />
-      {blurPreviewSrc ? <img className="canvas-blur-preview" src={blurPreviewSrc} alt="" aria-hidden="true" /> : null}
-      <div className="canvas-dot-field" aria-hidden="true" />
-      <div className="canvas-prism-sweep" aria-hidden="true" />
-      <div className="canvas-glass-shine" aria-hidden="true" />
-      <div className="relative z-10 flex min-h-0 flex-1 flex-col">{children}</div>
-    </div>
+    </CanvasMotionBackdrop>
   );
 }
 
@@ -2073,31 +2396,54 @@ function CanvasGeneratingStage({
   keywords: string[];
   blurPreviewSrc: string;
 }) {
+  const { t } = useLocale();
   const isThinking = phase === "thinking";
-  const [substepIndex, setSubstepIndex] = useState(0);
+  const [message, setMessage] = useState(() => pickCanvasWaitingMessage(isThinking ? "thinking" : "generating"));
+  const [isMessageLeaving, setIsMessageLeaving] = useState(false);
 
   useEffect(() => {
-    if (isThinking) {
-      return;
-    }
-    const timer = setInterval(() => {
-      setSubstepIndex((index) => (index + 1) % generatingSubsteps.length);
-    }, 1400);
-    return () => clearInterval(timer);
+    const messagePhase = isThinking ? "thinking" : "generating";
+    let timer: ReturnType<typeof setTimeout>;
+    let fadeTimer: ReturnType<typeof setTimeout>;
+    setMessage((previous) => pickCanvasWaitingMessage(messagePhase, previous));
+    setIsMessageLeaving(false);
+    const schedule = () => {
+      timer = setTimeout(() => {
+        setIsMessageLeaving(true);
+        fadeTimer = setTimeout(() => {
+          setMessage((previous) => pickCanvasWaitingMessage(messagePhase, previous));
+          setIsMessageLeaving(false);
+          schedule();
+        }, 200);
+      }, getCanvasWaitingDelay() - 200);
+    };
+    const onVisibilityChange = () => {
+      clearTimeout(timer);
+      clearTimeout(fadeTimer);
+      setIsMessageLeaving(false);
+      if (!document.hidden) schedule();
+    };
+    onVisibilityChange();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(fadeTimer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, [isThinking]);
 
   return (
-    <CanvasMotionBackdrop blurPreviewSrc={blurPreviewSrc} className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+    <CanvasMotionBackdrop blurPreviewSrc={blurPreviewSrc} mode={isThinking ? "thinking" : "busy"} className="flex min-h-0 flex-1 items-center justify-center px-4 py-4 sm:px-6">
       <div className="flex min-h-0 w-full flex-1 items-center justify-center">
-        <div className="canvas-status-card relative z-10 flex w-full max-w-xs flex-col items-center gap-3 px-6 py-6 text-center">
-          <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/12 text-primary">
-            {isThinking ? <Brain size={24} /> : <Sparkles size={24} />}
+        <div className="canvas-status-card relative z-10 flex w-full max-w-sm flex-col items-center gap-4 px-2 py-4 text-center">
+          <div className="canvas-status-symbol flex size-14 shrink-0 items-center justify-center text-primary/75">
+            {isThinking ? <Brain size={28} strokeWidth={1.4} /> : <Sparkles size={28} strokeWidth={1.4} />}
           </div>
           <div>
-            <h3 className="font-medium text-foreground">{isThinking ? "正在理解你的想法" : "正在创作"}</h3>
-            <p className="mt-1 text-xs text-muted">{isThinking ? "整理你的描述，规划画面…" : generatingSubsteps[substepIndex]}</p>
+            <h3 className="text-lg font-medium tracking-wide text-foreground" role="status">{isThinking ? t("正在理解你的想法") : t("正在创作")}</h3>
+            <p className={`canvas-waiting-message mt-3 min-h-12 text-sm leading-6 text-muted ${isMessageLeaving ? "canvas-waiting-message--leaving" : ""}`}>{message}</p>
           </div>
-          <div className="relative h-1 w-40 overflow-hidden rounded-full bg-border/70">
+          <div className="relative h-0.5 w-40 overflow-hidden rounded-full bg-border/50" aria-hidden="true">
             <span className="canvas-progress-indeterminate absolute inset-y-0 left-0 block bg-primary" />
           </div>
           {keywords.length > 0 ? (
@@ -2105,8 +2451,9 @@ function CanvasGeneratingStage({
               {keywords.map((keyword, index) => (
                 <span
                   key={`${keyword}-${index}`}
-                  className="canvas-prompt-tag px-2.5 py-1 text-[11px] leading-none"
-                  style={{ animationDelay: `${index * 120}ms` }}
+                  className="canvas-prompt-tag max-w-full truncate px-2.5 py-1 text-[11px] leading-none"
+                  title={keyword}
+                  style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
                 >
                   {keyword}
                 </span>
@@ -2125,6 +2472,7 @@ function CanvasGeneratingStage({
  */
 function CanvasResultStage({
   results,
+  lastModel,
   reveal,
   onOpenPreview,
   onDownload,
@@ -2134,6 +2482,7 @@ function CanvasResultStage({
   archivingBatch,
 }: {
   results: CanvasGenerationResult[];
+  lastModel: string;
   reveal: boolean;
   onOpenPreview: (index: number) => void;
   onDownload: (result: CanvasGenerationResult, index: number) => void;
@@ -2142,8 +2491,11 @@ function CanvasResultStage({
   archivingIndex: number | null;
   archivingBatch: boolean;
 }) {
+  const { t } = useLocale();
   const total = results.length;
   const [activeIndex, setActiveIndex] = useState(0);
+  const [finishingMessage] = useState(() => pickCanvasWaitingMessage("finishing"));
+  const [isRevealingArtwork, setIsRevealingArtwork] = useState(false);
 
   // 新一批结果就位（数量变化）后回到第一张，并兜住越界索引。
   useEffect(() => {
@@ -2161,19 +2513,19 @@ function CanvasResultStage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <CanvasMotionBackdrop blurPreviewSrc={active.dataUrl} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+      <CanvasMotionBackdrop blurPreviewSrc={active.dataUrl} mode={isRevealingArtwork ? "reveal" : "result"} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
         <div className="relative flex min-h-0 flex-1 flex-col">
           <CanvasResultCard
             key={`${active.dataUrl.slice(0, 32)}-${safeIndex}`}
             result={active}
+            lastModel={lastModel}
             index={safeIndex}
             reveal={reveal}
+            onRevealChange={setIsRevealingArtwork}
             onOpen={() => onOpenPreview(safeIndex)}
             onDownload={() => onDownload(active, safeIndex)}
             onCopy={() => {
-              if (active.imageFileName) {
-                void onCopyImage(active.imageFileName);
-              }
+              void onCopyImage(active.imageFileName || active.dataUrl);
             }}
             onArchive={() => void onArchive(active, safeIndex)}
             archiving={archivingIndex === safeIndex}
@@ -2183,7 +2535,7 @@ function CanvasResultStage({
           {total > 1 ? (
             <>
               <button
-                aria-label="上一张"
+                aria-label={t("上一张")}
                 className="absolute left-3 top-1/2 z-10 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm backdrop-blur transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 onClick={goPrev}
                 type="button"
@@ -2191,27 +2543,28 @@ function CanvasResultStage({
                 <ChevronLeft size={18} />
               </button>
               <button
-                aria-label="下一张"
+                aria-label={t("下一张")}
                 className="absolute right-3 top-1/2 z-10 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm backdrop-blur transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                 onClick={goNext}
                 type="button"
               >
                 <ChevronRight size={18} />
               </button>
-              <span className="pointer-events-none absolute right-3 top-3 z-10 rounded-full bg-overlay/55 px-2 py-0.5 text-[11px] font-medium tabular-nums text-primary-foreground backdrop-blur">
+              <span className="pointer-events-none absolute bottom-2 right-3 z-10 px-2 py-1 text-[11px] font-medium tabular-nums text-muted">
                 {safeIndex + 1} / {total}
               </span>
             </>
           ) : null}
         </div>
+        {reveal ? <p className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 text-xs text-muted" role="status">{finishingMessage}</p> : null}
       </CanvasMotionBackdrop>
 
       {total > 1 ? (
-        <div className="mt-3 flex shrink-0 items-center justify-center gap-2" aria-label="切换生成结果">
+        <div className="mt-3 flex shrink-0 items-center justify-center gap-2" aria-label={t("切换生成结果")}>
           {results.map((result, index) => (
             <button
               aria-current={index === safeIndex}
-              aria-label={`第 ${index + 1} 张`}
+              aria-label={t("第 {index} 张", { index: index + 1 })}
               className={`h-1.5 rounded-full transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
                 index === safeIndex ? "w-6 bg-primary" : "w-1.5 bg-border hover:bg-primary/40"
               }`}
@@ -2226,10 +2579,20 @@ function CanvasResultStage({
   );
 }
 
+function formatCanvasAspectRatio(width: number, height: number): string {
+  if (!width || !height) return "";
+  let a = width;
+  let b = height;
+  while (b) [a, b] = [b, a % b];
+  return `${width / a}:${height / a}`;
+}
+
 function CanvasResultCard({
   result,
+  lastModel,
   index,
   reveal,
+  onRevealChange,
   onOpen,
   onDownload,
   onCopy,
@@ -2238,8 +2601,10 @@ function CanvasResultCard({
   archivingBatch,
 }: {
   result: CanvasGenerationResult;
+  lastModel: string;
   index: number;
   reveal: boolean;
+  onRevealChange: (active: boolean) => void;
   onOpen: () => void;
   onDownload: () => void;
   onCopy: () => void;
@@ -2248,47 +2613,84 @@ function CanvasResultCard({
   /** 自动收录整批进行中：仅此期间未落盘的结果才显示「归档中」角标。 */
   archivingBatch: boolean;
 }) {
+  const { t } = useLocale();
   const archived = result.saved;
+  const [mediaSize, setMediaSize] = useState<{ source: string; width: number; height: number } | null>(null);
+  const [revealRequestedFor, setRevealRequestedFor] = useState(reveal ? result.dataUrl : null);
+  useEffect(() => {
+    if (reveal) setRevealRequestedFor(result.dataUrl);
+  }, [reveal, result.dataUrl]);
+  const title = (result.requestPrompt?.trim() || result.revisedPrompt?.trim() || t("生成作品 {index}", { index: index + 1 })).replace(/\s+/g, " ");
+  const dimensions = mediaSize?.source === result.dataUrl ? mediaSize : null;
+  const sizeLabel = dimensions ? `${dimensions.width} × ${dimensions.height} · ${formatCanvasAspectRatio(dimensions.width, dimensions.height)}` : "";
+  // Image-only legacy condition: disabled={!result.saved || !result.imageFileName}; videos add a media guard.
+  const imageCopyDisabled = !result.imageFileName && !result.dataUrl;
   // 判定「正在归档」的准确依据：手动收录这一张(archiving) 或 自动收录整批进行中(archivingBatch)。
   // 不能仅凭 !result.saved —— 自动收录关闭时 results 永远 saved=false，
   // 那样会错误地永久显示「归档中」角标。
   const showArchivingBadge = archiving || (archivingBatch && !archived);
   return (
     <article
-      className={`group relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-transparent transition duration-300 hover:shadow-image ${
-        reveal ? "canvas-reveal" : ""
-      }`}
+      className="canvas-result-card group relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-transparent"
       onDoubleClick={onOpen}
     >
-      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-transparent">
-        <img
-          alt={`生成结果 ${index + 1}`}
-          className="max-h-full w-auto max-w-full object-contain"
-          src={result.dataUrl}
-        />
+      <div
+        className="canvas-artwork relative flex min-h-0 flex-1 items-center justify-center bg-transparent p-3"
+        style={dimensions ? { "--canvas-artwork-ratio": dimensions.width / dimensions.height } as CSSProperties : undefined}
+      >
+        {result.mediaType === "video" ? (
+          <video
+            aria-label={t("生成视频 {index}", { index: index + 1 })}
+            className="canvas-artwork-media rounded-2xl object-contain"
+            onLoadedMetadata={(event) => setMediaSize({ source: result.dataUrl, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })}
+            controls
+            loop
+            muted
+            playsInline
+            src={result.dataUrl}
+          />
+        ) : (
+          <img
+            alt={t("生成结果 {index}", { index: index + 1 })}
+            className="canvas-artwork-media rounded-2xl object-contain"
+            onLoad={(event) => setMediaSize({ source: result.dataUrl, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+            src={result.dataUrl}
+          />
+        )}
+        {dimensions && revealRequestedFor === result.dataUrl ? (
+          <CanvasArtworkReveal key={result.dataUrl} image={result.mediaType !== "video"} onActiveChange={onRevealChange} />
+        ) : null}
         {showArchivingBadge ? (
           <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-background/85 px-2 py-1 text-[11px] text-muted shadow-sm backdrop-blur">
-            <LoaderCircle className="animate-spin" size={11} /> 归档中
+            <LoaderCircle className="animate-spin" size={11} /> {t("归档中")}
           </span>
         ) : null}
-        <div className="absolute inset-0 flex items-end justify-center gap-1.5 bg-gradient-to-t from-overlay/75 via-overlay/10 to-transparent p-3 opacity-0 transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100">
-          <ResultHoverButton icon={<Eye size={13} />} label="大图" onClick={onOpen} />
-          <ResultHoverButton icon={<Download size={13} />} label="导出" onClick={onDownload} />
+        <div className={`canvas-result-actions absolute ${result.mediaType === "video" ? "top-3" : "bottom-3"} left-1/2 flex -translate-x-1/2 items-center justify-center gap-1.5 rounded-2xl border border-border/50 bg-panel/75 p-1.5 opacity-0 backdrop-blur-md transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100`}>
+          <ResultHoverButton icon={<Eye size={13} />} label={t("大图")} onClick={onOpen} />
+          <ResultHoverButton icon={<Download size={13} />} label={t("导出")} onClick={onDownload} />
           <ResultHoverButton
             disabled={archived || archiving}
             icon={archiving ? <LoaderCircle className="animate-spin" size={13} /> : archived ? <Check size={13} /> : <Inbox size={13} />}
-            label={archived ? "已收录" : "收录"}
+            label={archived ? t("已收录") : t("收录")}
             onClick={onArchive}
-            title={archived ? "已收录到素材库" : archiving ? "正在收录到素材库…" : "收录到素材库"}
+            title={archived ? t("已收录") : t("收录到素材库")}
           />
           <ResultHoverButton
-            disabled={!result.saved || !result.imageFileName}
+            disabled={result.mediaType === "video" || imageCopyDisabled}
             icon={<Copy size={13} />}
-            label="复制"
+            label={t("复制")}
             onClick={onCopy}
-            title={result.saved ? "复制图片到系统剪贴板" : result.imageFileName ? "图片归档完成后可复制" : "未收录到素材库，点击「收录」后可复制"}
+            title={result.mediaType === "video" ? t("视频暂不支持复制为图片") : t("复制图片到剪贴板")}
           />
         </div>
+      </div>
+      <div className="shrink-0 px-5 pb-3 pt-1 text-center">
+        <p className="mx-auto max-w-md truncate text-sm font-medium text-foreground" title={title}>{title.length > 32 ? `${title.slice(0, 32)}…` : title}</p>
+        <p className="mt-1.5 flex flex-wrap items-center justify-center gap-x-1.5 text-[11px] leading-5 text-muted">
+          {lastModel ? <span className="max-w-[min(100%,18rem)] truncate" title={lastModel}>{lastModel}</span> : null}
+          {sizeLabel ? <span className="whitespace-nowrap">{sizeLabel}</span> : null}
+        </p>
+        {archived ? <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-muted"><Check size={12} /> {t("已收录")}</span> : null}
       </div>
     </article>
   );
@@ -2309,7 +2711,8 @@ function ResultHoverButton({
 }) {
   return (
     <button
-      className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-border bg-panel/70 px-2.5 text-xs font-medium text-foreground shadow-sm backdrop-blur transition hover:bg-primary/65 hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
+      aria-label={label}
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl text-foreground transition hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
@@ -2319,7 +2722,7 @@ function ResultHoverButton({
       type="button"
     >
       {icon}
-      {label}
+      <span className="sr-only">{label}</span>
     </button>
   );
 }
@@ -2354,9 +2757,21 @@ function CanvasFullscreenPreview({
   onArchive,
   archivingIndex,
 }: CanvasFullscreenPreviewProps) {
+  const { t } = useLocale();
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  const imageCopyDisabled = !result.imageFileName && !result.dataUrl;
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  /**
+   * 卡片先展示「本次生成实际使用的提示词」（生成时快照到结果上），模型改写版只作为
+   * 附加信息。旧实现只读 revisedPrompt，而 gpt-image / 豆包网页 / 视频模型都不返回它，
+   * 于是卡片长期只显示一句「模型没有改写」的占位，看不到自己真正用的提示词。
+   */
+  const submittedPrompt = result.requestPrompt?.trim() ?? "";
+  const modelRevisedPrompt = result.revisedPrompt?.trim() ?? "";
+  // 两者一致时不重复展示改写版。
+  const showRevisedPrompt = modelRevisedPrompt.length > 0 && modelRevisedPrompt !== submittedPrompt;
+  const displayPrompt = submittedPrompt || modelRevisedPrompt;
 
   useEffect(() => {
     if (!promptOpen) {
@@ -2380,7 +2795,7 @@ function CanvasFullscreenPreview({
   }, [promptCopied]);
 
   async function handleCopyPrompt(): Promise<void> {
-    const text = result.revisedPrompt?.trim() ?? "";
+    const text = displayPrompt;
     if (!text) {
       return;
     }
@@ -2392,12 +2807,13 @@ function CanvasFullscreenPreview({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-overlay/72 p-4 backdrop-blur-sm"
+      className="app-window-overlay z-[9999] flex items-center justify-center bg-overlay/72 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <button
-        aria-label="关闭预览"
+        aria-label={t("关闭预览")}
         className="absolute right-4 top-4 z-10 inline-flex size-10 items-center justify-center rounded-full border border-border/70 bg-panel/65 text-foreground shadow-lg backdrop-blur transition hover:bg-panel/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        data-feature-guide="canvas-fullscreen-close"
         onClick={(event) => { event.stopPropagation(); onClose(); }}
         type="button"
       >
@@ -2412,16 +2828,18 @@ function CanvasFullscreenPreview({
         {total > 1 ? (
           <>
             <button
-              aria-label="上一张"
+              aria-label={t("上一张")}
               className="absolute left-3 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-panel/55 text-foreground shadow-lg backdrop-blur transition hover:bg-panel/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              data-feature-guide="canvas-fullscreen-navigation"
               onClick={onPrev}
               type="button"
             >
               <ChevronLeft size={20} />
             </button>
             <button
-              aria-label="下一张"
+              aria-label={t("下一张")}
               className="absolute right-16 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-panel/55 text-foreground shadow-lg backdrop-blur transition hover:bg-panel/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              data-feature-guide="canvas-fullscreen-navigation"
               onClick={onNext}
               type="button"
             >
@@ -2429,12 +2847,27 @@ function CanvasFullscreenPreview({
             </button>
           </>
         ) : null}
-        <img
-          alt={`生成结果 ${index + 1}`}
-          className="block h-auto w-auto max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-          onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-          src={result.dataUrl}
-        />
+        {result.mediaType === "video" ? (
+          <video
+            aria-label={t("生成视频 {index}", { index: index + 1 })}
+            className="block h-auto w-auto max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+            data-feature-guide="canvas-fullscreen-media"
+            autoPlay
+            controls
+            loop
+            muted
+            playsInline
+            src={result.dataUrl}
+          />
+        ) : (
+          <img
+            alt={t("生成结果 {index}", { index: index + 1 })}
+            className="block h-auto w-auto max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+            data-feature-guide="canvas-fullscreen-media"
+            onLoad={(event) => setNaturalSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+            src={result.dataUrl}
+          />
+        )}
       </div>
 
       {/* 提示词卡片叠在大图之上，不影响大图布局。 */}
@@ -2445,43 +2878,57 @@ function CanvasFullscreenPreview({
         >
           <div className="rounded-2xl border border-border/70 bg-panel/65 p-2.5 shadow-elevated backdrop-blur">
             <div className="flex items-center justify-between gap-3 px-1 text-xs text-muted">
-              <span>生成结果</span>
+              <span>{t("生成结果")}</span>
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  aria-label="复制提示词"
-                  title={result.revisedPrompt?.trim() ? "复制当前提示词" : "暂无可复制的提示词"}
-                  disabled={!result.revisedPrompt?.trim()}
+                  aria-label={t("复制提示词")}
+                  title={displayPrompt ? t("复制当前提示词") : t("暂无可复制的提示词")}
+                  disabled={!displayPrompt}
                   onClick={() => void handleCopyPrompt()}
                   className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-muted opacity-40 transition hover:bg-background/40 hover:text-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:opacity-90 disabled:cursor-not-allowed disabled:opacity-25"
                 >
                   {promptCopied ? <Check size={12} /> : <Copy size={12} />}
-                  {promptCopied ? "已复制" : "复制"}
+                  {promptCopied ? t("已复制") : t("复制")}
                 </button>
                 <span className="rounded-full bg-background/55 px-2 py-0.5 tabular-nums">{index + 1} / {total}</span>
               </div>
             </div>
+            {showRevisedPrompt && submittedPrompt ? (
+              <p className="mt-2 px-1 text-[11px] font-medium text-muted">{t("本次使用的提示词")}</p>
+            ) : null}
             <div
-              aria-label="展开的提示词"
+              aria-label={t("展开的提示词")}
               className="mt-2 max-h-[min(52vh,560px)] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-background/45 px-3 py-2.5 text-xs leading-6 text-muted"
             >
-              {result.revisedPrompt?.trim() || "该模型未返回改写后的提示词。"}
+              {displayPrompt || t("本次生成没有记录提示词。")}
             </div>
+            {showRevisedPrompt && submittedPrompt ? (
+              <>
+                <p className="mt-2 px-1 text-[11px] font-medium text-muted">{t("模型改写后的提示词")}</p>
+                <div
+                  aria-label={t("模型改写后的提示词")}
+                  className="mt-1 max-h-[min(26vh,280px)] w-full overflow-y-auto whitespace-pre-wrap break-words rounded-xl bg-background/38 px-3 py-2.5 text-xs leading-6 text-muted"
+                >
+                  {modelRevisedPrompt}
+                </div>
+              </>
+            ) : null}
             <dl className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-background/38 px-3 py-2.5 text-xs text-muted">
               <div className="inline-flex min-w-0 items-center gap-1">
-                <dt>模型：</dt>
-                <dd className="max-w-40 truncate text-foreground">{lastModel || "未知"}</dd>
+                <dt>{t("模型：")}</dt>
+                <dd className="max-w-40 truncate text-foreground">{lastModel || t("未知")}</dd>
               </div>
               {naturalSize ? (
                 <div className="inline-flex items-center gap-1">
-                  <dt>尺寸：</dt>
+                  <dt>{t("尺寸：")}</dt>
                   <dd className="tabular-nums text-foreground">{naturalSize.width} × {naturalSize.height}</dd>
                 </div>
               ) : null}
               {generationElapsedMs !== null ? (
                 <div className="inline-flex items-center gap-1">
-                  <dt>用时：</dt>
-                  <dd className="tabular-nums text-foreground">{formatElapsedDuration(generationElapsedMs)}</dd>
+                  <dt>{t("用时：")}</dt>
+                  <dd className="tabular-nums text-foreground">{formatElapsedDuration(generationElapsedMs, t)}</dd>
                 </div>
               ) : null}
             </dl>
@@ -2491,35 +2938,35 @@ function CanvasFullscreenPreview({
 
       {/* 操作按钮固定在右侧中部，不随提示词卡片展开而位移；默认半透明，悬停/聚焦时更清晰。 */}
       <div
-        aria-label="生成结果操作"
+        aria-label={t("生成结果操作")}
         className="absolute right-3 top-1/2 z-30 flex -translate-y-1/2 shrink-0 flex-col gap-1.5 rounded-2xl border border-border/70 bg-panel/40 p-1 shadow-elevated backdrop-blur opacity-45 transition-opacity hover:opacity-100 focus-within:opacity-100"
+        data-feature-guide="canvas-fullscreen-actions"
         onClick={(event) => event.stopPropagation()}
       >
-        <CanvasResultActionButton icon={<Download size={18} />} label="导出" onClick={onDownload} />
+        <CanvasResultActionButton icon={<Download size={18} />} label={t("导出")} onClick={onDownload} />
         <CanvasResultActionButton
           disabled={result.saved || archivingIndex === index}
           icon={archivingIndex === index ? <LoaderCircle className="animate-spin" size={18} /> : result.saved ? <Check size={18} /> : <Inbox size={18} />}
-          label={result.saved ? "已收录" : "收录"}
+          label={result.saved ? t("已收录") : t("收录")}
           onClick={() => void onArchive(result, index)}
-          title={result.saved ? "已收录到素材库" : archivingIndex === index ? "正在收录到素材库…" : "收录到素材库"}
+          title={result.saved ? t("已收录") : archivingIndex === index ? t("收录中…") : t("收录到素材库")}
         />
         <CanvasResultActionButton
-          disabled={!result.saved || !result.imageFileName}
+          disabled={result.mediaType === "video" || imageCopyDisabled}
           icon={<Copy size={18} />}
-          label="复制"
+          label={t("复制")}
           onClick={() => {
-            if (result.imageFileName) {
-              void onCopyImage(result.imageFileName);
-            }
+            void onCopyImage(result.imageFileName || result.dataUrl);
           }}
-          title={result.saved ? "复制图片到系统剪贴板" : result.imageFileName ? "图片归档完成后可复制" : "未收录到素材库，点击「收录」后可复制"}
+          title={result.mediaType === "video" ? t("视频暂不支持复制为图片") : t("复制图片到剪贴板")}
         />
         <CanvasResultActionButton
           ariaExpanded={promptOpen}
+          dataFeatureGuide="canvas-fullscreen-prompt"
           icon={<Info size={18} />}
-          label="查看"
+          label={t("查看")}
           onClick={() => setPromptOpen((open) => !open)}
-          title={promptOpen ? "收起提示词" : "查看提示词"}
+          title={promptOpen ? t("收起提示词") : t("查看提示词")}
         />
       </div>
     </div>
@@ -2528,6 +2975,7 @@ function CanvasFullscreenPreview({
 
 function CanvasResultActionButton({
   ariaExpanded,
+  dataFeatureGuide,
   disabled = false,
   icon,
   label,
@@ -2535,6 +2983,7 @@ function CanvasResultActionButton({
   title,
 }: {
   ariaExpanded?: boolean;
+  dataFeatureGuide?: string;
   disabled?: boolean;
   icon: ReactNode;
   label: string;
@@ -2547,6 +2996,7 @@ function CanvasResultActionButton({
       aria-label={title ?? label}
       className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-border/60 bg-panel/40 text-foreground shadow-lg backdrop-blur transition hover:border-primary/45 hover:bg-panel/75 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
       disabled={disabled}
+      data-feature-guide={dataFeatureGuide}
       onClick={onClick}
       title={title ?? label}
       type="button"

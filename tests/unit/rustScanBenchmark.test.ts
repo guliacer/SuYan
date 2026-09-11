@@ -36,7 +36,7 @@ beforeAll(() => {
       fs.writeFileSync(path.join(dir, `img${f}.jpg`), Buffer.alloc(10 * 1024, f));
     }
   }
-});
+}, 60_000);
 
 afterAll(async () => {
   fs.rmSync(rootPath, { recursive: true, force: true });

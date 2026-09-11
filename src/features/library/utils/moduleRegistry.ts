@@ -4,6 +4,7 @@ export const builtinModuleIds = [
   "video-prompt",
   "image-runtime",
   "video-runtime",
+  "nsfw-runtime",
   "image-compression",
   "video-compression",
   "deduplicate-scan",
@@ -22,6 +23,7 @@ export const builtinModuleCapabilities = [
   "video-reference-images",
   "image-runtime",
   "video-runtime",
+  "nsfw-local-classification",
   "image-compression",
   "video-compression",
   "deduplicate-scan",
@@ -76,8 +78,8 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
   },
   {
     id: "video-runtime",
-    label: "视频运行时",
-    description: "为视频提示词与视频压缩提供 ffmpeg 运行能力。首次使用时按需下载安装。",
+    label: "视频依赖",
+    description: "为视频提示词与视频压缩提供 ffmpeg 处理能力。首次使用时按需下载安装。",
     category: "runtime",
     required: false,
     defaultInstalled: false,
@@ -88,7 +90,7 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
   {
     id: "video-prompt",
     label: "视频提示词卡片",
-    description: "提供视频提示词卡片能力。关键帧抽取与参考图管理需要视频运行时（FFmpeg）。",
+    description: "提供视频提示词卡片能力。关键帧抽取与参考图管理需要视频依赖（FFmpeg）。",
     category: "prompt",
     required: false,
     defaultInstalled: true,
@@ -98,7 +100,7 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
   },
   {
     id: "image-runtime",
-    label: "图像运行时",
+    label: "图像依赖",
     description: "为图像压缩提供 sharp 图像处理能力。",
     category: "runtime",
     required: false,
@@ -106,6 +108,17 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
     defaultEnabled: true,
     dependencies: ["core-library"],
     capabilities: ["image-runtime"],
+  },
+  {
+    id: "nsfw-runtime",
+    label: "本地 NSFW 识别",
+    description: "可选的本地图片安全分级模型；模型与 ONNX Runtime 按需安装，不随软件安装包分发。",
+    category: "runtime",
+    required: false,
+    defaultInstalled: false,
+    defaultEnabled: false,
+    dependencies: ["core-library"],
+    capabilities: ["nsfw-local-classification"],
   },
   {
     id: "image-compression",
@@ -121,7 +134,7 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
   {
     id: "video-compression",
     label: "视频压缩",
-    description: "批量压缩本地视频素材，复用视频运行时中的 ffmpeg 能力。",
+    description: "批量压缩本地视频素材，复用视频依赖中的 ffmpeg 能力。",
     category: "batch",
     required: false,
     defaultInstalled: true,
@@ -192,6 +205,11 @@ export function getBuiltinModuleDefinition(moduleId: BuiltinModuleId): BuiltinMo
 }
 
 export function canDisableBuiltinModule(moduleId: BuiltinModuleId): boolean {
+  return canDeleteBuiltinModule(moduleId);
+}
+
+/** 必需模块不能删除；其余内置模块由用户自行移除或恢复。 */
+export function canDeleteBuiltinModule(moduleId: BuiltinModuleId): boolean {
   return !getBuiltinModuleDefinition(moduleId).required;
 }
 

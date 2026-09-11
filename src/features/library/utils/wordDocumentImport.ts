@@ -1,9 +1,15 @@
 export type WordDocumentBlock = {
+  /** Paragraph-local content order prevents a whole page/table from becoming one prompt. */
+  content: WordDocumentBlockContent[];
   imageRelationshipIds: string[];
   pageBreakAfter: boolean;
   pageBreakBefore: boolean;
   text: string;
 };
+
+export type WordDocumentBlockContent =
+  | { kind: "image"; imageRelationshipId: string }
+  | { kind: "text"; text: string };
 
 export type WordDocumentImageRelationship = {
   id: string;
@@ -19,19 +25,22 @@ export type WordDocumentPromptPair = {
   prompt: string;
 };
 
-type WordDocumentPage = {
-  imageRelationshipIds: string[];
-  textParts: string[];
-};
+type WordDocumentFlowToken =
+  | { kind: "image"; imageRelationshipId: string; pageIndex: number }
+  | { kind: "text"; pageIndex: number; text: string };
+
+type WordDocumentFlowRun =
+  | { kind: "images"; images: Array<Extract<WordDocumentFlowToken, { kind: "image" }>> }
+  | { kind: "text"; text: Extract<WordDocumentFlowToken, { kind: "text" }> };
 
 const pageBreakPattern =
   /<w:br\b[^>]*\bw:type=(?:"page"|'page')[^>]*\/>|<w:lastRenderedPageBreak\b[^>]*\/>/g;
 
 export function extractWordDocumentBlocks(documentXml: string): WordDocumentBlock[] {
   const bodyXml = documentXml.match(/<w:body\b[^>]*>([\s\S]*?)<\/w:body>/)?.[1] ?? documentXml;
-  const blocks = [...bodyXml.matchAll(/<w:(p|tbl)\b[\s\S]*?<\/w:\1>/g)].map((match) =>
-    parseWordDocumentBlock(match[0]),
-  );
+  // Parse paragraphs inside tables individually. Treating a whole table as one block
+  // loses the order between image cells and prompt cells and merges unrelated prompts.
+  const blocks = [...bodyXml.matchAll(/<w:p\b[\s\S]*?<\/w:p>/g)].map((match) => parseWordDocumentBlock(match[0]));
 
   return blocks.length > 0 ? blocks : [parseWordDocumentBlock(bodyXml)];
 }
@@ -58,254 +67,208 @@ export function extractWordImageRelationships(relsXml: string): WordDocumentImag
 }
 
 export function pairWordDocumentPrompts(blocks: readonly WordDocumentBlock[]): WordDocumentPromptPair[] {
-  const pages = groupWordDocumentPages(blocks);
-
-  if (pages.length > 1) {
-    return pairWordDocumentPages(pages);
-  }
-
   return pairWordDocumentFlow(blocks);
 }
 
 function parseWordDocumentBlock(blockXml: string): WordDocumentBlock {
+  const content = extractWordBlockContent(blockXml);
   const textIndex = blockXml.search(/<w:t\b/);
   const imageIndex = blockXml.search(/\br:(?:embed|link)=/);
   const contentIndexes = [textIndex, imageIndex].filter((index) => index >= 0);
   const firstContentIndex = contentIndexes.length > 0 ? Math.min(...contentIndexes) : -1;
   const lastContentIndex = Math.max(lastIndexOfPattern(blockXml, /<w:t\b/g), lastIndexOfPattern(blockXml, /\br:(?:embed|link)=/g));
   const pageBreakIndexes = [...blockXml.matchAll(pageBreakPattern)].map((match) => match.index ?? -1);
+  const imageRelationshipIds = uniqueStrings(
+    content
+      .filter((part): part is Extract<WordDocumentBlockContent, { kind: "image" }> => part.kind === "image")
+      .map((part) => part.imageRelationshipId),
+  );
 
   return {
-    imageRelationshipIds: extractImageRelationshipIds(blockXml),
+    content,
+    imageRelationshipIds,
     pageBreakBefore:
       firstContentIndex >= 0 && pageBreakIndexes.some((pageBreakIndex) => pageBreakIndex >= 0 && pageBreakIndex < firstContentIndex),
     pageBreakAfter:
       (firstContentIndex < 0 && pageBreakIndexes.length > 0) ||
       pageBreakIndexes.some((pageBreakIndex) => pageBreakIndex >= 0 && pageBreakIndex > lastContentIndex),
-    text: extractWordText(blockXml),
+    text: content
+      .filter((part): part is Extract<WordDocumentBlockContent, { kind: "text" }> => part.kind === "text")
+      .map((part) => part.text)
+      .join(""),
   };
 }
 
-function extractImageRelationshipIds(blockXml: string): string[] {
-  return [
-    ...new Set(
-      [...blockXml.matchAll(/\br:(?:embed|link)=["']([^"']+)["']/g)]
-        .map((match) => decodeXmlText(match[1]).trim())
-        .filter(Boolean),
-    ),
-  ];
-}
+function extractWordBlockContent(blockXml: string): WordDocumentBlockContent[] {
+  const content: WordDocumentBlockContent[] = [];
+  let textBuffer = "";
+  const tokenPattern =
+    /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|\br:(?:embed|link)=["']([^"']+)["']|<w:tab\b[^>]*\/>|<w:br\b(?![^>]*\bw:type=(?:"page"|'page'))[^>]*\/>/g;
 
-function extractWordText(blockXml: string): string {
-  const normalizedXml = blockXml
-    .replace(/<w:tab\b[^>]*\/>/g, " ")
-    .replace(/<w:br\b(?![^>]*\bw:type=(?:"page"|'page'))[^>]*\/>/g, "\n");
-  const text = [...normalizedXml.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)]
-    .map((match) => decodeXmlText(match[1]))
-    .join("");
-
-  return normalizeWordPromptText(text);
-}
-
-function groupWordDocumentPages(blocks: readonly WordDocumentBlock[]): WordDocumentPage[] {
-  const pages: WordDocumentPage[] = [];
-  let currentPage = createEmptyPage();
-
-  for (const block of blocks) {
-    if (block.pageBreakBefore && hasPageContent(currentPage)) {
-      pages.push(currentPage);
-      currentPage = createEmptyPage();
+  const flushText = () => {
+    const text = normalizeWordPromptText(textBuffer);
+    if (text) {
+      content.push({ kind: "text", text });
     }
+    textBuffer = "";
+  };
 
-    currentPage.imageRelationshipIds.push(...block.imageRelationshipIds);
-
-    if (block.text) {
-      currentPage.textParts.push(block.text);
-    }
-
-    if (block.pageBreakAfter && hasPageContent(currentPage)) {
-      pages.push(currentPage);
-      currentPage = createEmptyPage();
-    }
-  }
-
-  if (hasPageContent(currentPage)) {
-    pages.push(currentPage);
-  }
-
-  return pages;
-}
-
-function pairWordDocumentPages(pages: readonly WordDocumentPage[]): WordDocumentPromptPair[] {
-  const pairs: WordDocumentPromptPair[] = [];
-  let index = 0;
-  let groupSerial = 0;
-
-  while (index < pages.length) {
-    const page = pages[index];
-
-    if (page.imageRelationshipIds.length === 0) {
-      index += 1;
+  for (const match of blockXml.matchAll(tokenPattern)) {
+    if (match[1] !== undefined) {
+      textBuffer += decodeXmlText(match[1]);
       continue;
     }
 
-    const samePagePrompt = normalizeWordPromptText(page.textParts.join("\n"));
-
-    // 本页已有提示词：仅绑定本页图片（默认 图像-提示词 一组）。
-    if (samePagePrompt) {
-      groupSerial += 1;
-      const groupId = `page-group-${groupSerial}`;
-      appendPageImagePairs(pairs, page, {
-        groupId,
-        pageIndex: index,
-        pairingMode: "same-page",
-        prompt: samePagePrompt,
-      });
-      index += 1;
+    if (match[2] !== undefined) {
+      flushText();
+      content.push({ kind: "image", imageRelationshipId: decodeXmlText(match[2]).trim() });
       continue;
     }
 
-    // 本页只有图：向后寻找提示词页。支持：
-    // 1) 下一页纯文字（经典跨页）
-    // 2) 后面连续多张纯图 + 最终一页文字/图文（多图同一提示词组）
-    // 3) 下一页图文混排（左图右文/多图+共用提示词）——多图共享该提示词，避免前图空提示词。
-    let promptPageIndex = index + 1;
-    while (promptPageIndex < pages.length && !pageHasPromptText(pages[promptPageIndex])) {
-      promptPageIndex += 1;
-    }
-
-    if (promptPageIndex < pages.length) {
-      const promptPage = pages[promptPageIndex];
-      const prompt = normalizeWordPromptText(promptPage.textParts.join("\n"));
-      const lastImagePageIndex = promptPage.imageRelationshipIds.length > 0 ? promptPageIndex : promptPageIndex - 1;
-      const spansMultiplePages = lastImagePageIndex > index || promptPage.imageRelationshipIds.length > 0;
-      const pairingMode =
-        promptPage.imageRelationshipIds.length === 0
-          ? "next-page"
-          : spansMultiplePages
-            ? "shared-run"
-            : "same-page";
-
-      groupSerial += 1;
-      const groupId = `page-group-${groupSerial}`;
-
-      for (let pageIndex = index; pageIndex <= lastImagePageIndex; pageIndex += 1) {
-        const imagePage = pages[pageIndex];
-        if (imagePage.imageRelationshipIds.length === 0) {
-          continue;
-        }
-
-        appendPageImagePairs(pairs, imagePage, {
-          groupId,
-          pageIndex,
-          pairingMode,
-          prompt,
-        });
-      }
-
-      index = lastImagePageIndex + 1;
-      continue;
-    }
-
-    // 找不到后续提示词：仍导入图片，提示词留空。
-    groupSerial += 1;
-    const groupId = `page-group-${groupSerial}`;
-    appendPageImagePairs(pairs, page, {
-      groupId,
-      pageIndex: index,
-      pairingMode: "same-page",
-      prompt: "",
-    });
-    index += 1;
+    textBuffer += "\n";
   }
 
-  return pairs;
-}
+  flushText();
 
-function pageHasPromptText(page: WordDocumentPage): boolean {
-  return normalizeWordPromptText(page.textParts.join("\n")).length > 0;
-}
-
-function appendPageImagePairs(
-  pairs: WordDocumentPromptPair[],
-  page: WordDocumentPage,
-  meta: {
-    groupId: string;
-    pageIndex: number;
-    pairingMode: WordDocumentPromptPair["pairingMode"];
-    prompt: string;
-  },
-): void {
-  for (const imageRelationshipId of page.imageRelationshipIds) {
-    pairs.push({
-      imageRelationshipId,
-      groupId: meta.groupId,
-      pageIndex: meta.pageIndex,
-      pairingMode: meta.pairingMode,
-      prompt: meta.prompt,
-    });
-  }
+  return content;
 }
 
 function pairWordDocumentFlow(blocks: readonly WordDocumentBlock[]): WordDocumentPromptPair[] {
+  const tokens = createWordDocumentFlowTokens(blocks);
+  const runs = createWordDocumentFlowRuns(tokens);
+  const imageFirst = shouldUseAfterImagePrompt(runs);
   const pairs: WordDocumentPromptPair[] = [];
-  let pendingImageRelationshipIds: string[] = [];
-  let pendingTextParts: string[] = [];
   let groupSerial = 0;
 
-  function flushPending() {
-    if (pendingImageRelationshipIds.length === 0) {
-      pendingTextParts = [];
-      return;
+  for (let runIndex = 0; runIndex < runs.length; runIndex += 1) {
+    const run = runs[runIndex];
+    if (run.kind !== "images") {
+      continue;
     }
 
-    const prompt = normalizeWordPromptText(pendingTextParts.join("\n"));
-    groupSerial += 1;
-    const groupId = `flow-group-${groupSerial}`;
+    // The document's first content direction determines whether a prompt follows
+    // its images or precedes them. Either way, only one adjacent text block can be
+    // selected; a second prompt can never be concatenated into this group.
+    const adjacentRun = imageFirst ? runs[runIndex + 1] : runs[runIndex - 1];
+    const promptRun = adjacentRun?.kind === "text" ? adjacentRun : null;
+    const prompt = promptRun?.text.text ?? "";
+    const imagePageIndexes = new Set(run.images.map((image) => image.pageIndex));
+    const promptPageIndex = promptRun?.text.pageIndex ?? null;
+    const crossesPage =
+      promptPageIndex !== null && [...imagePageIndexes].some((pageIndex) => pageIndex !== promptPageIndex);
+    const promptPageHasImage = promptPageIndex !== null && imagePageIndexes.has(promptPageIndex);
+    const pairingMode: WordDocumentPromptPair["pairingMode"] = crossesPage
+      ? promptPageHasImage
+        ? "shared-run"
+        : "next-page"
+      : "flow";
+    const groupPrefix = crossesPage ? "page-group" : "flow-group";
+    const groupId = `${groupPrefix}-${++groupSerial}`;
 
-    // 多张图后跟同一段提示词：全部作为同一提示词组的多张效果图。
-    for (const imageRelationshipId of pendingImageRelationshipIds) {
+    for (const image of run.images) {
       pairs.push({
-        imageRelationshipId,
+        imageRelationshipId: image.imageRelationshipId,
         groupId,
-        pageIndex: 0,
-        pairingMode: "flow",
+        pageIndex: image.pageIndex,
+        pairingMode,
         prompt,
       });
     }
-
-    pendingImageRelationshipIds = [];
-    pendingTextParts = [];
   }
-
-  for (const block of blocks) {
-    if (block.imageRelationshipIds.length > 0) {
-      if (pendingImageRelationshipIds.length > 0 && pendingTextParts.length > 0) {
-        flushPending();
-      }
-
-      pendingImageRelationshipIds.push(...block.imageRelationshipIds);
-    }
-
-    if (block.text && pendingImageRelationshipIds.length > 0) {
-      pendingTextParts.push(block.text);
-    }
-  }
-
-  flushPending();
 
   return pairs;
 }
 
-function createEmptyPage(): WordDocumentPage {
-  return {
-    imageRelationshipIds: [],
-    textParts: [],
-  };
+function shouldUseAfterImagePrompt(runs: readonly WordDocumentFlowRun[]): boolean {
+  let afterCount = 0;
+  let beforeCount = 0;
+  let afterLength = 0;
+  let beforeLength = 0;
+
+  for (let index = 0; index < runs.length; index += 1) {
+    if (runs[index]?.kind !== "images") {
+      continue;
+    }
+
+    const previous = runs[index - 1];
+    const next = runs[index + 1];
+    if (previous?.kind === "text") {
+      beforeCount += 1;
+      beforeLength += previous.text.text.length;
+    }
+    if (next?.kind === "text") {
+      afterCount += 1;
+      afterLength += next.text.text.length;
+    }
+  }
+
+  if (afterCount !== beforeCount) {
+    return afterCount > beforeCount;
+  }
+
+  if (afterLength !== beforeLength) {
+    return afterLength > beforeLength;
+  }
+
+  return runs[0]?.kind === "images";
 }
 
-function hasPageContent(page: WordDocumentPage): boolean {
-  return page.imageRelationshipIds.length > 0 || page.textParts.some((text) => text.trim());
+function createWordDocumentFlowTokens(blocks: readonly WordDocumentBlock[]): WordDocumentFlowToken[] {
+  const tokens: WordDocumentFlowToken[] = [];
+  let pageIndex = 0;
+
+  for (const block of blocks) {
+    if (block.pageBreakBefore) {
+      pageIndex += 1;
+    }
+
+    const content = block.content.length > 0 ? block.content : createFallbackBlockContent(block);
+    for (const part of content) {
+      if (part.kind === "image") {
+        tokens.push({ kind: "image", imageRelationshipId: part.imageRelationshipId, pageIndex });
+      } else if (part.text) {
+        tokens.push({ kind: "text", pageIndex, text: part.text });
+      }
+    }
+
+    if (block.pageBreakAfter) {
+      pageIndex += 1;
+    }
+  }
+
+  return tokens;
+}
+
+function createFallbackBlockContent(block: WordDocumentBlock): WordDocumentBlockContent[] {
+  return [
+    ...block.imageRelationshipIds.map((imageRelationshipId) => ({
+      kind: "image" as const,
+      imageRelationshipId,
+    })),
+    ...(block.text ? [{ kind: "text" as const, text: block.text }] : []),
+  ];
+}
+
+function createWordDocumentFlowRuns(tokens: readonly WordDocumentFlowToken[]): WordDocumentFlowRun[] {
+  const runs: WordDocumentFlowRun[] = [];
+
+  for (const token of tokens) {
+    const previous = runs[runs.length - 1];
+    if (token.kind === "image") {
+      if (previous?.kind === "images") {
+        previous.images.push(token);
+      } else {
+        runs.push({ kind: "images", images: [token] });
+      }
+      continue;
+    }
+
+    // Keep adjacent paragraph text as separate prompt candidates. Combining them
+    // would recreate the bug where two prompts on one page are stored together.
+    runs.push({ kind: "text", text: token });
+  }
+
+  return runs;
 }
 
 function normalizeWordRelationshipTarget(target: string): string {
@@ -375,4 +338,8 @@ function lastIndexOfPattern(value: string, pattern: RegExp): number {
   }
 
   return lastIndex;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }

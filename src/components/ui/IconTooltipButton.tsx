@@ -15,6 +15,7 @@ type IconTooltipButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "ari
   size?: IconTooltipButtonSize;
   tooltipAlign?: TooltipAlign;
   tooltipPlacement?: TooltipPlacement;
+  tooltipFlip?: boolean;
   variant?: IconTooltipButtonVariant;
 };
 
@@ -55,15 +56,18 @@ function computeTooltipStyle(
   buttonRect: DOMRect,
   placement: TooltipPlacement,
   align: TooltipAlign,
+  allowFlip = true,
 ): TooltipStyle {
   const viewportWidth = window.innerWidth;
   const viewportHeight = window.innerHeight;
 
   let actualPlacement = placement;
-  if (placement === "above" && buttonRect.top - tooltipGap < viewportPadding) {
-    actualPlacement = "below";
-  } else if (placement === "below" && buttonRect.bottom + tooltipGap > viewportHeight - viewportPadding) {
-    actualPlacement = "above";
+  if (allowFlip) {
+    if (placement === "above" && buttonRect.top - tooltipGap < viewportPadding) {
+      actualPlacement = "below";
+    } else if (placement === "below" && buttonRect.bottom + tooltipGap > viewportHeight - viewportPadding) {
+      actualPlacement = "above";
+    }
   }
 
   let top: number;
@@ -116,6 +120,7 @@ export function IconTooltipButton({
   size = "md",
   title: _title,
   tooltipAlign = "center",
+  tooltipFlip = true,
   tooltipPlacement = "below",
   type = "button",
   variant = "panel",
@@ -131,8 +136,8 @@ export function IconTooltipButton({
       return;
     }
     const buttonRect = button.getBoundingClientRect();
-    setStyle(computeTooltipStyle(buttonRect, tooltipPlacement, tooltipAlign));
-  }, [tooltipAlign, tooltipPlacement]);
+    setStyle(computeTooltipStyle(buttonRect, tooltipPlacement, tooltipAlign, tooltipFlip));
+  }, [tooltipAlign, tooltipFlip, tooltipPlacement]);
 
   useLayoutEffect(() => {
     if (!isOpen) {
@@ -182,7 +187,7 @@ export function IconTooltipButton({
                 top: `${style.top}px`,
                 left: `${style.left}px`,
                 transform: style.transform,
-                zIndex: 9999,
+                zIndex: 2147483647,
               }}
               className="icon-tooltip-button__bubble icon-tooltip-button__bubble--portal"
             >

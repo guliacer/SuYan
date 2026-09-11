@@ -7,6 +7,7 @@ import type { DeduplicateGroup, DeduplicateResult } from "@/types/suyanApi";
 import type { PromptCardData } from "../../utils/promptFilters";
 import { NsfwImage } from "../NsfwImage";
 import { useLibraryStore } from "../../store/useLibraryStore";
+import { useLocale } from "@/components/LocaleProvider";
 
 type DeduplicatePanelProps = {
   items: PromptCardData[];
@@ -17,6 +18,7 @@ type DeduplicatePanelProps = {
 type ScanStatus = "idle" | "scanning" | "results" | "error";
 
 export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: DeduplicatePanelProps) {
+  const { t } = useLocale();
   const deduplicateScan = useLibraryStore((s) => s.deduplicateScan);
   const [status, setStatus] = useState<ScanStatus>("idle");
   const [result, setResult] = useState<DeduplicateResult | null>(null);
@@ -61,7 +63,7 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
       setKeepSelections(initial);
       setStatus("results");
     } else {
-      setErrorMessage("去重扫描失败，请重试。");
+      setErrorMessage(t("去重扫描失败，请重试。"));
       setStatus("error");
     }
   }
@@ -85,7 +87,7 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
       setResult(null);
       setKeepSelections({});
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : "删除重复项失败，请重试。");
+      setErrorMessage(err instanceof Error ? err.message : t("删除重复项失败，请重试。"));
       setStatus("error");
     } finally {
       setIsDeleting(false);
@@ -97,9 +99,9 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <Button icon={<CopyCheck size={16} />} variant="primary" onClick={() => void handleScan()}>
-            开始扫描
+            {t("开始扫描")}
           </Button>
-          <p className="text-sm text-muted">扫描重复图片，默认保留每组最大文件。</p>
+          {null}
         </div>
         {status === "error" ? <p className="text-sm text-danger">{errorMessage}</p> : null}
       </div>
@@ -110,7 +112,7 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
     return (
       <div className="flex items-center gap-3 text-sm text-muted">
         <LoaderCircle className="size-4 animate-spin" />
-        正在扫描重复文件…
+        {t("正在扫描重复文件…")}
       </div>
     );
   }
@@ -121,7 +123,7 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
     return (
       <div className="flex items-center gap-3 text-sm text-muted">
         <CopyCheck className="size-4 text-primary" />
-        未发现重复图片，素材库很干净。
+        {t("未发现重复图片，素材库很干净。")}
       </div>
     );
   }
@@ -145,27 +147,27 @@ export function DeduplicatePanel({ items, blurNsfwImages, onDelete }: Deduplicat
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 bg-panel px-4 py-3">
         <p className="text-sm text-muted">
-          共 <span className="font-semibold text-foreground">{result.groups.length}</span> 组重复，浪费{" "}
-          <span className="font-semibold text-foreground">{formatBytes(result.wastedBytes)}</span> 空间
+          {t("共 {groups} 组重复，浪费 {bytes} 空间", { groups: result.groups.length, bytes: formatBytes(result.wastedBytes) })}
         </p>
         <div className="relative">
           <Button
+            className="min-h-8 px-2.5 py-1.5 text-xs"
             disabled={pendingDeleteCount === 0 || isDeleting}
-            icon={<Trash2 size={16} />}
+            icon={<Trash2 size={14} />}
             variant="danger"
             onClick={() => setIsDeleteConfirmOpen(true)}
           >
-            删除重复项（{pendingDeleteCount}）
+            {t("删除重复项（{count}）", { count: pendingDeleteCount })}
           </Button>
           {isDeleteConfirmOpen ? (
             <ConfirmBubble
               className="right-0 top-full mt-3"
-              confirmLabel="确认删除"
-              description={`将删除 ${pendingDeleteCount} 个重复文件，保留所选项，无法撤销。`}
+              confirmLabel={t("确认删除")}
+              description={t("将删除 {count} 个重复文件，保留所选项，无法撤销。", { count: pendingDeleteCount })}
               icon={<Trash2 size={15} />}
               isBusy={isDeleting}
               placement="below"
-              title="删除重复项？"
+              title={t("删除重复项？")}
               onCancel={() => setIsDeleteConfirmOpen(false)}
               onConfirm={() => void handleDelete()}
             />
@@ -193,15 +195,16 @@ function DeduplicateGroupCard({
   keepSelections,
   onSelectKeep,
 }: DeduplicateGroupCardProps) {
+  const { t } = useLocale();
   const keepId = keepSelections[group.hash];
   const shortHash = group.hash.length > 8 ? `${group.hash.slice(0, 8)}…` : group.hash;
 
   return (
     <div className="rounded-md border border-border/70 bg-panel p-3">
       <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
-        <span className="font-semibold text-foreground">第 {index + 1} 组</span>
-        <span>哈希 {shortHash}</span>
-        <span>· {group.items.length} 个文件</span>
+        <span className="font-semibold text-foreground">{t("第 {index} 组", { index: index + 1 })}</span>
+        <span>{t("哈希")} {shortHash}</span>
+        <span>· {t("{count} files", { count: group.items.length })}</span>
       </div>
       <div className="grid gap-2">
         {group.items.map((entry) => {
@@ -226,7 +229,7 @@ function DeduplicateGroupCard({
               <div className="size-12 shrink-0 overflow-hidden rounded-md border border-border/70 bg-background">
                 {matched ? (
                   <NsfwImage
-                    alt={entry.title || "提示词图像"}
+                    alt={entry.title || t("提示词图像")}
                     blurNsfwImages={blurNsfwImages}
                     className="h-full w-full"
                     image={matched}
@@ -241,14 +244,14 @@ function DeduplicateGroupCard({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">{entry.title || "未命名提示词"}</p>
+                <p className="truncate text-sm font-medium text-foreground">{entry.title || t("未命名提示词")}</p>
                 <p className="mt-0.5 text-xs text-muted">
                   {formatBytes(entry.fileSize)} · {formatDate(entry.createdAt)}
                 </p>
               </div>
               {isKept ? (
                 <span className="rounded-md border border-primary bg-primary-soft px-2 py-0.5 text-xs font-medium text-foreground">
-                  保留
+                  {t("保留")}
                 </span>
               ) : null}
             </label>

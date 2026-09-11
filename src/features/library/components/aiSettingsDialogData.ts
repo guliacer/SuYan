@@ -11,6 +11,7 @@ import type {
   SaveAiProviderProfilePayload,
   SaveAiProviderSettingsPayload,
 } from "../types/ai";
+import { normalizeAiRecognitionSourcePreferences } from "../types/ai";
 import { aiFeatureActionMeta } from "../types/ai";
 import { normalizeActionPreferencesDraft } from "../utils/aiSettingsDraft";
 import { normalizeAiBaseUrl } from "../utils/aiBaseUrl";
@@ -115,8 +116,19 @@ export function resolveAiSettingsActionEntry(action: AiFeatureAction): AiSetting
   return aiSettingsActionEntries.find((entry) => isAiSettingsActionEntrySelected(entry, action)) ?? aiSettingsActionEntries[0]!;
 }
 
-export function resolveAiSettingsEntryAction(entry: AiSettingsActionEntry, selectedAction: AiFeatureAction): AiFeatureAction {
-  return isAiSettingsActionEntrySelected(entry, selectedAction) ? selectedAction : entry.actions[0];
+export function resolveAiSettingsEntryAction(
+  entry: AiSettingsActionEntry,
+  selectedAction: AiFeatureAction | null,
+  recognitionSourcePreferences: AiRecognitionSourcePreferences = {},
+): AiFeatureAction {
+  // Keep an explicitly opened source while editing; entering another group uses its own saved default.
+  if (selectedAction && isAiSettingsActionEntrySelected(entry, selectedAction)) {
+    return selectedAction;
+  }
+  return entry.actions.find((action) => {
+    const kind = getAiActionRecognitionKind(action);
+    return kind !== null && getAiActionRecognitionSource(action) === (recognitionSourcePreferences[kind] ?? "prompt");
+  }) ?? entry.actions[0];
 }
 
 export function isAiSettingsActionEntrySelected(entry: AiSettingsActionEntry, action: AiFeatureAction): boolean {
@@ -179,14 +191,19 @@ export function buildPayload({
   actionOrder,
   activeProfileId,
   profiles,
+  recognitionSourcePreferences,
 }: {
   actionPreferences: Partial<Record<AiFeatureAction, AiActionPreference>>;
   actionOrder?: readonly string[];
   activeProfileId: string;
   profiles: readonly AiProviderProfileDraft[];
+  recognitionSourcePreferences?: AiRecognitionSourcePreferences;
 }): SaveAiProviderSettingsPayload {
   return {
     ...(actionOrder?.length ? { actionOrder: [...actionOrder] } : {}),
+    ...(recognitionSourcePreferences
+      ? { recognitionSourcePreferences: normalizeAiRecognitionSourcePreferences(recognitionSourcePreferences) }
+      : {}),
     actionPreferences: normalizeActionPreferencesDraft(actionPreferences, profiles, activeProfileId),
     activeProfileId,
     profiles: profiles.map(toSaveProfilePayload),
@@ -449,7 +466,7 @@ export function normalizeModelDraft(input: unknown): AiProviderModelSettings | n
 export function normalizeCapabilities(input: unknown): AiProviderModelCapability[] {
   const capabilities = Array.isArray(input)
     ? input.filter((capability): capability is AiProviderModelCapability =>
-        capability === "text" || capability === "vision" || capability === "image-generation",
+        capability === "text" || capability === "vision" || capability === "image-generation" || capability === "video-generation",
       )
     : [];
 

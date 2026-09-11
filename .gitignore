@@ -44,6 +44,7 @@ Desktop.ini
 # Local tooling / AI agent runtime
 .agents/
 .trae/
+.codegraph/
 .codex/backups/
 .codex/reverse-pixcall/
 .codex/config.toml
@@ -59,6 +60,11 @@ Desktop.ini
 *.pfx
 secrets/
 private/
+.secrets/
+
+# The desktop OIDC client metadata is public by design; never put a secret here.
+!config/guli-identity.public.env
+!config/guli-identity.public.env.example
 
 # Runtime local settings / user data - never commit personal library or credentials
 /library.json
@@ -71,8 +77,19 @@ private/
 **/view-settings.json
 **/window-state.json
 **/acceleration-settings.json
+**/file-dialog-settings.json
 **/.default-library-seeded
 **/.startup-gallery-seeded
+/recovery-backups/
+/output/
+/.playwright-cli/
+/.freebuff/
+/.workbuddy/
+/.omo/
+**/account.json
+**/session.json
+**/storageState*.json
+**/*.har
 # Generated icons
 build/icon.ico
 build/_exe-icon-probe*.png
@@ -84,3 +101,7 @@ tools/go-file-helper/bin/*
 # Rust Core sidecar build artifacts
 native/suyan-core/target/
 native/suyan-core/bin/
+
+# Account API reference backend (local dev db + build output)
+account-api/dist/
+account-api/.data/

@@ -11,7 +11,28 @@ export type GenerationModelPreferences = {
   hiddenGenerationModels?: readonly string[];
 };
 
+export type ConfiguredGenerationModel = {
+  id: string;
+  label?: string | null;
+  capabilities?: readonly string[];
+};
+
 export const generationModelEntries: GenerationModelEntry[] = [
+  {
+    label: "Agnes Video v2.0",
+    kind: "video",
+    aliases: ["Agnes Video v2.0", "agnes-video-v2.0", "Agnes Video 2.0"],
+  },
+  {
+    label: "Agnes Video 2.5",
+    kind: "video",
+    aliases: ["Agnes Video 2.5", "agnes-video-2.5"],
+  },
+  {
+    label: "Agnes Video 2.5 Flash",
+    kind: "video",
+    aliases: ["Agnes Video 2.5 Flash", "agnes-video-2.5-flash"],
+  },
   {
     label: "GPT Image 2",
     kind: "image",
@@ -343,6 +364,25 @@ export function getGenerationModelOptions(preferences: GenerationModelPreference
   return orderedOptions.filter((option) => !hiddenModelKeys.has(normalizeModelNeedle(option)));
 }
 
+export function getConfiguredGenerationModelOptions(
+  models: readonly ConfiguredGenerationModel[],
+  preferences: GenerationModelPreferences = {},
+): string[] {
+  const configured = uniqueGenerationModelLabels(
+    models
+      .filter((model) =>
+        (model.capabilities ?? []).some(
+          (capability) => capability === "image-generation" || capability === "video-generation",
+        ),
+      )
+      .map((model) => model.id),
+  );
+  const orderedOptions = orderGenerationModelLabels(configured, preferences.generationModelOrder ?? []);
+  const hiddenModelKeys = new Set((preferences.hiddenGenerationModels ?? []).map(normalizeModelNeedle));
+
+  return orderedOptions.filter((option) => !hiddenModelKeys.has(normalizeModelNeedle(option)));
+}
+
 export function moveGenerationModelOption(
   currentOrder: readonly string[],
   sourceLabel: string,
@@ -469,6 +509,11 @@ export function resolveGenerationModelLabel(input: {
   title?: string | null;
 }): string | null {
   const generationMethod = input.generationMethod?.trim() ?? "";
+
+  if (generationMethod && !isGenericGenerationModelLabel(generationMethod)) {
+    return generationMethod;
+  }
+
   const generationMethodMatch = matchGenerationModelLabel(generationMethod);
 
   if (generationMethodMatch) {

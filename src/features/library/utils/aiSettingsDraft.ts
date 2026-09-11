@@ -1,6 +1,7 @@
 import type {
   AiActionPreference,
   AiFeatureAction,
+  AiModelSelection,
   AiProviderModelSettings,
   AiRecognitionSourcePreferences,
   AiRulePreset,
@@ -30,10 +31,7 @@ export type AiActionProfileDraft = {
 export const nsfwAiAction: AiFeatureAction = "image-safety";
 export const aiSettingsGeneralActions = aiFeatureActions.filter((action) => action !== nsfwAiAction);
 
-export type AiActionModelSelection = {
-  profileId: string;
-  modelId: string;
-};
+export type AiActionModelSelection = AiModelSelection;
 
 /**
  * Apply the quick-switch provider/model selection to the persistent action preference.
@@ -57,15 +55,16 @@ export function updateAiActionModelPreference(
     return null;
   }
 
+  const nextPreference = { ...settings.actionPreferences[action] };
+  delete nextPreference.source;
+  nextPreference.profileId = profile.id;
+  nextPreference.modelId = model.id;
+
   return {
     ...settings,
     actionPreferences: {
       ...settings.actionPreferences,
-      [action]: {
-        ...settings.actionPreferences[action],
-        profileId: profile.id,
-        modelId: model.id,
-      },
+      [action]: nextPreference,
     },
   };
 }
@@ -109,11 +108,19 @@ export function normalizeActionPreferenceDraft(
   action: AiFeatureAction,
 ): AiActionPreference {
   const meta = aiFeatureActionMeta[action];
-  const fallbackProfile = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0];
+
+  const fallbackProfile =
+    profiles.find(
+      (profile) =>
+        profile.id === activeProfileId &&
+        profile.models.some((model) => model.capabilities.includes(meta.capability)),
+    ) ?? profiles.find((profile) => profile.models.some((model) => model.capabilities.includes(meta.capability))) ?? profiles[0];
   const preferredProfile = preference?.profileId
     ? profiles.find((profile) => profile.id === preference.profileId)
     : null;
-  const profile = preferredProfile ?? fallbackProfile;
+  const profile = preferredProfile?.models.some((model) => model.capabilities.includes(meta.capability))
+    ? preferredProfile
+    : fallbackProfile;
   const compatibleModels = profile?.models.filter((model) => model.capabilities.includes(meta.capability)) ?? [];
   const preferredModel = preference?.modelId
     ? compatibleModels.find((model) => model.id === preference.modelId)

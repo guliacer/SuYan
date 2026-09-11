@@ -1,10 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ButtonSize = "md" | "sm";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   icon?: ReactNode;
   variant?: ButtonVariant;
+  size?: ButtonSize;
   /**
    * Maximum text width before truncation kicks in. Defaults to "16rem" so a
    * single button never dominates a button row. Pass `false` to remove the
@@ -21,9 +23,9 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 const variants: Record<ButtonVariant, string> = {
-  primary: "border-primary bg-primary text-primary-foreground hover:bg-primary-strong",
-  secondary: "border-border bg-panel text-foreground hover:bg-background",
-  ghost: "border-transparent bg-transparent text-foreground hover:bg-panel",
+  primary: "border-secondary bg-secondary text-secondary-foreground hover:bg-secondary-strong",
+  secondary: "border-secondary-border bg-secondary-soft text-secondary-ink hover:bg-secondary/20",
+  ghost: "border-transparent bg-transparent text-foreground hover:bg-secondary-soft hover:text-secondary-ink",
   danger: "border-danger bg-danger text-danger-foreground hover:bg-danger-strong",
 };
 
@@ -32,6 +34,7 @@ export function Button({
   icon,
   maxWidth = "16rem",
   multiline = false,
+  size = "md",
   title,
   variant = "secondary",
   className = "",
@@ -43,7 +46,7 @@ export function Button({
 
   return (
     <button
-      className={`inline-flex min-h-10 max-w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/35 disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${className}`}
+      className={`inline-flex max-w-full items-center justify-center gap-2 border font-medium leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/35 disabled:cursor-not-allowed disabled:opacity-50 ${size === "sm" ? "min-h-8 rounded-md px-2.5 py-1.5 text-xs" : "min-h-10 rounded-xl px-3 py-2 text-sm"} ${variants[variant]} ${className}`}
       style={maxWidth ? { maxWidth } : undefined}
       title={resolvedTitle}
       type={type}

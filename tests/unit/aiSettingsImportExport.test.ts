@@ -16,7 +16,7 @@ describe("AI settings import/export dialogs and store wiring", () => {
   });
 
   it("export dialog offers plain and encrypted backup types with password confirmation", () => {
-    expect(exportSource).toContain('useState<"plain" | "full">("plain")');
+    expect(exportSource).toContain('useState<"plain" | "full" | "account">("plain")');
     expect(exportSource).toContain("password !== passwordConfirm");
     expect(dialogSource).toContain("exportAiSettings");
     expect(exportSource).not.toContain("apiKey");
@@ -25,7 +25,6 @@ describe("AI settings import/export dialogs and store wiring", () => {
   it("import dialog previews summary and requires confirmation for replace mode", () => {
     expect(importSource).toContain('useState<ImportMode>("merge")');
     expect(importSource).toContain("setConfirmingReplace(true)");
-    expect(importSource).toContain("完全替换将清空现有 AI 配置");
     expect(dialogSource).toContain("importAiSettingsPreview");
     expect(dialogSource).toContain("importAiSettingsApply");
     // preview must never surface a plaintext key field

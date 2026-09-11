@@ -1,6 +1,8 @@
 import { Upload } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 
 export function ImageDropOverlay() {
+  const { t } = useLocale();
   return (
     <div
       aria-hidden="true"
@@ -10,13 +12,7 @@ export function ImageDropOverlay() {
         <span className="flex size-14 items-center justify-center rounded-full bg-primary-soft text-primary">
           <Upload size={26} />
         </span>
-        <p className="text-base font-semibold text-foreground">松开鼠标即可导入图片</p>
-        <p className="text-sm text-muted">支持多张同时拖入</p>
-        <ul className="mt-1 space-y-1 text-left text-xs leading-5 text-muted">
-          <li>· 自动读取每张图内嵌提示词</li>
-          <li>· 内容相同的提示词归为同一组</li>
-          <li>· 不同提示词拆成不同提示词组</li>
-        </ul>
+        <p className="text-base font-semibold text-foreground">{t("松开鼠标即可导入图片")}</p>
       </div>
     </div>
   );

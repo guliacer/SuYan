@@ -1,4 +1,4 @@
-import { safeStorage } from "electron";
+import { app, safeStorage } from "electron";
 import fs from "node:fs/promises";
 import type {
   AiActionPreference,
@@ -12,6 +12,7 @@ import type {
 } from "../../../src/features/library/types/ai";
 import { aiFeatureActions } from "../../../src/features/library/types/ai";
 import { AppError } from "../ipc/errors";
+import { logger } from "../appLogger";
 import { getAiSettingsPath, getLibraryDataDir } from "../library/libraryPaths";
 import {
   type AiProviderSettingsCollection,
@@ -47,8 +48,18 @@ type AiSettingsProfileFile = {
   apiKeyEncrypted?: string;
 };
 
+let aiSettingsWriteChain: Promise<void> = Promise.resolve();
+
 export async function readPublicAiProviderSettings(): Promise<PublicAiProviderSettings> {
-  return toPublicAiProviderSettings(await readPrivateAiProviderSettings());
+  const settings = toPublicAiProviderSettings(await readPrivateAiProviderSettings());
+
+  logger.info("ai", "ai-settings:read", {
+    activeProfileId: settings.activeProfileId,
+    actionPreferenceCount: Object.keys(settings.actionPreferences).length,
+    profileCount: settings.profiles.length,
+  });
+
+  return settings;
 }
 
 export async function readPrivateAiProviderSettings(): Promise<AiProviderSettingsCollection> {
@@ -86,8 +97,24 @@ export async function readPrivateAiProviderProfileById(profileId: string): Promi
   return profile;
 }
 
-export async function writeAiProviderSettings(
+export function writeAiProviderSettings(
   payload: SaveAiProviderSettingsPayload,
+  beforeCommit?: () => void,
+): Promise<PublicAiProviderSettings> {
+  // Serialize read/merge/write cycles. Without this queue, two rapid model
+  // selections can both read the same old file and the later rename can erase
+  // the preference written by the first request.
+  const task = aiSettingsWriteChain.then(() => writeAiProviderSettingsNow(payload, beforeCommit));
+  aiSettingsWriteChain = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+async function writeAiProviderSettingsNow(
+  payload: SaveAiProviderSettingsPayload,
+  beforeCommit?: () => void,
 ): Promise<PublicAiProviderSettings> {
   await fs.mkdir(getLibraryDataDir(), { recursive: true });
 
@@ -100,9 +127,17 @@ export async function writeAiProviderSettings(
   const tempPath = `${getAiSettingsPath()}.tmp`;
 
   await fs.writeFile(tempPath, JSON.stringify(toSettingsFile(nextSettings), null, 2), "utf8");
+  try { beforeCommit?.(); } catch (error) { await fs.rm(tempPath, { force: true }); throw error; }
   await fs.rename(tempPath, getAiSettingsPath());
 
-  return toPublicAiProviderSettings(nextSettings);
+  const publicSettings = toPublicAiProviderSettings(nextSettings);
+  logger.info("ai", "ai-settings:write-persisted", {
+    activeProfileId: publicSettings.activeProfileId,
+    actionPreferenceCount: Object.keys(publicSettings.actionPreferences).length,
+    profileCount: publicSettings.profiles.length,
+  });
+
+  return publicSettings;
 }
 
 export async function resolveAiProviderSettingsForPayload(
@@ -141,6 +176,10 @@ function encryptApiKey(apiKey: string): string {
 
   // Development / restricted environments: still persist the key so API settings
   // remain usable. Packaged GitHub releases never ship this file (empty-shell).
+  if (app?.isPackaged) {
+    throw new AppError("AI_SETTINGS_ENCRYPTION_UNAVAILABLE", "系统加密不可用，无法安全保存 API Key。请检查系统账户凭据后重试。");
+  }
+
   return encodeLocalDevApiKey(value);
 }
 
@@ -243,6 +282,7 @@ function isActionPreferences(input: unknown): input is Partial<Record<AiFeatureA
     ([action, preference]) =>
       aiFeatureActions.includes(action as AiFeatureAction) &&
       isRecord(preference) &&
+      (typeof preference.source === "undefined" || preference.source === "remote" || preference.source === "local") &&
       (typeof preference.profileId === "undefined" || typeof preference.profileId === "string") &&
       (typeof preference.modelId === "undefined" || typeof preference.modelId === "string") &&
       (typeof preference.rulePresetIds === "undefined" ||
@@ -288,7 +328,7 @@ function isModelList(input: unknown): input is AiProviderModelSettings[] {
         Array.isArray(model.capabilities) &&
         model.capabilities.every(
           (capability) =>
-            capability === "text" || capability === "vision" || capability === "image-generation",
+            capability === "text" || capability === "vision" || capability === "image-generation" || capability === "video-generation",
         ),
     )
   );

@@ -10,6 +10,8 @@ import type {
 import { AppError } from "../ipc/errors";
 import { logger } from "../appLogger";
 import { detectGeneratedImageExtension } from "../library/generatedImageData";
+import { constrainWindowContentBounds } from "../window/windowContentBounds";
+import { normalizeExternalUrl } from "../app/externalUrlPolicy";
 
 const doubaoCreateImageUrl = "https://www.doubao.com/chat/create-image";
 const doubaoPartition = "persist:suyan-doubao";
@@ -102,7 +104,11 @@ export async function refreshDoubaoWebCanvasAuth(ownerWindow: BrowserWindow): Pr
 
 export function setDoubaoWebCanvasBounds(ownerWindow: BrowserWindow, bounds: DoubaoWebCanvasBounds): { updated: true } {
   const view = ensureView(ownerWindow);
-  const nextBounds = normalizeBounds(bounds);
+  const [contentWidth, contentHeight] = ownerWindow.getContentSize();
+  const nextBounds = constrainWindowContentBounds(
+    { width: contentWidth, height: contentHeight },
+    normalizeBounds(bounds),
+  );
   state.bounds = nextBounds;
   // 只在非屏外（即登录弹窗可见、view 显示在画布宿主）时实时定位；屏外时保留真实 bounds 供恢复用。
   if (!state.offscreen) {
@@ -250,7 +256,7 @@ function ensureView(ownerWindow: BrowserWindow): WebContentsView {
       void view.webContents.loadURL(url);
       return { action: "deny" };
     }
-    void shell.openExternal(url);
+    void openAllowedExternalUrl(url);
     return { action: "deny" };
   });
   view.webContents.on("will-navigate", (event, url) => {
@@ -258,7 +264,7 @@ function ensureView(ownerWindow: BrowserWindow): WebContentsView {
       return;
     }
     event.preventDefault();
-    void shell.openExternal(url);
+    void openAllowedExternalUrl(url);
   });
   view.webContents.on("render-process-gone", (_event, details) => {
     logger.warn("ai", "doubao-web:render-process-gone", { reason: details.reason });
@@ -750,6 +756,16 @@ function isAllowedDoubaoUrl(value: string): boolean {
     return allowedDoubaoHosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
   } catch {
     return false;
+  }
+}
+
+async function openAllowedExternalUrl(value: string): Promise<void> {
+  try {
+    await shell.openExternal(normalizeExternalUrl(value));
+  } catch (error) {
+    logger.warn("ai", "doubao-web:external-url-rejected", {
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

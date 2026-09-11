@@ -12,10 +12,13 @@ describe("moduleManagement", () => {
     const byId = Object.fromEntries(rows.map((row) => [row.definition.id, row]));
 
     expect(byId["core-library"]?.canDisable).toBe(false);
+    expect(byId["core-library"]?.canDelete).toBe(false);
     expect(byId["core-library"]?.canToggleEnabled).toBe(false);
     expect(byId["core-library"]?.effectivelyEnabled).toBe(true);
 
     expect(byId["video-runtime"]?.installed).toBe(false);
+    expect(byId["video-runtime"]?.canDelete).toBe(true);
+    expect(byId["video-runtime"]?.canRestore).toBe(false);
     expect(byId["video-runtime"]?.canToggleEnabled).toBe(false);
     expect(byId["video-runtime"]?.effectivelyEnabled).toBe(false);
 
@@ -23,7 +26,8 @@ describe("moduleManagement", () => {
     expect(byId["video-compression"]?.rawEnabled).toBe(true);
     expect(byId["video-compression"]?.effectivelyEnabled).toBe(false);
     expect(byId["video-compression"]?.blockedByDependencies).toBe(true);
-    expect(byId["video-compression"]?.dependencyLabels).toContain("视频运行时");
+    expect(byId["video-compression"]?.dependencyLabels).toContain("视频依赖");
+    expect(byId["video-runtime"]?.dependentLabels).toContain("视频压缩");
   });
 
   it("marks video-compression available after runtime is installed and enabled", () => {
@@ -45,7 +49,7 @@ describe("moduleManagement", () => {
 
     expect(groups.map((group) => group.category)).toEqual(["core", "prompt", "runtime", "batch"]);
     expect(groups.find((group) => group.category === "runtime")?.rows.map((row) => row.definition.id)).toEqual(
-      expect.arrayContaining(["video-runtime", "image-runtime"]),
+      expect.arrayContaining(["video-runtime", "image-runtime", "nsfw-runtime"]),
     );
   });
 
@@ -61,5 +65,22 @@ describe("moduleManagement", () => {
     expect(
       resolveVideoRuntimeStateAfterProbe({ installed: true, enabled: true }, false),
     ).toEqual({ installed: false, enabled: false });
+  });
+
+  it("marks removed optional built-ins as restorable without cascading deletion", () => {
+    const state = resolveBuiltinModuleState({
+      "image-runtime": { installed: false, enabled: false },
+      "image-compression": { installed: true, enabled: true },
+    });
+    const rows = buildModuleManagementRows(state);
+    const imageRuntime = rows.find((row) => row.definition.id === "image-runtime");
+    const imageCompression = rows.find((row) => row.definition.id === "image-compression");
+
+    expect(imageRuntime?.canDelete).toBe(true);
+    expect(imageRuntime?.canRestore).toBe(true);
+    expect(imageRuntime?.dependentLabels).toContain("图像压缩");
+    expect(imageCompression?.installed).toBe(true);
+    expect(imageCompression?.effectivelyEnabled).toBe(false);
+    expect(imageCompression?.blockedByDependencies).toBe(true);
   });
 });

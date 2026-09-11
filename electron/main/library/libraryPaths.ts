@@ -18,6 +18,48 @@ export function getCanvasReferenceImagesDir(): string {
   return path.join(getLibraryDataDir(), "canvas-references");
 }
 
+export function getPromptContentImagesDir(): string {
+  return path.join(getLibraryDataDir(), "prompt-images");
+}
+
+export function getPromptContentImagesTrashDir(): string {
+  return path.join(getPromptContentImagesDir(), ".trash");
+}
+
+export function getThemeBackgroundsDir(): string {
+  return path.join(getLibraryDataDir(), "theme-backgrounds");
+}
+
+export function getThemeBackgroundPath(imageFileName: string): string {
+  const safeFileName = path.basename(imageFileName);
+
+  if (safeFileName !== imageFileName || !safeFileName) {
+    throw new AppError("INVALID_IMAGE_FILE_NAME", "主题背景图片文件名不合法。");
+  }
+
+  return path.join(getThemeBackgroundsDir(), safeFileName);
+}
+
+export function getPromptContentImagePath(imageFileName: string): string {
+  const safeFileName = path.basename(imageFileName);
+
+  if (safeFileName !== imageFileName || !safeFileName) {
+    throw new AppError("INVALID_IMAGE_FILE_NAME", "灵感图片文件名不合法。");
+  }
+
+  return path.join(getPromptContentImagesDir(), safeFileName);
+}
+
+export function getPromptContentImageTrashPath(imageFileName: string): string {
+  const safeFileName = path.basename(imageFileName);
+
+  if (safeFileName !== imageFileName || !safeFileName) {
+    throw new AppError("INVALID_IMAGE_FILE_NAME", "灵感图片文件名不合法。");
+  }
+
+  return path.join(getPromptContentImagesTrashDir(), safeFileName);
+}
+
 export function getCanvasReferenceImagePath(imageFileName: string): string {
   const safeFileName = path.basename(imageFileName);
 
@@ -60,6 +102,14 @@ export function getLibraryPath(): string {
   return path.join(getLibraryDataDir(), "library.json");
 }
 
+export function getPromptsPath(): string {
+  return path.join(getLibraryDataDir(), "prompts.json");
+}
+
+export function getTodosPath(): string {
+  return path.join(getLibraryDataDir(), "todos.json");
+}
+
 export function getLibraryRootsPath(): string {
   return path.join(getLibraryDataDir(), "library-roots.json");
 }
@@ -82,6 +132,10 @@ export function getLexiconPathForKind(kind: "categories" | "tags"): string {
 
 export function getAiSettingsPath(): string {
   return path.join(getLibraryDataDir(), "ai-settings.json");
+}
+
+export function getAccountPath(): string {
+  return path.join(getLibraryDataDir(), "account.json");
 }
 
 export function getProxySettingsPath(): string {

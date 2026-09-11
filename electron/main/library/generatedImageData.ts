@@ -5,6 +5,11 @@ export type DecodedGeneratedImage = {
   extension: GeneratedImageExtension;
 };
 
+export type DecodedGeneratedMedia = {
+  buffer: Buffer;
+  extension: string;
+};
+
 /**
  * Decode an AI-generated image data URL and determine its format from the file
  * signature. The declared MIME type is deliberately not trusted because remote
@@ -25,6 +30,26 @@ export function decodeGeneratedImageDataUrl(dataUrl: string): DecodedGeneratedIm
   }
 
   return { buffer, extension };
+}
+
+/** Decode generated image/video data URLs using the declared media MIME. */
+export function decodeGeneratedMediaDataUrl(dataUrl: string): DecodedGeneratedMedia {
+  const match = /^data:([^;,]+);base64,([\s\S]+)$/i.exec(dataUrl.trim());
+  if (!match) {
+    throw new Error("生成媒体数据格式无效");
+  }
+  const mime = match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s+/g, ""), "base64");
+  if (buffer.length === 0) {
+    throw new Error("生成媒体内容为空");
+  }
+  if (mime.startsWith("video/")) {
+    if (mime.includes("webm")) return { buffer, extension: ".webm" };
+    if (mime.includes("quicktime") || mime.includes("mov")) return { buffer, extension: ".mov" };
+    return { buffer, extension: ".mp4" };
+  }
+  const image = decodeGeneratedImageDataUrl(dataUrl);
+  return image;
 }
 
 export function detectGeneratedImageExtension(buffer: Uint8Array): GeneratedImageExtension | null {

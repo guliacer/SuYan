@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, Cpu, LoaderCircle, RotateCcw, ShieldCheck, Zap } from "lucide-react";
+import { useLocale } from "@/components/LocaleProvider";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import {
@@ -68,6 +69,7 @@ export function PerformanceSettingsDialog({
   onClose,
   onNotify,
 }: PerformanceSettingsDialogProps) {
+  const { t } = useLocale();
   const [status, setStatus] = useState<AppAccelerationStatus | null>(null);
   const [draft, setDraft] = useState<AppAccelerationSettings>(defaultAppAccelerationSettings);
   const [isLoading, setIsLoading] = useState(true);
@@ -139,7 +141,7 @@ export function PerformanceSettingsDialog({
     }
 
     setIsSaving(true);
-    setFeedbackText("正在保存启动加速设置...");
+    setFeedbackText(t("正在保存启动加速设置..."));
     const result = await window.suyanApi.saveAccelerationSettings(nextDraft);
     setIsSaving(false);
 
@@ -152,14 +154,14 @@ export function PerformanceSettingsDialog({
     setDraft(result.data.settings);
 
     if (result.data.safeMode && shouldUseHardwareAcceleration(result.data.settings)) {
-      setFeedbackText("已保存；安全模式会继续关闭 GPU。");
+      setFeedbackText(t("已保存；安全模式会继续关闭 GPU。"));
       return;
     }
 
     setFeedbackText(
       result.data.restartRequired
-        ? "已保存，重启后生效。"
-        : "已保存，当前会话已是该模式。",
+         ? t("已保存，重启后生效。")
+         : t("已保存，当前会话已是该模式。"),
     );
   }
 
@@ -169,7 +171,7 @@ export function PerformanceSettingsDialog({
     }
 
     setIsSaving(true);
-    setFeedbackText("正在重新启用 GPU...");
+    setFeedbackText(t("正在重新启用 GPU..."));
     const result = await window.suyanApi.saveAccelerationSettings({
       ...draft,
       hardwareAccelerationMode: "gpu-experimental",
@@ -183,50 +185,45 @@ export function PerformanceSettingsDialog({
 
     setStatus(result.data);
     setDraft(result.data.settings);
-    setFeedbackText("已重新启用 GPU，重启软件后生效。");
+    setFeedbackText(t("已重新启用 GPU，重启软件后生效。"));
   }
 
   const body = (
-      <div className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
+      <div data-feature-guide="system-preferences-panel-performance" className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
         {isLoading ? (
           <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted">
             <LoaderCircle size={16} className="animate-spin" />
-            正在读取启动加速状态...
+            {t("正在读取启动加速状态...")}
           </div>
         ) : (
           <>
             <section className="grid gap-3 rounded-md border border-border bg-background p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">当前会话</p>
+                  <p className="text-sm font-semibold text-foreground">{t("当前会话")}</p>
                   <p className="mt-1 text-xs leading-5 text-muted">
-                    {status?.effectiveHardwareAcceleration ? "硬件加速已启用" : "硬件加速已关闭"}
+                    {status?.effectiveHardwareAcceleration ? t("硬件加速已启用") : t("硬件加速已关闭")}
                   </p>
                 </div>
                 <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-                  {getModeLabel(status?.settings.hardwareAccelerationMode ?? draft.hardwareAccelerationMode)}
+                  {t(getModeLabel(status?.settings.hardwareAccelerationMode ?? draft.hardwareAccelerationMode))}
                 </span>
               </div>
-
-              {status?.safeMode ? (
-                <p className="rounded-md border border-border bg-panel px-3 py-2 text-sm text-muted">
-                  安全模式运行中，GPU 会强制关闭。
-                </p>
-              ) : null}
 
               {status?.autoDisabledByCrash ? (
                 <div className="grid gap-2 rounded-md border border-primary bg-primary-soft px-3 py-2">
                   <p className="text-sm leading-6 text-foreground">
-                    GPU 多次崩溃，已降级为软件渲染。修复驱动后可重新启用。
+                    {t("GPU 多次崩溃，已降级为软件渲染。修复驱动后可重新启用。")}
                   </p>
                   <div>
                     <Button
+                      className="min-h-8 px-2.5 py-1.5 text-xs"
                       disabled={isActionBusy}
                       icon={<Zap size={14} />}
                       variant="secondary"
                       onClick={() => void handleReenableGpu()}
                     >
-                      重新启用 GPU
+                      {t("重新启用 GPU")}
                     </Button>
                   </div>
                 </div>
@@ -234,20 +231,17 @@ export function PerformanceSettingsDialog({
 
               {pendingRestart || status?.restartRequired ? (
                 <p className="rounded-md border border-primary bg-primary-soft px-3 py-2 text-sm text-foreground">
-                  重启后生效。
+                  {t("重启后生效。")}
                 </p>
               ) : null}
             </section>
 
             <section className="grid gap-3 rounded-md border border-border bg-background p-4">
               <div>
-                <p className="text-sm font-semibold text-foreground">加速模式</p>
-                <p className="mt-1 text-xs leading-5 text-muted">
-                  默认启用 GPU，让启动、滚动、动画和视频更流畅；异常时切回稳定。
-                </p>
+                <p className="text-sm font-semibold text-foreground">{t("加速模式")}</p>
               </div>
 
-              <div className="grid gap-2 min-[720px]:grid-cols-2" role="radiogroup" aria-label="选择启动加速模式">
+              <div className="grid gap-2 min-[720px]:grid-cols-2" role="radiogroup" aria-label={t("选择启动加速模式")}>
                 {modeOptions.map((option) => {
                   const selected = draft.hardwareAccelerationMode === option.value;
 
@@ -274,7 +268,7 @@ export function PerformanceSettingsDialog({
                           <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background">
                             {option.icon}
                           </span>
-                          <span className="truncate text-sm font-semibold">{option.label}</span>
+                          <span className="truncate text-sm font-semibold">{t(option.label)}</span>
                         </span>
                         <span
                           className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
@@ -284,7 +278,7 @@ export function PerformanceSettingsDialog({
                           {selected ? <Check size={12} /> : null}
                         </span>
                       </span>
-                      <span className="text-xs leading-5">{option.description}</span>
+                      <span className="text-xs leading-5">{t(option.description)}</span>
                     </button>
                   );
                 })}
@@ -293,9 +287,9 @@ export function PerformanceSettingsDialog({
 
             <section className="grid gap-3 rounded-md border border-border bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-foreground">GPU 功能状态</p>
+                <p className="text-sm font-semibold text-foreground">{t("GPU 功能状态")}</p>
                 <span className="rounded-full border border-border bg-panel px-3 py-1 text-xs font-medium text-foreground">
-                  当前会话
+                  {t("当前会话")}
                 </span>
               </div>
 
@@ -306,14 +300,14 @@ export function PerformanceSettingsDialog({
                       className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border bg-panel px-3 py-2"
                       key={row.key}
                     >
-                      <span className="truncate text-xs font-medium text-muted">{row.label}</span>
-                      <span className="shrink-0 text-xs font-semibold text-foreground">{formatGpuFeatureStatus(row.value)}</span>
+                      <span className="truncate text-xs font-medium text-muted">{t(row.label)}</span>
+                      <span className="shrink-0 text-xs font-semibold text-foreground">{t(formatGpuFeatureStatus(row.value))}</span>
                     </div>
                   ))}
                 </div>
               ) : (
                 <p className="rounded-md border border-border bg-panel px-3 py-2 text-sm text-muted">
-                  暂未读取到 GPU 功能状态。
+                  {t("暂未读取到 GPU 功能状态。")}
                 </p>
               )}
             </section>
@@ -321,9 +315,7 @@ export function PerformanceSettingsDialog({
             <section className="grid gap-2 rounded-md border border-border bg-background p-4">
               <div className="flex items-start gap-2">
                 <RotateCcw size={16} className="mt-0.5 shrink-0 text-muted" />
-                <p className="text-sm leading-6 text-muted">
-                  若实验模式出现空白，可用安全模式启动，或切回稳定后重启。
-                </p>
+                {null}
               </div>
             </section>
           </>
@@ -341,7 +333,7 @@ export function PerformanceSettingsDialog({
 
   return (
     <AppDialog
-      panelClassName="flex max-h-[92vh] w-full max-w-3xl flex-col"
+      panelClassName="flex max-h-full w-full max-w-3xl flex-col"
       titleId="performance-settings-title"
       onClose={onClose ?? (() => undefined)}
     >
@@ -352,9 +344,8 @@ export function PerformanceSettingsDialog({
           </span>
           <div className="min-w-0">
             <h2 className="text-lg font-semibold" id="performance-settings-title">
-              启动加速
+              {t("启动加速")}
             </h2>
-            <p className="mt-1 text-sm text-muted">重启后应用硬件加速设置</p>
           </div>
         </div>
         <DialogCloseButton onClick={() => onClose?.()} />
