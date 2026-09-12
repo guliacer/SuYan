@@ -159,19 +159,6 @@ Release artifacts must not include `data\`, `logs\`, API keys, account credentia
 
 Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pass. Once the Release exists, also run `pnpm check:release-notes:remote` to confirm that the Chinese / English description matches the remote body.
 
-### Guli Identity configuration
-
-The packaged desktop client only needs public OIDC client metadata; it never needs a `client_secret`. Use the ignored `private/guli-identity.env` for local development or packaging, or provide `config/guli-identity.public.env`:
-
-```env
-GULI_IDENTITY_ISSUER=https://auth.guliacer.dpdns.org
-GULI_IDENTITY_CLIENT_ID=your-public-client-id
-GULI_IDENTITY_REDIRECT_URI=suyan://oauth/callback
-GULI_IDENTITY_SCOPES=openid email profile offline_access
-```
-
-Register `suyan://oauth/callback` with the identity service. Discovery, authorization, token, userinfo, and JWKS endpoints must use HTTPS in production.
-
 ## Data and privacy
 
 - Managed materials live under `data\library\`; logs live under `logs\`. External materials keep only relative indexes under registered roots.

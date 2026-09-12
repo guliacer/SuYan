@@ -160,19 +160,6 @@ pnpm package:win:release
 
 推送或创建 GitHub Release 前，必须通过 `pnpm check:release-notes`；对应 Release 已存在时，再运行 `pnpm check:release-notes:remote`，确认中文 / English 描述与远程正文一致。
 
-### Guli Identity 配置
-
-正式安装包只需要公共 OIDC 客户端信息，不需要 `client_secret`。开发或打包前配置被 Git 忽略的 `private/guli-identity.env`，或使用 `config/guli-identity.public.env`：
-
-```env
-GULI_IDENTITY_ISSUER=https://auth.guliacer.dpdns.org
-GULI_IDENTITY_CLIENT_ID=你的公共客户端ID
-GULI_IDENTITY_REDIRECT_URI=suyan://oauth/callback
-GULI_IDENTITY_SCOPES=openid email profile offline_access
-```
-
-服务端需要登记回调地址 `suyan://oauth/callback`。生产环境的 Discovery、授权、令牌、用户信息和 JWKS 地址必须使用 HTTPS。
-
 ## 数据与隐私
 
 - 托管素材位于软件目录的 `data\library\`，日志位于 `logs\`；外链素材只保存已登记目录的相对索引，不复制或删除原文件。
