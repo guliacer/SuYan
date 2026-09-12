@@ -43,13 +43,11 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 <img src="./photo/readme/import-menu.png" alt="Import options" width="100%" />
 
-<img src="./photo/readme/batch-manager.png" alt="Batch manager" width="100%" />
-
 ### AI assistant
 
 - Configure providers, models, and rules independently for category recognition, tag recognition, prompt optimization, translation, image reverse prompting, and generation.
 - Analyze categories and tags from either the prompt or artwork. Model selectors use the provider's actual model IDs and remember each action's preferred model and analysis source.
-- Split prompts into parameter capsules, variables, and replaceable terms. Local rules constrain AI results so visual attributes are not treated as categories and unsupported tags are not invented.
+- Organize prompts by subject, scene, composition, lighting, and style. Local rules constrain AI results so visual attributes are not treated as categories and unsupported tags are not invented.
 - Use **Organize** beside AI tags to merge synonyms, group unorganized tags, classify entities, and correct wrong groups with preview, confirmation, and undo.
 - Export AI settings normally, with a password, or with account verification. Account-verified backups can only be imported after the same account is verified.
 
@@ -142,6 +140,7 @@ pnpm typecheck
 pnpm test
 pnpm check:secrets
 pnpm check:empty-shell
+pnpm check:release-notes
 ```
 
 Build the development Windows portable directory:
@@ -157,6 +156,8 @@ pnpm package:win:release
 ```
 
 Release artifacts must not include `data\`, `logs\`, API keys, account credentials, personal media, or private configuration. See [docs/Windows四版本打包.md](./docs/Windows四版本打包.md) for optional-component editions.
+
+Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pass. Once the Release exists, also run `pnpm check:release-notes:remote` to confirm that the Chinese / English description matches the remote body.
 
 ### Guli Identity configuration
 

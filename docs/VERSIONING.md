@@ -7,7 +7,8 @@
 | **0.1.0** | 第一个正式版（已冻结） | 标签 `v0.1.0`、分支 `release/0.1.0` | GitHub Release `v0.1.0` |
 | **0.2.10** | 第二个正式版（已锁定） | 标签 `v0.2.10`、`master` 历史提交点 | GitHub Release `v0.2.10` |
 | **0.3.6** | 当前正式版（已锁定） | 标签 `v0.3.6`、`master` 发布提交 | GitHub Release `v0.3.6` |
-| **0.3.7+** | 后续开发版本 | `master` 的 `package.json` | 新标签 / 新 GitHub Release |
+| **0.3.7** | 当前开发版本（未发布） | `master` 的 `package.json` | 尚未创建 Release |
+| **0.3.8+** | 后续开发版本 | `master` 的 `package.json` | 新标签 / 新 GitHub Release |
 
 ## 铁律
 

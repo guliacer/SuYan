@@ -44,13 +44,11 @@
 
 <img src="./photo/readme/import-menu.png" alt="导入方式" width="100%" />
 
-<img src="./photo/readme/batch-manager.png" alt="批量管理" width="100%" />
-
 ### AI 创作助手
 
 - 为分类识别、标签识别、提示词优化、翻译、图像反推和生图分别配置服务商、模型与规则。
 - 从提示词或效果图分析分类与标签；模型列表优先使用接口实际返回的模型名称，并记住每个操作的默认模型和分析来源。
-- 提示词分析会拆出参数胶囊、变量和可替换词条；AI 结果经过本地规则约束，避免把视觉属性误当分类，或生成缺乏依据的标签。
+- 提示词分析会按主体、场景、构图、光影和风格等维度整理内容；AI 结果经过本地规则约束，避免把视觉属性误当分类，或生成缺乏依据的标签。
 - 标签旁提供「归纳整理」，用于同义词统一、未分组标签归纳、实体分组和分组纠正；支持预览、确认和最近一次撤销。
 - AI 设置支持普通导出、密码加密导出和按账户验证的加密导出。账户验证包只能由同一账户验证后导入。
 
@@ -143,6 +141,7 @@ pnpm typecheck
 pnpm test
 pnpm check:secrets
 pnpm check:empty-shell
+pnpm check:release-notes
 ```
 
 开发阶段快速生成 Windows 便携目录：
@@ -158,6 +157,8 @@ pnpm package:win:release
 ```
 
 发布包不应包含 `data\`、`logs\`、API Key、账户凭据、个人素材或私密配置。四版本组件包的构建方式见 [docs/Windows四版本打包.md](./docs/Windows四版本打包.md)。
+
+推送或创建 GitHub Release 前，必须通过 `pnpm check:release-notes`；对应 Release 已存在时，再运行 `pnpm check:release-notes:remote`，确认中文 / English 描述与远程正文一致。
 
 ### Guli Identity 配置
 
