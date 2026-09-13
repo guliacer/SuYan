@@ -90,6 +90,29 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 - A local receiver listens on `127.0.0.1:9477` and accepts images, prompts, negative prompts, titles, and generation methods from ComfyUI.
 - ComfyUI PNG prompt / workflow metadata is parsed automatically and uses the same local import path.
+
+#### ComfyUI quick save
+
+Install and enable [ComfyUI-GuliNodes](https://github.com/guliacer/ComfyUI-GuliNodes). When an image finishes generating in ComfyUI, click the SuYan icon above the canvas to send the image and its associated prompt to SuYan for quick saving.
+
+Start SuYan before the first use and keep it running. After a successful send, the image is added to the SuYan library together with its prompt, negative prompt, title, and generation method; prompt / workflow metadata embedded in the ComfyUI PNG is parsed automatically as well.
+
+If sending fails, make sure SuYan is running, ComfyUI can access `127.0.0.1:9477`, and ComfyUI-GuliNodes is installed and enabled.
+
+<img src="./photo/readme/comfyui-quick-save.png" alt="Click the SuYan icon in ComfyUI to quick-save an image" width="100%" />
+
+<img src="./photo/readme/comfyui-saved-detail.png" alt="A ComfyUI image and prompt saved in SuYan" width="100%" />
+
+#### Generation completion notifications
+
+When you need to step away from your computer, use [TapRelay](https://github.com/guliacer/TapRelay/releases) to send generation-complete notifications to your phone. Download TapRelay, follow its setup instructions to connect your devices, then return to SuYan's creative canvas and turn on the notification button below the canvas before starting generation.
+
+When the generation task finishes, SuYan sends a completion notification through TapRelay to the connected phone. The notification includes the completion status and basic task details. Keep TapRelay available and make sure the connection between your phone and computer is working before use.
+
+<img src="./photo/readme/generation-notification-toggle.png" alt="Enable generation completion notifications in the SuYan canvas" width="100%" />
+
+<img src="./photo/readme/generation-notification-phone.jpg" alt="A generation completion notification received on a phone" width="100%" />
+
 - The web assistant provides a controlled web workspace and site directory for common creative websites.
 - Resource recommendations focus on maintained model, tool, prompt, and creative-resource links; expired entries are removed or updated.
 
@@ -113,7 +136,9 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 ### Use a release build
 
-Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.6`; the latest version is always shown on the Releases page.
+Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.7`; the latest version is always shown on the Releases page.
+
+`v0.3.7` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
 
 If GitHub downloads are slow, mirror downloads are also available:
 
@@ -168,15 +193,18 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ## Changelog
 
-### v0.3.6 (current release)
+### v0.3.7 (current release)
 
-Compared with the latest public `v0.2.10`, this release line adds:
+Building on the frozen `v0.3.6`, this release focuses on large-library backups, AI gateway compatibility, and dependable delivery:
 
-- Real Guli Identity browser authorization, email registration, Google / GitHub / Linux.do sign-in, device codes, and multiple linked methods.
-- Account profile confirmation and custom name / avatar, authorship, batch work association, and account-verified exports.
-- Ideas library, task calendar, work schedules, holiday lookup, and task exchange.
-- ComfyUI receiver, web assistant, local NSFW rating, optional signed components, localized UI, update notifications, and page-by-page guidance.
-- Canvas fitting and themed backgrounds, model-ID discovery, persistent per-action AI preferences, stricter category / tag organization, clipboard image fixes, thumbnail fallback, non-blocking export progress, folder memory, and release safety checks.
+- Large libraries are automatically split into capacity-based volumes. Multiple volumes can be imported together, with shared category, tag, and cover resources deduplicated.
+- Export reports phase progress in the background, keeps the UI responsive, and remembers the last import / export folder.
+- OpenAI-compatible endpoints now handle non-streaming, SSE, NDJSON, UTF-8 BOM, and common response envelopes, improving reverse prompting and AI analysis reliability.
+- Sanitized AI diagnostics make model, gateway, response-format, and download failures easier to investigate without recording keys or image content.
+- Added illustrated instructions for ComfyUI quick save and TapRelay generation-completion notifications.
+- Added four Windows release packages with SHA-256 checksums, verification metadata, and bilingual Release notes.
+
+The account, canvas, tag organization, responsive UI, localization, and onboarding work from `v0.3.6` remains included.
 
 ### v0.2.10
 

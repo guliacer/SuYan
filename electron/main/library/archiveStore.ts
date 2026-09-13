@@ -25,7 +25,8 @@ import { appendLibraryItems, readLibraryFile } from "./libraryStore";
 import { resolveMediaAbsolutePath } from "./mediaPathResolver";
 import { getImagePath, getImageThumbnailPath } from "./libraryPaths";
 import { toPortableArchiveItem } from "./archiveExportPolicy";
-import { readArchiveEntry, validateArchiveEntryBudget } from "./archiveBudget";
+import { archiveLimits, readArchiveEntry, validateArchiveEntryBudget } from "./archiveBudget";
+import { ARCHIVE_VOLUME_TARGET_BYTES, planArchiveVolumes, type SizedArchiveEntry } from "./archiveVolumePolicy";
 import { archiveKnowledgeImageNames, collectArchiveAnalyzedLibraries, readArchiveAnalyzedLibraries, remapArchiveKnowledgeImages, type ArchiveAnalyzedLibraries } from "./archiveKnowledge";
 import { appendArchiveWithKnowledge, archiveTaxonomy } from "./archiveKnowledgeStore";
 import { readLibraryViewSettings, withViewSettingsWriteLock } from "./viewSettingsStore";
@@ -46,6 +47,16 @@ type ArchiveResult = {
   authorName?: string;
   categoryCount?: number;
   tagCount?: number;
+  filePaths?: string[];
+  volumeCount?: number;
+};
+
+type ArchiveSourceEntry = { zipPath: string; sourcePath: string; size: number; itemId?: string };
+
+export type ArchiveVolumeInfo = {
+  id: string;
+  index: number;
+  count: number;
 };
 
 /** 分享包 data.json 结构（方案 §十七）：v2 起携带可选 author，旧版导入器可忽略。 */
@@ -53,10 +64,16 @@ export type ArchiveManifest = Omit<LibraryFile, "schemaVersion"> & {
   schemaVersion: 1 | 2;
   author?: AuthorInfo;
   analyzedLibraries?: ArchiveAnalyzedLibraries;
+  backupVolume?: ArchiveVolumeInfo;
 };
 
 /** 构建分享包清单：登录用户导出时注入 author，未登录则省略（旧版导入器不受影响）。 */
-export function buildArchiveManifest(items: LibraryItem[], author: AuthorInfo | null, analyzedLibraries?: ArchiveAnalyzedLibraries): ArchiveManifest {
+export function buildArchiveManifest(
+  items: LibraryItem[],
+  author: AuthorInfo | null,
+  analyzedLibraries?: ArchiveAnalyzedLibraries,
+  volume?: ArchiveVolumeInfo,
+): ArchiveManifest {
   const manifest: ArchiveManifest = {
     schemaVersion: 2,
     updatedAt: new Date().toISOString(),
@@ -66,6 +83,7 @@ export function buildArchiveManifest(items: LibraryItem[], author: AuthorInfo | 
     manifest.author = author;
   }
   if (analyzedLibraries) manifest.analyzedLibraries = analyzedLibraries;
+  if (volume) manifest.backupVolume = volume;
   return manifest;
 }
 
@@ -117,31 +135,67 @@ export async function exportLibraryZip(itemIds: string[], authorChoice?: "keep" 
     });
     coverEntries.push({ zipPath: `knowledge-images/${name}`, sourcePath });
   }
-  const extraEntries = [...avatars.entries, ...coverEntries];
+  const extraEntries = await sizeArchiveEntries([...avatars.entries, ...coverEntries]);
   const counts = { categoryCount: knowledge.categories.length, tagCount: knowledge.tags.length };
-  const exportFile = buildArchiveManifest(avatars.items, exportAuthor, knowledge);
-  // Root author identifies the exporter, never overrides individual ownership.
-  if (exportFile.author?.avatarUrl?.startsWith("app-account-avatar:")) delete exportFile.author.avatarUrl;
-  const dataJson = JSON.stringify(exportFile, null, 2);
-
-  const mediaEntries: Array<{ zipPath: string; sourcePath: string }> = [];
+  const mediaEntries: ArchiveSourceEntry[] = [];
   reportExportProgress("正在检查素材文件…", 0, { completed: 0, total: items.length });
   for (const item of items) {
     try {
       const sourcePath = await resolveMediaAbsolutePath(item);
-      await fs.access(sourcePath);
-      mediaEntries.push({ zipPath: `images/${item.imageFileName}`, sourcePath });
+      const stat = await fs.stat(sourcePath);
+      if (!stat.isFile()) throw new Error("源文件不是普通文件");
+      mediaEntries.push({ zipPath: `images/${item.imageFileName}`, sourcePath, size: stat.size, itemId: item.id });
     } catch {
       throw new AppError("ZIP_MEDIA_MISSING", `源文件缺失，无法导出：${item.title || item.imageFileName}`);
     }
     reportExportProgress("正在检查素材文件…", mediaEntries.length / items.length * 100,
       { completed: mediaEntries.length, total: items.length });
   }
-  const entries = [...extraEntries, ...mediaEntries];
-  await writeZipInBackground(result.filePath, [{ zipPath: "data.json", text: dataJson }, ...entries],
-    temporaryPath => exportViaRust(temporaryPath, dataJson, entries));
+  const sharedBytes = extraEntries.reduce((total, entry) => total + entry.size, 0);
+  if (extraEntries.length + 1 > archiveLimits.maxEntries) {
+    throw new AppError("ZIP_TOO_MANY_ENTRIES", `分享包附加资源超过 ${archiveLimits.maxEntries} 项安全上限。`);
+  }
+  const volumeEntries = planArchiveVolumes(
+    mediaEntries.map((entry): SizedArchiveEntry<ArchiveSourceEntry> => ({ entry, size: entry.size })),
+    sharedBytes,
+    ARCHIVE_VOLUME_TARGET_BYTES,
+    Math.max(1, archiveLimits.maxEntries - extraEntries.length - 1),
+  );
+  const volumeCount = volumeEntries.length;
+  const backupId = volumeCount > 1 ? randomUUID() : undefined;
+  const portableItemsById = new Map(avatars.items.map(item => [item.id, item]));
+  const outputPaths = volumeEntries.map((_, index) => volumeCount === 1
+    ? result.filePath!
+    : buildArchiveVolumePath(result.filePath!, index, volumeCount));
 
-  return { canceled: false, filePath: result.filePath, exportedCount: items.length, ...counts };
+  for (let index = 0; index < volumeEntries.length; index += 1) {
+    const currentEntries = volumeEntries[index];
+    const currentItems = currentEntries
+      .map(entry => entry.itemId ? portableItemsById.get(entry.itemId) : undefined)
+      .filter((item): item is LibraryItem => Boolean(item));
+    const volume = backupId ? { id: backupId, index: index + 1, count: volumeCount } : undefined;
+    const exportFile = buildArchiveManifest(currentItems, exportAuthor, knowledge, volume);
+    // Root author identifies the exporter, never overrides individual ownership.
+    if (exportFile.author?.avatarUrl?.startsWith("app-account-avatar:")) delete exportFile.author.avatarUrl;
+    const dataJson = JSON.stringify(exportFile, null, 2);
+    const entries = [...extraEntries, ...currentEntries];
+    reportExportProgress(volumeCount > 1 ? `正在生成第 ${index + 1}/${volumeCount} 个备份包…` : "正在生成备份包…", null,
+      { completed: index, total: volumeCount });
+    await writeZipInBackground(outputPaths[index], [{ zipPath: "data.json", text: dataJson }, ...entries],
+      temporaryPath => exportViaRust(temporaryPath, dataJson, entries), {
+        progressCounts: { completed: index, total: volumeCount },
+        phasePrefix: volumeCount > 1 ? `第 ${index + 1}/${volumeCount} 卷：` : undefined,
+      });
+  }
+
+  return {
+    canceled: false,
+    filePath: outputPaths[0] ?? result.filePath,
+    filePaths: outputPaths,
+    volumeCount,
+    exportedCount: items.length,
+    ...counts,
+  };
 }
 
 export async function importLibraryZip(): Promise<{
@@ -152,7 +206,7 @@ export async function importLibraryZip(): Promise<{
 }> {
   const result = await dialog.showOpenDialog({
     title: "导入分享包",
-    properties: ["openFile"],
+    properties: ["openFile", "multiSelections"],
     filters: [{ name: "ZIP 分享包", extensions: ["zip"] }],
   });
 
@@ -161,7 +215,24 @@ export async function importLibraryZip(): Promise<{
   }
 
   const currentAuthor = await snapshotWorkAuthor();
-  const filePath = result.filePaths[0];
+  let library = await readLibraryFile();
+  let importedCount = 0;
+  let settings: LibraryViewSettings | undefined;
+  const knowledgeImageFilesByBackup = new Map<string, Map<string, string>>();
+  for (const filePath of result.filePaths) {
+    const imported = await importArchiveFile(filePath, currentAuthor, knowledgeImageFilesByBackup);
+    library = imported.library;
+    importedCount += imported.importedCount;
+    settings = imported.settings ?? settings;
+  }
+  return { canceled: false, library, importedCount, settings };
+}
+
+async function importArchiveFile(
+  filePath: string,
+  currentAuthor: Awaited<ReturnType<typeof snapshotWorkAuthor>>,
+  knowledgeImageFilesByBackup: Map<string, Map<string, string>>,
+): Promise<{ library: LibraryFile; importedCount: number; settings?: LibraryViewSettings }> {
 
   // 整包读入内存前先做结构预检，截断/损坏文件会在毫秒级失败，避免
   // JSZip 加载数分钟后才抛 `Corrupted zip: missing N bytes` 的底层错误。
@@ -218,6 +289,9 @@ export async function importLibraryZip(): Promise<{
   }
 
   const knowledge = readArchiveAnalyzedLibraries(parsed.analyzedLibraries);
+  const backupKey = parsed.backupVolume?.id ?? filePath;
+  const sharedKnowledgeImageFiles = knowledgeImageFilesByBackup.get(backupKey) ?? new Map<string, string>();
+  knowledgeImageFilesByBackup.set(backupKey, sharedKnowledgeImageFiles);
   const importedItems: LibraryItem[] = [];
   const writtenMediaNames: string[] = [];
   const imageNames = new Map<string, string>();
@@ -276,12 +350,18 @@ export async function importLibraryZip(): Promise<{
     if (knowledge) {
       for (const name of archiveKnowledgeImageNames(knowledge)) {
         if (imageNames.has(name)) continue;
+        const existingImageFileName = sharedKnowledgeImageFiles.get(name);
+        if (existingImageFileName) {
+          imageNames.set(name, existingImageFileName);
+          continue;
+        }
         const cover = zip.file(`knowledge-images/${name}`);
         if (!cover) throw new AppError("ZIP_KNOWLEDGE_IMAGE_MISSING", "分享包缺少分类或标签封面，请重新导出。");
         const coverBuffer = await readArchiveEntry(cover, `knowledge-images/${name}`, () => extractedBytes, next => { extractedBytes = next; });
         const imageFileName = await writeImportImageBuffer(randomUUID(), coverBuffer, path.extname(name));
         writtenMediaNames.push(imageFileName);
         imageNames.set(name, imageFileName);
+        sharedKnowledgeImageFiles.set(name, imageFileName);
       }
     }
     await prepareImageThumbnails(writtenMediaNames.filter(name => !isVideoMediaFile(name)));
@@ -289,7 +369,7 @@ export async function importLibraryZip(): Promise<{
       ? await appendArchiveWithKnowledge(importedItems, remapArchiveKnowledgeImages(knowledge, imageNames))
       : { library: await appendLibraryItems(importedItems) };
 
-    return { canceled: false, ...saved, importedCount: importedItems.length };
+    return { ...saved, importedCount: importedItems.length };
   } catch (error) {
     if (error instanceof AppError && error.code === "ZIP_IMPORT_ROLLBACK_FAILED") throw error;
     await Promise.allSettled(
@@ -300,6 +380,25 @@ export async function importLibraryZip(): Promise<{
     );
     throw error;
   }
+}
+
+async function sizeArchiveEntries(
+  entries: readonly { zipPath: string; sourcePath: string }[],
+): Promise<ArchiveSourceEntry[]> {
+  const sized: ArchiveSourceEntry[] = [];
+  for (const entry of entries) {
+    const stat = await fs.stat(entry.sourcePath).catch(() => null);
+    if (!stat?.isFile()) {
+      throw new AppError("ZIP_MEDIA_MISSING", `源文件缺失，无法导出：${entry.zipPath}`);
+    }
+    sized.push({ ...entry, size: stat.size });
+  }
+  return sized;
+}
+
+function buildArchiveVolumePath(filePath: string, index: number, count: number): string {
+  const parsed = path.parse(filePath);
+  return path.join(parsed.dir, `${parsed.name}-第${index + 1}卷-共${count}卷${parsed.ext || ".zip"}`);
 }
 
 

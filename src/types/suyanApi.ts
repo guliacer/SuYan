@@ -272,6 +272,8 @@ export type ExportZipData = {
   canceled: boolean;
   filePath: string | null;
   exportedCount: number;
+  filePaths?: string[];
+  volumeCount?: number;
   requiresAuthorChoice?: boolean;
   unownedCount?: number;
   authorName?: string;

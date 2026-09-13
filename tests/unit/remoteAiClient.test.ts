@@ -21,6 +21,7 @@ import {
   generateVideosWithRemoteApi,
   normalizeChatEndpoint,
   normalizeModelsEndpoint,
+  parseRemoteChatCompletionResponseBody,
   parseRemoteModels,
   parseRemoteOptimizedPromptContent,
   parseRemoteReversedImagePromptContent,
@@ -82,6 +83,57 @@ describe("remoteAiClient", () => {
       vi.unstubAllGlobals();
       vi.useRealTimers();
     }
+  });
+
+  it("forces non-streaming requests and rebuilds SSE chat chunks", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      "event: message",
+      'data: {"choices":[{"index":0,"delta":{"role":"assistant"}}]}',
+      "",
+      'data: {"choices":[{"index":0,"delta":{"content":"半身人像"}}]}',
+      "",
+      'data: {"choices":[{"index":0,"delta":{"content":"，柔和自然光"},"finish_reason":"stop"}]}',
+      "",
+      "data: [DONE]",
+      "",
+    ].join("\n"), {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const result = await requestChatCompletions(
+        {
+          apiKey: "test-key",
+          baseUrl: "https://api.example.com/v1",
+          enabled: true,
+          id: "test-profile",
+          model: "test-model",
+          models: [],
+          name: "测试配置",
+        },
+        { model: "test-model", messages: [] },
+        false,
+      );
+
+      expect(result).toMatchObject({
+        choices: [{
+          finish_reason: "stop",
+          message: { content: "半身人像，柔和自然光", role: "assistant" },
+        }],
+      });
+      const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+      expect(requestBody.stream).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("accepts a UTF-8 BOM and a data envelope around a chat response", () => {
+    expect(parseRemoteChatCompletionResponseBody(
+      '\uFEFF{"data":{"choices":[{"message":{"content":"可用结果"}}]}}',
+    )).toEqual({ choices: [{ message: { content: "可用结果" } }] });
   });
 
   it("appends /chat/completions to the normalized base URL", () => {

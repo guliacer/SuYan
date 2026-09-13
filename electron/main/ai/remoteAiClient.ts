@@ -430,6 +430,7 @@ export async function reverseImagePromptRemotely(
         ],
         temperature: 0.2,
         max_tokens: 1400,
+        stream: false,
       },
       false,
       generationRequestTimeoutMs,
@@ -439,6 +440,7 @@ export async function reverseImagePromptRemotely(
     logAiEvent("info", "reverse:done", {
       durationMs: Date.now() - startedAt,
       maxTokens: 1400,
+      model: settings.model,
       ok: true,
       timeoutMs: generationRequestTimeoutMs,
     });
@@ -448,6 +450,9 @@ export async function reverseImagePromptRemotely(
       code: error instanceof AppError ? error.code : "AI_REMOTE_REQUEST_FAILED",
       durationMs: Date.now() - startedAt,
       message: error instanceof Error ? error.message : String(error),
+      model: settings.model,
+      endpointHost: getEndpointLogPart(settings.baseUrl, "host"),
+      endpointPath: getEndpointLogPart(settings.baseUrl, "path"),
     });
     throw error;
   }
@@ -839,8 +844,11 @@ export async function requestChatCompletions(
     const timer = setTimeout(() => controller.abort(), remainingMs);
 
     try {
+      // All current callers need a single completed response. Some OpenAI-compatible
+      // gateways default to SSE when this field is omitted, so make the contract explicit.
+      const requestBody = body.stream === undefined ? { ...body, stream: false } : body;
       const response = await platformFetch(endpoint, {
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
         headers: {
           Authorization: `Bearer ${settings.apiKey}`,
           "Content-Type": "application/json",
@@ -860,8 +868,25 @@ export async function requestChatCompletions(
       }
 
       try {
-        return JSON.parse(responseText) as unknown;
+        const parsed = parseRemoteChatCompletionResponseBody(responseText);
+        if (classifyRemoteResponseBody(responseText) !== "json") {
+          logAiEvent("info", "remote:response-normalized", {
+            contentType: response.headers.get("content-type") ?? "",
+            endpointHost: getEndpointLogPart(settings.baseUrl, "host"),
+            endpointPath: getEndpointLogPart(settings.baseUrl, "path"),
+            responseBytes: Buffer.byteLength(responseText, "utf8"),
+            responseFormat: classifyRemoteResponseBody(responseText),
+          });
+        }
+        return parsed;
       } catch {
+        logAiEvent("warn", "remote:response-invalid", {
+          contentType: response.headers.get("content-type") ?? "",
+          endpointHost: getEndpointLogPart(settings.baseUrl, "host"),
+          endpointPath: getEndpointLogPart(settings.baseUrl, "path"),
+          responseBytes: Buffer.byteLength(responseText, "utf8"),
+          responseFormat: classifyRemoteResponseBody(responseText),
+        });
         throw new AppError("AI_REMOTE_RESPONSE_INVALID", "远程 AI 返回的响应不是有效 JSON。");
       }
     } catch (error) {
@@ -893,6 +918,251 @@ export async function requestChatCompletions(
   }
 
   throw new AppError("AI_REMOTE_REQUEST_FAILED", "远程 AI 请求失败，已达最大重试次数。");
+}
+
+type RemoteResponseBodyFormat = "empty" | "json" | "sse" | "ndjson" | "text";
+
+/**
+ * Normalize the response variants commonly returned by OpenAI-compatible gateways.
+ * The app requests a non-stream response, but a few free gateways still emit SSE or
+ * newline-delimited JSON. Reassemble those chunks before the normal assistant parser.
+ */
+export function parseRemoteChatCompletionResponseBody(content: string): unknown {
+  const normalized = content.replace(/^\uFEFF/u, "").trim();
+
+  if (!normalized) {
+    throw new AppError("AI_REMOTE_RESPONSE_INVALID", "远程 AI 返回的响应不是有效 JSON。");
+  }
+
+  try {
+    return unwrapRemoteChatEnvelope(JSON.parse(normalized) as unknown);
+  } catch {
+    const streamFrames = parseRemoteEventFrames(normalized);
+    const streamResponse = mergeRemoteChatFrames(streamFrames);
+    if (streamResponse) {
+      return streamResponse;
+    }
+
+    const jsonLines = parseRemoteJsonLines(normalized);
+    const lineResponse = mergeRemoteChatFrames(jsonLines);
+    if (lineResponse) {
+      return lineResponse;
+    }
+
+    throw new AppError("AI_REMOTE_RESPONSE_INVALID", "远程 AI 返回的响应不是有效 JSON。");
+  }
+}
+
+function classifyRemoteResponseBody(content: string): RemoteResponseBodyFormat {
+  const normalized = content.replace(/^\uFEFF/u, "").trim();
+
+  if (!normalized) {
+    return "empty";
+  }
+
+  try {
+    JSON.parse(normalized);
+    return "json";
+  } catch {
+  }
+
+  if (/^(?:event\s*:[^\r\n]*\r?\n)?\s*data\s*:/mu.test(normalized)) {
+    return "sse";
+  }
+
+  if (parseRemoteJsonLines(normalized).length > 0) {
+    return "ndjson";
+  }
+
+  return "text";
+}
+
+function parseRemoteEventFrames(content: string): unknown[] {
+  const frames: unknown[] = [];
+  let dataLines: string[] = [];
+
+  const flush = (): void => {
+    const data = dataLines.join("\n").trim();
+    dataLines = [];
+
+    if (!data || data === "[DONE]") {
+      return;
+    }
+
+    try {
+      frames.push(JSON.parse(data) as unknown);
+    } catch {
+      // Ignore non-JSON event frames and let the caller report a clear response error.
+    }
+  };
+
+  for (const line of content.split(/\r?\n/u)) {
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+
+    const dataMatch = /^\s*data\s*:\s?(.*)$/u.exec(line);
+    if (dataMatch) {
+      dataLines.push(dataMatch[1]);
+    }
+  }
+
+  flush();
+  return frames;
+}
+
+function parseRemoteJsonLines(content: string): unknown[] {
+  const lines = content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => line !== "[DONE]");
+
+  if (lines.length < 2) {
+    return [];
+  }
+
+  const parsed: unknown[] = [];
+  for (const line of lines) {
+    const dataLine = /^data\s*:\s?(.*)$/u.exec(line)?.[1] ?? line;
+    try {
+      parsed.push(JSON.parse(dataLine) as unknown);
+    } catch {
+      return [];
+    }
+  }
+
+  return parsed;
+}
+
+function mergeRemoteChatFrames(frames: unknown[]): Record<string, unknown> | null {
+  const chatFrames = frames.filter(
+    (frame): frame is Record<string, unknown> =>
+      isRecord(frame) && Array.isArray(frame.choices),
+  );
+
+  if (chatFrames.length === 0) {
+    return null;
+  }
+
+  const hasDelta = chatFrames.some((frame) =>
+    getChatChoices(frame).some((choice) => isRecord(choice) && isRecord(choice.delta)),
+  );
+
+  if (!hasDelta) {
+    return chatFrames[chatFrames.length - 1];
+  }
+
+  type ChatFrameState = {
+    content: string;
+    finishReason?: string;
+    index: number;
+    reasoningContent: string;
+    role?: string;
+  };
+
+  const states = new Map<number, ChatFrameState>();
+  for (const frame of chatFrames) {
+    for (const rawChoice of getChatChoices(frame)) {
+      if (!isRecord(rawChoice)) {
+        continue;
+      }
+
+      const index = typeof rawChoice.index === "number" && Number.isInteger(rawChoice.index)
+        ? rawChoice.index
+        : 0;
+      const state = states.get(index) ?? {
+        content: "",
+        index,
+        reasoningContent: "",
+      };
+      const delta = isRecord(rawChoice.delta) ? rawChoice.delta : null;
+      const message = isRecord(rawChoice.message) ? rawChoice.message : null;
+      const source = delta ?? message;
+
+      if (source) {
+        const role = normalizeString(source.role);
+        if (role) {
+          state.role = role;
+        }
+        state.content += readChatText(source.content);
+        state.reasoningContent += readChatText(source.reasoning_content);
+      }
+
+      const finishReason = normalizeString(rawChoice.finish_reason);
+      if (finishReason) {
+        state.finishReason = finishReason;
+      }
+      states.set(index, state);
+    }
+  }
+
+  const lastFrame = chatFrames[chatFrames.length - 1];
+  return {
+    ...lastFrame,
+    choices: [...states.values()]
+      .sort((left, right) => left.index - right.index)
+      .map((state) => ({
+        index: state.index,
+        message: {
+          ...(state.role ? { role: state.role } : {}),
+          content: state.content,
+          ...(state.reasoningContent ? { reasoning_content: state.reasoningContent } : {}),
+        },
+        ...(state.finishReason ? { finish_reason: state.finishReason } : {}),
+      })),
+  };
+}
+
+function unwrapRemoteChatEnvelope(input: unknown): unknown {
+  if (
+    isRecord(input) &&
+    !Array.isArray(input.choices) &&
+    isRecord(input.data) &&
+    Array.isArray(input.data.choices)
+  ) {
+    return input.data;
+  }
+
+  return input;
+}
+
+function getChatChoices(input: Record<string, unknown>): unknown[] {
+  return Array.isArray(input.choices) ? input.choices : [];
+}
+
+function readChatText(input: unknown): string {
+  if (typeof input === "string") {
+    return input;
+  }
+
+  if (!Array.isArray(input)) {
+    return "";
+  }
+
+  return input
+    .map((part) => {
+      if (!isRecord(part)) {
+        return "";
+      }
+
+      return typeof part.text === "string"
+        ? part.text
+        : typeof part.content === "string"
+        ? part.content
+        : "";
+    })
+    .join("");
+}
+
+function getEndpointLogPart(baseUrl: string, part: "host" | "path"): string {
+  try {
+    const parsed = new URL(baseUrl);
+    return part === "host" ? parsed.host : parsed.pathname;
+  } catch {
+    return "";
+  }
 }
 
 function sleep(ms: number): Promise<void> {

@@ -7,6 +7,10 @@ import { assertZipIntegrity, ZipCorruptError } from "../library/zipIntegrity";
 import { reportExportProgress } from "./exportTask";
 
 export type ExportZipEntry = { zipPath: string } & ({ sourcePath: string } | { text: string });
+type ExportZipProgressOptions = {
+  progressCounts?: { completed: number; total: number };
+  phasePrefix?: string;
+};
 
 // Trusted, static worker code; no user text is interpolated into executable code.
 // Loading JSZip in the worker keeps both compression and large buffers off the UI/main thread.
@@ -47,13 +51,15 @@ function resolveZipRuntime(): string {
   return createRequire(__filename).resolve("jszip");
 }
 
-async function streamZip(outputPath: string, entries: ExportZipEntry[]): Promise<void> {
+async function streamZip(outputPath: string, entries: ExportZipEntry[], options?: ExportZipProgressOptions): Promise<void> {
   const worker = new Worker(workerSource, { eval: true, workerData: { outputPath, entries, jszipPath: resolveZipRuntime() } });
   try {
     await new Promise<void>((resolve, reject) => {
       let done = false;
       worker.on("message", (message: { type: string; percent?: number }) => {
-        if (message.type === "progress") reportExportProgress("正在压缩并写入文件…", message.percent ?? null);
+        if (message.type === "progress") {
+          reportExportProgress(`${options?.phasePrefix ?? ""}正在压缩并写入文件…`, message.percent ?? null, options?.progressCounts);
+        }
         if (message.type === "done") done = true;
       });
       worker.once("error", reject);
@@ -67,19 +73,20 @@ export async function writeZipInBackground(
   outputPath: string,
   entries: ExportZipEntry[],
   tryNative?: (temporaryPath: string) => Promise<boolean>,
+  options?: ExportZipProgressOptions,
 ): Promise<void> {
   const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
   try {
-    reportExportProgress("正在压缩并写入文件…");
+    reportExportProgress(`${options?.phasePrefix ?? ""}正在压缩并写入文件…`, null, options?.progressCounts);
     let nativeValid = false;
     if (tryNative && await tryNative(temporaryPath)) {
       try { await assertZipIntegrity(temporaryPath); nativeValid = true; }
       catch (error) { if (!(error instanceof ZipCorruptError)) throw error; }
     }
-    if (!nativeValid) await streamZip(temporaryPath, entries);
-    reportExportProgress("正在校验导出文件…");
+    if (!nativeValid) await streamZip(temporaryPath, entries, options);
+    reportExportProgress(`${options?.phasePrefix ?? ""}正在校验导出文件…`, null, options?.progressCounts);
     await assertZipIntegrity(temporaryPath);
-    reportExportProgress("正在完成保存…");
+    reportExportProgress(`${options?.phasePrefix ?? ""}正在完成保存…`, 100, options?.progressCounts);
     await fs.rename(temporaryPath, outputPath);
   } finally { await fs.rm(temporaryPath, { force: true }).catch(() => undefined); }
 }

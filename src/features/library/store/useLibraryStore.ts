@@ -3225,8 +3225,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         set({
           statusMessage: result.data.canceled
             ? infoStatus("已取消分享导出。")
-            : successStatus(
-                `已导出 ${result.data.exportedCount} 张素材${result.data.categoryCount !== undefined
+              : successStatus(
+                `已导出 ${result.data.exportedCount} 张素材${result.data.volumeCount && result.data.volumeCount > 1
+                  ? `，已自动分为 ${result.data.volumeCount} 个备份包` : ""}${result.data.categoryCount !== undefined
                   ? `，包含 ${result.data.categoryCount} 个分类、${result.data.tagCount ?? 0} 个标签` : ""}。`,
               ),
         });

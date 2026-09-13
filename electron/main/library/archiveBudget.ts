@@ -1,7 +1,6 @@
 import { AppError } from "../ipc/errors";
 
 export const archiveLimits = {
-  maxArchiveBytes: 512 * 1024 * 1024,
   maxEntries: 10_000,
   maxEntryBytes: 128 * 1024 * 1024,
   maxTotalUncompressedBytes: 2 * 1024 * 1024 * 1024,
@@ -15,13 +14,12 @@ export type ArchiveEntryLike = {
 };
 
 export function validateArchiveEntryBudget(
+  // 保留压缩包大小参数以兼容现有调用方；分享包不再按压缩后体积设置固定上限。
   archiveBytes: number,
   entryCount: number,
   entries: ArchiveEntryLike[] = [],
 ): void {
-  if (archiveBytes > archiveLimits.maxArchiveBytes) {
-    throw new AppError("ZIP_TOO_LARGE", `分享包超过 ${archiveLimits.maxArchiveBytes / 1024 / 1024} MB 上限。`);
-  }
+  void archiveBytes;
   if (entryCount > archiveLimits.maxEntries) {
     throw new AppError("ZIP_TOO_MANY_ENTRIES", `分享包条目超过 ${archiveLimits.maxEntries} 项上限。`);
   }

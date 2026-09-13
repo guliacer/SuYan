@@ -32,8 +32,8 @@ describe("external archive export", () => {
 });
 
 describe("share archive safety budget", () => {
-  it("rejects an oversized archive before extraction", () => {
-    expect(() => validateArchiveEntryBudget(513 * 1024 * 1024, 1)).toThrow(/512 MB/);
+  it("does not reject an archive solely because its compressed size exceeds 512 MB", () => {
+    expect(() => validateArchiveEntryBudget(513 * 1024 * 1024, 1)).not.toThrow();
   });
 
   it("rejects a single declared entry that exceeds the extraction budget", () => {
@@ -44,6 +44,20 @@ describe("share archive safety budget", () => {
         async: async () => Buffer.alloc(0),
       },
     ])).toThrow(/单文件上限/);
+  });
+
+  it("rejects archives with too many entries", () => {
+    expect(() => validateArchiveEntryBudget(1024, 10_001)).toThrow(/条目超过/);
+  });
+
+  it("rejects a declared uncompressed total above the extraction budget", () => {
+    const entries = Array.from({ length: 17 }, (_, index) => ({
+      name: `images/${index}.png`,
+      _data: { uncompressedSize: 128 * 1024 * 1024 },
+      async: async () => Buffer.alloc(0),
+    }));
+
+    expect(() => validateArchiveEntryBudget(1024, entries.length, entries)).toThrow(/解压总量超过/);
   });
 });
 
