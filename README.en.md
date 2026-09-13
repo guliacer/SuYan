@@ -195,16 +195,28 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ### v0.3.8 (current release)
 
-SuYan v0.3.8 consolidates the major product improvements since the early `v0.2.0` baseline and fixes the latest prompt-editing issues.
+Compared with `v0.2.10`, this release adds accounts, idea management, web assistance, and local content rating while improving the creation, organization, and backup workflows.
 
-**What changed since `v0.2.0`**
+**New features**
 
-- **Real accounts and ownership**: Added Guli Identity OIDC + PKCE browser authorization for email, Google, GitHub, Linux.do, and device-code sign-in. Multiple login methods can be linked, with confirmation for display name, avatar, and work ownership.
-- **AI creative canvas**: Added in-app generation, reference images, and clipboard paste. The canvas adapts to the available space, supports a collapsible parameter sidebar, theme-aware backgrounds, and generation effects. Model lists prefer names returned by the configured endpoint, and analysis settings are remembered.
-- **AI analysis and organization**: Expanded prompt optimization, translation, reverse prompting, category detection, and tag detection. Added consolidation, synonym merging, entity grouping, and constraints that reduce unsupported tags and incorrect categories.
-- **Materials and workflows**: Added mounted material folders, ComfyUI quick save, the web assistant, resource recommendations, an idea library, and a task calendar. Batch import and export support large-library volumes, bundled category and tag libraries, background progress, and remembered folders.
-- **Reliability and delivery**: Improved OpenAI-compatible response parsing and reverse prompting, thumbnail fallback, original-image ordering, image clipboard copying, sanitized structured logs, and failure diagnostics. Added four Windows package editions, optional local components, verification files, and update checks.
-- **Interface and guidance**: Added Chinese / English switching, a coordinated theme-color system, translucent navigation, responsive layouts, unified dialogs, and page-specific first-use guidance.
+- **Accounts and ownership**: Added real OIDC + PKCE browser authorization for email, Google, GitHub, Linux.do, and device-code sign-in. Multiple login methods can be linked, with confirmation for display name, avatar, and work ownership.
+- **Idea library and tasks**: Added storage and organization for plain-text ideas, prompts, workflows, and configuration notes, with categories, tags, variables, favorites, drag ordering, import / export, and calendar planning.
+- **Web assistant**: Open Doubao and other creative sites inside the app to reduce context switching, with a controlled web workspace and site directory.
+- **Themes and sidebar management**: Added coordinated theme colors, navigation and canvas appearance settings, and controls to show, hide, and organize sidebar entries.
+- **Local content rating**: Added an optional local NSFW model component for sensitive-content detection, default blur, temporary reveal in detail, and batch re-rating. Other configured detection modes remain available when the component is not installed.
+- **ComfyUI quick save**: With ComfyUI-GuliNodes, send a completed image and its prompt to SuYan for archiving with one click.
+- **TapRelay completion notifications**: Send generation success or failure status to a phone through TapRelay when you need to leave the computer unattended.
+- **Page-specific guidance**: First entry to each feature page provides skippable, repeatable help focused on the real controls, including imports, prompt cards, the canvas, AI connections, system settings, and window controls.
+
+**Improvements**
+
+- Improved most page layouts, responsive behavior, unified dialogs, and navigation visuals so controls remain usable at different resolutions.
+- Improved the creative canvas with adaptive presentation, theme-aware backgrounds, collapsible parameters, and generation effects.
+- Improved AI analysis and management, including prompt optimization, translation, reverse prompting, category and tag detection, and constrained consolidation.
+- Improved AI / API settings with multiple providers, endpoint model discovery, per-action model and analysis-source preferences, and settings backup import / export.
+- Refreshed resource recommendations with image-generation services and model entry points that offer free trials or free quotas, while retaining relevant usage conditions.
+- Improved large-library backups with volume splitting, multi-volume import, bundled category and tag libraries, background progress, and remembered folders.
+- Also improved thumbnail fallback, original-image ordering, image copying, sanitized structured logs, failure diagnostics, and four Windows release packages.
 
 **This release also fixes**
 
