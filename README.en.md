@@ -195,25 +195,23 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ### v0.3.8 (current release)
 
-SuYan v0.3.8 is a maintenance release focused on reliable prompt editing and predictable keyboard interaction:
+SuYan v0.3.8 consolidates the major product improvements since the early `v0.2.0` baseline and fixes the latest prompt-editing issues.
+
+**What changed since `v0.2.0`**
+
+- **Real accounts and ownership**: Added Guli Identity OIDC + PKCE browser authorization for email, Google, GitHub, Linux.do, and device-code sign-in. Multiple login methods can be linked, with confirmation for display name, avatar, and work ownership.
+- **AI creative canvas**: Added in-app generation, reference images, and clipboard paste. The canvas adapts to the available space, supports a collapsible parameter sidebar, theme-aware backgrounds, and generation effects. Model lists prefer names returned by the configured endpoint, and analysis settings are remembered.
+- **AI analysis and organization**: Expanded prompt optimization, translation, reverse prompting, category detection, and tag detection. Added consolidation, synonym merging, entity grouping, and constraints that reduce unsupported tags and incorrect categories.
+- **Materials and workflows**: Added mounted material folders, ComfyUI quick save, the web assistant, resource recommendations, an idea library, and a task calendar. Batch import and export support large-library volumes, bundled category and tag libraries, background progress, and remembered folders.
+- **Reliability and delivery**: Improved OpenAI-compatible response parsing and reverse prompting, thumbnail fallback, original-image ordering, image clipboard copying, sanitized structured logs, and failure diagnostics. Added four Windows package editions, optional local components, verification files, and update checks.
+- **Interface and guidance**: Added Chinese / English switching, a coordinated theme-color system, translucent navigation, responsive layouts, unified dialogs, and page-specific first-use guidance.
+
+**This release also fixes**
 
 - Manual tags entered in the prompt detail view are preserved instead of being removed by the stricter AI tag filter.
 - Adding, removing, or renaming a manual tag now uses the same normalized save path and keeps duplicate, empty, and over-limit values under control.
 - Prompt editing and prompt creation no longer wrap the rich-text editor and its toolbar in a label element, so arrow keys stay in the editor instead of jumping to the first toolbar button.
 - Added regression coverage for manual tag persistence and rich-text editor focus structure.
-
-### v0.3.7
-
-Building on the frozen `v0.3.6`, this release focuses on large-library backups, AI gateway compatibility, and dependable delivery:
-
-- Large libraries are automatically split into capacity-based volumes. Multiple volumes can be imported together, with shared category, tag, and cover resources deduplicated.
-- Export reports phase progress in the background, keeps the UI responsive, and remembers the last import / export folder.
-- OpenAI-compatible endpoints now handle non-streaming, SSE, NDJSON, UTF-8 BOM, and common response envelopes, improving reverse prompting and AI analysis reliability.
-- Sanitized AI diagnostics make model, gateway, response-format, and download failures easier to investigate without recording keys or image content.
-- Added illustrated instructions for ComfyUI quick save and TapRelay generation-completion notifications.
-- Added four Windows release packages with SHA-256 checksums, verification metadata, and bilingual Release notes.
-
-The account, canvas, tag organization, responsive UI, localization, and onboarding work from `v0.3.6` remains included.
 
 ### v0.2.10
 
