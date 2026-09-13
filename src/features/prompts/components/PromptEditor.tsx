@@ -143,7 +143,8 @@ export function PromptEditor({ categories, entry, isBusy, tagSuggestions, onClos
             </label>
           </section>
         ) : (
-          <label className="grid gap-1.5 text-sm font-medium">{t("灵感正文")}
+          <section className="grid gap-1.5" aria-labelledby="prompt-editor-content-label">
+            <h3 className="text-sm font-medium" id="prompt-editor-content-label">{t("灵感正文")}</h3>
             <RichTextEditor
               value={contentHtml}
               onChange={(html, text) => {
@@ -151,7 +152,7 @@ export function PromptEditor({ categories, entry, isBusy, tagSuggestions, onClos
                 setContent(text);
               }}
             />
-          </label>
+          </section>
         )}
                 <p className="text-xs text-muted">{t("已识别 {count} 个变量", { count: variables.length })}{variables.length ? `：${variables.map((variable) => `{{${variable.name}}}`).join("、")}` : ""}</p>
       </div>

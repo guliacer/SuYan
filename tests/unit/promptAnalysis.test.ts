@@ -13,6 +13,7 @@ import {
   filterPromptOptionValues,
   getNegativePromptValues,
   moveNegativePromptValuesFromPrompt,
+  normalizeManualPromptTags,
   normalizePromptAnalysisSections,
   normalizeConcretePromptTags,
   omitNegativeAnalysisSections,
@@ -175,6 +176,18 @@ describe("promptAnalysis", () => {
       // 「海报设计」是分类叶子（平面设计域），按分类/标签边界必须从标签里剥掉，
       // 不再降级成「海报」留在标签中。见 photographyCategories.resolveLabelLayer。
     ).toEqual(["商业视觉", "冰爽水雾水果广告海报", "水梨"]);
+  });
+
+  it("preserves custom labels entered by the user while trimming and deduplicating them", () => {
+    expect(
+      normalizeManualPromptTags([
+        "  我的私人标签：春日灵感  ",
+        "我的私人标签：春日灵感",
+        "English Mood",
+        "   ",
+      ], { maxCount: 2 }),
+    ).toEqual(["我的私人标签：春日灵感", "English Mood"]);
+    expect(normalizeConcretePromptTags(["我的私人标签：春日灵感"])).toEqual([]);
   });
 
   it("rejects sentence clauses that describe a scene instead of naming a tag", () => {

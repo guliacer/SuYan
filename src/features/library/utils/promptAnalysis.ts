@@ -1112,6 +1112,34 @@ export function normalizeConcretePromptTags(
   });
 }
 
+/**
+ * Normalize tags explicitly entered by the user.
+ *
+ * Manual labels are user data, not AI analysis results. Keep their wording
+ * intact and only remove surrounding whitespace, empty values, and duplicates.
+ */
+export function normalizeManualPromptTags(
+  tags: readonly string[],
+  options: { maxCount?: number } = {},
+): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawTag of tags) {
+    const tag = rawTag.trim();
+    const key = tag.replace(/\s+/gu, " ").toLocaleLowerCase();
+
+    if (!tag || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(tag);
+  }
+
+  return typeof options.maxCount === "number" ? result.slice(0, options.maxCount) : result;
+}
+
 export function addTags(tags: readonly string[], nextTags: readonly string[]): string[] {
   return uniqueTags([...tags, ...nextTags]);
 }

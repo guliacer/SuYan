@@ -136,9 +136,9 @@ When the generation task finishes, SuYan sends a completion notification through
 
 ### Use a release build
 
-Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.7`; the latest version is always shown on the Releases page.
+Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.8`; the latest version is always shown on the Releases page.
 
-`v0.3.7` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
+`v0.3.8` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
 
 If GitHub downloads are slow, mirror downloads are also available:
 
@@ -193,7 +193,16 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ## Changelog
 
-### v0.3.7 (current release)
+### v0.3.8 (current release)
+
+SuYan v0.3.8 is a maintenance release focused on reliable prompt editing and predictable keyboard interaction:
+
+- Manual tags entered in the prompt detail view are preserved instead of being removed by the stricter AI tag filter.
+- Adding, removing, or renaming a manual tag now uses the same normalized save path and keeps duplicate, empty, and over-limit values under control.
+- Prompt editing and prompt creation no longer wrap the rich-text editor and its toolbar in a label element, so arrow keys stay in the editor instead of jumping to the first toolbar button.
+- Added regression coverage for manual tag persistence and rich-text editor focus structure.
+
+### v0.3.7
 
 Building on the frozen `v0.3.6`, this release focuses on large-library backups, AI gateway compatibility, and dependable delivery:
 

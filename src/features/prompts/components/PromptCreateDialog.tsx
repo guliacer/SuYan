@@ -244,7 +244,8 @@ API Key:
         <DialogCloseButton onClick={onClose} />
       </header>
       <div className="min-h-0 space-y-4 overflow-y-auto p-5">
-        <label className="grid gap-1.5 text-sm font-medium">{t("灵感正文")}
+        <section className="grid gap-1.5" aria-labelledby="prompt-create-content-label">
+          <h3 className="text-sm font-medium" id="prompt-create-content-label">{t("灵感正文")}</h3>
           <RichTextEditor
             autoFocus
             value={contentHtml}
@@ -253,7 +254,7 @@ API Key:
               setContent(text);
             }}
           />
-        </label>
+        </section>
         <div className="flex items-center gap-2 rounded-xl border border-border bg-panel/60 px-3 py-2 text-sm">
           {analysisState === "analyzing" ? <LoaderCircle className="animate-spin text-primary" size={16} /> : analysisState === "failed" ? <TriangleAlert className="text-amber-500" size={16} /> : analysisState === "ready" ? <Check className="text-emerald-500" size={16} /> : <Sparkles className="text-primary" size={16} />}
           <span>{analysisState === "analyzing" ? t("正在自动整理……") : analysisState === "failed" ? t("自动整理失败，仍可保存灵感") : analysisState === "ready" ? t("已自动整理") : t("输入正文后自动整理")}</span>

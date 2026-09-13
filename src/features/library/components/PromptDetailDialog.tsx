@@ -91,6 +91,7 @@ import {
   applyAnalysisInlineChips,
   isGenericPromptLabel,
   moveNegativePromptValuesFromPrompt,
+  normalizeManualPromptTags,
   normalizeConcretePromptTags,
   splitNegativePromptFromPrompt,
   type PromptAnalysisResult,
@@ -162,6 +163,9 @@ type PromptDetailSavePatch = Partial<
     | "authorAvatarUrl"
   >
 >;
+type PromptDetailSaveOptions = {
+  preserveManualTags?: boolean;
+};
 type EditingChipState =
   | { kind: "category"; originalValue: string; value: string }
   | { kind: "tag"; originalValue: string; value: string };
@@ -243,7 +247,7 @@ type PromptDetailDialogProps = {
   onNavigatePrevious: () => void;
   /** Export the whole prompt group (zip) — used when the detail has multiple effect images. */
   onShareGroup?: () => void;
-  onSave: (patch: PromptDetailSavePatch) => Promise<void>;
+  onSave: (patch: PromptDetailSavePatch, options?: PromptDetailSaveOptions) => Promise<void>;
   onSaveGenerationModelPreferences: (patch: {
     generationModelOrder?: string[];
     hiddenGenerationModels?: string[];
@@ -982,14 +986,18 @@ export function PromptDetailDialog({
     commitCategoryChips(categoryChips.filter((category) => !isSameLabel(category, categoryToRemove)));
   }
 
-  function commitVisibleTags(nextVisibleTags: readonly string[]) {
+  function commitVisibleTags(
+    nextVisibleTags: readonly string[],
+    options: PromptDetailSaveOptions = {},
+  ) {
     // tags 现在只存特征标签；分类一律走 category/genreIds，不再夹带。
-    const nextTags = normalizeConcretePromptTags(nextVisibleTags)
+    const normalizeTags = options.preserveManualTags ? normalizeManualPromptTags : normalizeConcretePromptTags;
+    const nextTags = normalizeTags(nextVisibleTags, { maxCount: maxAiTagCount })
       .filter((tag) => !categoryChips.some((category) => isSameLabel(category, tag)))
       .slice(0, maxAiTagCount);
 
     setTagDrafts(nextTags);
-    void onSave({ tags: nextTags });
+    void onSave({ tags: nextTags }, options);
   }
 
   function commitModel(nextValue: string | null) {
@@ -1648,11 +1656,11 @@ export function PromptDetailDialog({
 
     const nextTags = addTags(visibleTagDrafts, [tag]).slice(0, maxAiTagCount);
     setNewTagDraft("");
-    commitVisibleTags(nextTags);
+    commitVisibleTags(nextTags, { preserveManualTags: true });
   }
 
   function removeTag(tag: string) {
-    commitVisibleTags(visibleTagDrafts.filter((itemTag) => itemTag !== tag));
+    commitVisibleTags(visibleTagDrafts.filter((itemTag) => itemTag !== tag), { preserveManualTags: true });
   }
 
   function renameTag(originalTag: string, nextValue: string) {
@@ -1663,7 +1671,7 @@ export function PromptDetailDialog({
       : withoutOriginalTag;
 
     setEditingChip(null);
-    commitVisibleTags(nextTags);
+    commitVisibleTags(nextTags, { preserveManualTags: true });
   }
 
   function handleVideoRef(element: HTMLVideoElement | null) {

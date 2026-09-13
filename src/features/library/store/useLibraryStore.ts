@@ -114,9 +114,11 @@ import {
   analyzePromptText,
   analyzePromptTags,
   isolateCategoryAnalysisResult,
+  normalizeManualPromptTags,
   normalizeConcretePromptTags,
   type PromptAnalysisResult,
 } from "../utils/promptAnalysis";
+import { maxAnalysisResultCount } from "../utils/analysisMergeCap";
 import {
   buildPromptAnalysisFromRemote,
   type PromptAnalysisRunResult,
@@ -243,6 +245,7 @@ function logAiSettingsSaveEvent(
 
 type SaveItemOptions = {
   background?: boolean;
+  preserveManualTags?: boolean;
   silent?: boolean;
 };
 
@@ -3253,7 +3256,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         ? {
             ...item,
             ...patch,
-            tags: hasTagsPatch ? normalizeConcretePromptTags(patch.tags ?? []) : item.tags,
+            tags: hasTagsPatch
+              ? options.preserveManualTags
+                ? normalizeManualPromptTags(patch.tags ?? [], { maxCount: maxAnalysisResultCount })
+                : normalizeConcretePromptTags(patch.tags ?? [])
+              : item.tags,
             updatedAt: now,
           }
         : item,
@@ -3321,7 +3328,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         nextById.set(id, {
           ...current,
           ...patch,
-          tags: hasTagsPatch ? normalizeConcretePromptTags(patch.tags ?? []) : current.tags,
+          tags: hasTagsPatch
+            ? options.preserveManualTags
+              ? normalizeManualPromptTags(patch.tags ?? [], { maxCount: maxAnalysisResultCount })
+              : normalizeConcretePromptTags(patch.tags ?? [])
+            : current.tags,
           updatedAt: now,
         });
       }

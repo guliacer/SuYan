@@ -2564,7 +2564,13 @@ export function LibraryView() {
               void requestExportZip(detailGroupItems.map((groupItem) => groupItem.id));
             }}
             onShareText={(text) => void copyText(text, t("已复制分享文案。"))}
-            onSave={(patch) => saveItem(detailItem.id, patch, { background: true, silent: true })}
+            onSave={(patch, options) =>
+              saveItem(detailItem.id, patch, {
+                background: true,
+                silent: true,
+                preserveManualTags: options?.preserveManualTags,
+              })
+            }
             onSaveGenerationModelPreferences={(patch) => void saveGenerationModelPreferences(patch)}
             onSaveAiActionModelPreference={saveAiActionModelPreference}
             onSaveAiRecognitionSourcePreferences={saveAiRecognitionSourcePreferences}
