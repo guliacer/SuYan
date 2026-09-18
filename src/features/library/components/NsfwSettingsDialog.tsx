@@ -18,6 +18,7 @@ import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import { useLocale } from "@/components/LocaleProvider";
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
+import { MarqueeText } from "@/components/ui/MarqueeText";
 import { TextArea } from "@/components/ui/TextArea";
 import { TextField } from "@/components/ui/TextField";
 import type {
@@ -558,7 +559,7 @@ export function NsfwSettingsDialog({
                           >
                             <span className={`size-2 rounded-full ${selected ? "bg-primary" : "bg-transparent"}`} />
                           </span>
-                          <span className="truncate text-sm font-semibold">{model.label || model.id}</span>
+                          <MarqueeText className="text-sm font-semibold" text={model.label || model.id} />
                         </button>
                       );
                     })

@@ -66,6 +66,12 @@ import {
 } from "./libraryPaths";
 
 import { normalizeCanvasBackground } from "../../../src/features/library/utils/canvasBackground";
+import {
+  defaultVisualLifeSettings,
+  isVisualLifeEffectId,
+  normalizeVisualLifeSettings,
+} from "../../../src/features/library/utils/visualLife";
+import type { VisualLifeSettings } from "../../../src/features/library/utils/visualLife";
 
 const defaultMasonryColumnCount = 4;
 let settingsWriteQueue: Promise<unknown> = Promise.resolve();
@@ -230,11 +236,16 @@ export function normalizeLibraryViewSettings(input: unknown): LibraryViewSetting
     themeCustomAccent: (currentMemory?.customAccents ?? normalizedCustomAccents)[0],
     themeAccentMemory,
     customTheme: normalizedCustomTheme,
+    visualLife: normalizeVisualLifeSettings(input.visualLife as Partial<VisualLifeSettings> | undefined),
     workspaceWidthPercent: normalizeWorkspaceWidthPercent(input.workspaceWidthPercent),
     sidebarEntryVisibility: normalizeSidebarEntryVisibility(input.sidebarEntryVisibility),
     featureGuideCompleted: Array.isArray(input.featureGuideCompleted)
       ? uniqueStrings(input.featureGuideCompleted.filter((guideId): guideId is string => typeof guideId === "string"))
       : [],
+    featureGuideVersion:
+      typeof input.featureGuideVersion === "string" && input.featureGuideVersion.trim().length > 0
+        ? input.featureGuideVersion.trim()
+        : null,
     autoNsfwGrading: input.autoNsfwGrading === true,
     blurNsfwImages: input.blurNsfwImages === true,
     nsfwGradingSpeed: normalizeNsfwGradingSpeed(input.nsfwGradingSpeed),
@@ -294,12 +305,24 @@ function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
     (input.themeCustomAccents === undefined || (Array.isArray(input.themeCustomAccents) && input.themeCustomAccents.every((accent) => typeof accent === "string"))) &&
     (input.themeAccentMemory === undefined || isRecord(input.themeAccentMemory)) &&
     (input.customTheme === undefined || isRecord(input.customTheme)) &&
+    (input.visualLife === undefined || (
+      isRecord(input.visualLife) &&
+      typeof input.visualLife.enabled === "boolean" &&
+      (input.visualLife.sheenEnabled === undefined || typeof input.visualLife.sheenEnabled === "boolean") &&
+      (input.visualLife.outerEffectsEnabled === undefined || typeof input.visualLife.outerEffectsEnabled === "boolean") &&
+      typeof input.visualLife.reduced === "boolean" &&
+      (input.visualLife.mode === "smart" || input.visualLife.mode === "custom" || input.visualLife.mode === "random" || input.visualLife.mode === "static") &&
+      (input.visualLife.intensity === "low" || input.visualLife.intensity === "standard" || input.visualLife.intensity === "dreamy" || input.visualLife.intensity === "immersive") &&
+      Array.isArray(input.visualLife.effectPool) &&
+      input.visualLife.effectPool.every(isVisualLifeEffectId)
+    )) &&
     (input.canvasBackground === undefined || isRecord(input.canvasBackground)) &&
     (input.workspaceWidthPercent === undefined ||
       (typeof input.workspaceWidthPercent === "number" && Number.isFinite(input.workspaceWidthPercent))) &&
     (input.sidebarEntryVisibility === undefined || isSidebarEntryVisibility(input.sidebarEntryVisibility)) &&
     (input.featureGuideCompleted === undefined ||
       (Array.isArray(input.featureGuideCompleted) && input.featureGuideCompleted.every((guideId) => typeof guideId === "string"))) &&
+    (input.featureGuideVersion === undefined || input.featureGuideVersion === null || typeof input.featureGuideVersion === "string") &&
     typeof input.autoNsfwGrading === "boolean" &&
     typeof input.blurNsfwImages === "boolean" &&
     isNsfwGradingSpeed(input.nsfwGradingSpeed) &&
@@ -337,7 +360,7 @@ function createDefaultViewSettings(): LibraryViewSettings {
     hiddenGenerationModels: [],
     themeMode: "light",
     themePreset: DEFAULT_THEME_PRESET,
-    themeAccent: "coral",
+    themeAccent: getDefaultThemeAccentForPreset(DEFAULT_THEME_PRESET),
     themeOpacity: DEFAULT_THEME_OPACITY,
     themeNavigationOpacity: DEFAULT_THEME_OPACITY,
     themeBackgroundOpacity: DEFAULT_THEME_OPACITY,
@@ -347,9 +370,11 @@ function createDefaultViewSettings(): LibraryViewSettings {
     themeCustomAccent: "#ff6363",
     themeAccentMemory: createDefaultThemeAccentMemory(),
     customTheme: normalizeThemeCustomTheme(undefined),
+    visualLife: { ...defaultVisualLifeSettings, effectPool: [...defaultVisualLifeSettings.effectPool] },
     workspaceWidthPercent: 88,
     sidebarEntryVisibility: normalizeSidebarEntryVisibility(undefined),
     featureGuideCompleted: [],
+    featureGuideVersion: null,
     autoNsfwGrading: false,
     blurNsfwImages: false,
     nsfwGradingSpeed: defaultNsfwGradingSpeed,

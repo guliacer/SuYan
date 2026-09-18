@@ -4,16 +4,20 @@ import {
   useState,
   useEffect,
   useLayoutEffect,
+  useId,
+  type ClipboardEvent,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Bell,
   BellOff,
   Bookmark,
   BookmarkCheck,
-  Brain,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -24,6 +28,7 @@ import {
   Eye,
   EyeOff,
   Film,
+  GripVertical,
   ImagePlus,
   Info,
   Inbox,
@@ -31,6 +36,8 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Settings2,
   SlidersHorizontal,
   Sparkles,
@@ -39,6 +46,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
+import { MarqueeText } from "@/components/ui/MarqueeText";
 import { Button } from "@/components/ui/Button";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
@@ -72,10 +80,23 @@ import {
   doubaoStyleOptions,
   extractPromptKeywords,
   getCanvasGenerationSizeLabel,
+  limitCanvasPromptText,
+  maxCanvasResultsPanelWidth,
+  maxCanvasPromptLength,
+  maxCanvasCreationPanelWidth,
+  minCanvasResultsPanelWidth,
+  minCanvasCreationPanelWidth,
+  normalizeCanvasCreationPanelWidth,
+  normalizeCanvasResultsPanelWidth,
+  replaceCanvasPromptSelection,
+  resolveCanvasAtmosphereTone,
   resolveCanvasGenerationSize,
   shouldInheritCanvasPromptOrigin,
 } from "../utils/canvasGeneration";
+import type { CanvasAtmosphereTone } from "../utils/canvasGeneration";
 import type { StatusFeedbackMessage } from "../utils/statusFeedback";
+import { compactAutomaticPromptTitle } from "../../prompts/utils/promptTitle";
+import { splitNegativePromptFromPrompt } from "../utils/promptAnalysis";
 
 type CanvasViewProps = {
   aiSettings: PublicAiProviderSettings;
@@ -84,6 +105,7 @@ type CanvasViewProps = {
   onDraftChange: (patch: Partial<CanvasDraftSettings>) => void;
   generationResults: CanvasGenerationResult[];
   lastGenerationModel: string;
+  lastGenerationCount: number;
   onGenerationResultsChange: (results: CanvasGenerationResult[]) => void;
   onLastGenerationModelChange: (model: string) => void;
   onCopyImage: (imageFileName: string) => Promise<void>;
@@ -146,6 +168,16 @@ const maxPromptHistory = 40;
 const typingHistoryWindowMs = 900;
 /** REVEAL 文案阶段；实际作品动效另等媒体加载完成后播放。 */
 const revealPhaseMs = canvasRevealDurationMs;
+/** 请求立即发起，给用户留出一小段稳定的「提示词解析」视觉阶段。 */
+const promptParsingPhaseMs = 700;
+
+function waitForCanvasPhaseWindow(startedAt: number, minimumMs: number): Promise<void> {
+  const remainingMs = Math.max(0, minimumMs - (performance.now() - startedAt));
+  if (remainingMs === 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => window.setTimeout(resolve, remainingMs));
+}
 
 function formatElapsedDuration(elapsedMs: number, t: (text: string) => string): string {
   const totalSeconds = Math.max(0, elapsedMs) / 1000;
@@ -163,6 +195,7 @@ export function CanvasView({
   canvasDraft,
   generationResults: results,
   lastGenerationModel: lastModel,
+  lastGenerationCount,
   isBusy,
   onDraftChange,
   onGenerationResultsChange,
@@ -182,6 +215,8 @@ export function CanvasView({
   const positivePromptRef = useRef<HTMLTextAreaElement>(null);
   const negativePromptRef = useRef<HTMLTextAreaElement>(null);
   const creationPanelRef = useRef<HTMLDivElement | null>(null);
+  const creationResizeStartRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const creationResizeWidthRef = useRef(canvasDraft.creationPanelWidth);
   const promptHistoryRef = useRef<Record<PromptField, string[]>>({ positive: [], negative: [] });
   const lastTypingRef = useRef<{ field: PromptField; at: number } | null>(null);
   const configMenuRef = useRef<HTMLDivElement | null>(null);
@@ -194,7 +229,6 @@ export function CanvasView({
   latestImagesRef.current = canvasDraft.referenceImages;
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
   const doubaoWebCanvasHostRef = useRef<HTMLDivElement | null>(null);
-  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationStartedAtRef = useRef<number | null>(null);
   const [optimizingField, setOptimizingField] = useState<PromptField | null>(null);
   // 生成相关状态提到 store：切到素材库卸载本组件后，再切回时新实例若读取局部
@@ -202,10 +236,16 @@ export function CanvasView({
   // （生成请求本身在主进程后台继续）。
   const isGenerating = useLibraryStore((state) => state.canvasIsGenerating);
   const setIsGenerating = useLibraryStore((state) => state.setCanvasGenerating);
+  const canvasPromptUndoSnapshot = useLibraryStore((state) => state.canvasPromptUndoSnapshot);
+  const setCanvasPromptUndoSnapshot = useLibraryStore((state) => state.setCanvasPromptUndoSnapshot);
   const phase = useLibraryStore((state) => state.canvasPhase);
   const thinkingKeywords = useLibraryStore((state) => state.canvasThinkingKeywords);
+  const atmosphereTone = useLibraryStore((state) => state.canvasAtmosphereTone);
   const setPhase = useLibraryStore((state) => state.setCanvasPhase);
   const setThinkingKeywords = useLibraryStore((state) => state.setCanvasThinkingKeywords);
+  const setAtmosphereTone = useLibraryStore((state) => state.setCanvasAtmosphereTone);
+  const setGenerationRunId = useLibraryStore((state) => state.setCanvasGenerationRunId);
+  const setCanvasLastGenerationCount = useLibraryStore((state) => state.setCanvasLastGenerationCount);
   const [errorText, setErrorText] = useState("");
   const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
   const [isGenerationSettingsOpen, setIsGenerationSettingsOpen] = useState(false);
@@ -215,6 +255,9 @@ export function CanvasView({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [generationElapsedMs, setGenerationElapsedMs] = useState<number | null>(null);
   const [creationPanelHeight, setCreationPanelHeight] = useState<number | null>(null);
+  const [liveCreationPanelWidth, setLiveCreationPanelWidth] = useState(canvasDraft.creationPanelWidth);
+  const [isCreationResizing, setIsCreationResizing] = useState(false);
+  const [liveResultsPanelWidth, setLiveResultsPanelWidth] = useState(canvasDraft.resultsPanelWidth);
   /** 手动收录进行中的结果索引；同一时刻只收录一张，null 表示空闲。 */
   const [archivingIndex, setArchivingIndex] = useState<number | null>(null);
   /** 自动收录整批进行中：仅这段时间内未落盘的结果才显示「归档中」角标。
@@ -261,6 +304,7 @@ export function CanvasView({
   );
   const hasUsableApi = Boolean(
     activeProfile?.enabled &&
+      activeProfile.provider !== "ollama" &&
       activeProfile.baseUrl &&
       activeProfile.hasApiKey &&
       (selectedGenerationModel?.capabilities.includes("image-generation") || isVideoModel),
@@ -270,12 +314,78 @@ export function CanvasView({
   // 仅在需要登录时，豆包登录弹窗才覆盖右侧画布宿主；登录后转入后台、恢复原生画布。
   const doubaoLoginVisible = isDoubaoWeb && doubaoStage === "login";
   const isCreationPanelCollapsed = canvasDraft.creationPanelCollapsed;
+  const isResultsPanelHidden = canvasDraft.resultsPanelHidden;
+
+  useEffect(() => {
+    setLiveCreationPanelWidth(canvasDraft.creationPanelWidth);
+  }, [canvasDraft.creationPanelWidth]);
+
+  useEffect(() => {
+    setLiveResultsPanelWidth(canvasDraft.resultsPanelWidth);
+  }, [canvasDraft.resultsPanelWidth]);
+
+  useEffect(() => {
+    if (!canvasPromptUndoSnapshot) {
+      return;
+    }
+
+    // 详情页推送发生在 CanvasView 挂载前：把推送前的两段文本注入现有撤销历史，
+    // 让画布里的正向/负向撤销按钮都能回到推送前的内容。
+    promptHistoryRef.current = {
+      positive: [canvasPromptUndoSnapshot.prompt],
+      negative: [canvasPromptUndoSnapshot.negativePrompt],
+    };
+    lastTypingRef.current = null;
+    setCanvasPromptUndoSnapshot(null);
+  }, [canvasPromptUndoSnapshot, setCanvasPromptUndoSnapshot]);
 
   function toggleCreationPanel() {
     setIsConfigMenuOpen(false);
     setIsReferenceImagePopoverOpen(false);
     setIsMoreMenuOpen(false);
     onDraftChange({ creationPanelCollapsed: !isCreationPanelCollapsed });
+  }
+
+  function clampCreationPanelWidth(value: number): number {
+    return normalizeCanvasCreationPanelWidth(value);
+  }
+
+  function updateCreationWidthFromPointer(clientX: number): void {
+    const start = creationResizeStartRef.current;
+    if (!start) {
+      return;
+    }
+    const nextWidth = clampCreationPanelWidth(start.startWidth + (clientX - start.startX));
+    creationResizeWidthRef.current = nextWidth;
+    setLiveCreationPanelWidth(nextWidth);
+  }
+
+  function finishCreationResize(event?: ReactPointerEvent<HTMLDivElement>): void {
+    const start = creationResizeStartRef.current;
+    if (!start) {
+      return;
+    }
+    if (event && event.currentTarget.hasPointerCapture(start.pointerId)) {
+      event.currentTarget.releasePointerCapture(start.pointerId);
+    }
+    creationResizeStartRef.current = null;
+    setIsCreationResizing(false);
+    const nextWidth = clampCreationPanelWidth(creationResizeWidthRef.current);
+    setLiveCreationPanelWidth(nextWidth);
+    onDraftChange({ creationPanelWidth: nextWidth });
+  }
+
+  function handleCreationResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    let delta = 0;
+    if (event.key === "ArrowLeft") delta = -16;
+    if (event.key === "ArrowRight") delta = 16;
+    if (event.key === "Home") delta = minCanvasCreationPanelWidth - liveCreationPanelWidth;
+    if (event.key === "End") delta = maxCanvasCreationPanelWidth - liveCreationPanelWidth;
+    if (delta === 0) return;
+    event.preventDefault();
+    const nextWidth = clampCreationPanelWidth(liveCreationPanelWidth + delta);
+    setLiveCreationPanelWidth(nextWidth);
+    onDraftChange({ creationPanelWidth: nextWidth });
   }
 
   // 右侧结果区沿用创作面板的实际高度，避免竖图的固有高度把网格行向下撑开。
@@ -554,15 +664,6 @@ export function CanvasView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results.length]);
 
-  // 卸载时清理 REVEAL 定时器，避免设置已卸载组件的状态。
-  useEffect(() => {
-    return () => {
-      if (revealTimerRef.current) {
-        clearTimeout(revealTimerRef.current);
-      }
-    };
-  }, []);
-
   // 全屏预览键盘导航：← 上一张 / → 下一张 / Esc 关闭。
   useEffect(() => {
     if (previewIndex === null) {
@@ -590,10 +691,11 @@ export function CanvasView({
     return field === "positive" ? canvasDraft.prompt : canvasDraft.negativePrompt;
   }
 
-  function updateFieldText(field: PromptField, nextText: string, source: ChangeSource): void {
+  function updateFieldText(field: PromptField, nextText: string, source: ChangeSource): boolean {
+    const limitedText = limitCanvasPromptText(nextText);
     const currentText = getFieldText(field);
-    if (nextText === currentText) {
-      return;
+    if (limitedText === currentText) {
+      return limitedText !== nextText;
     }
 
     const now = Date.now();
@@ -604,7 +706,8 @@ export function CanvasView({
       promptHistoryRef.current[field] = [...history, currentText].slice(-maxPromptHistory);
     }
     lastTypingRef.current = source === "typing" ? { field, at: now } : null;
-    onDraftChange(field === "positive" ? { prompt: nextText } : { negativePrompt: nextText });
+    onDraftChange(field === "positive" ? { prompt: limitedText } : { negativePrompt: limitedText });
+    return limitedText !== nextText;
   }
 
   function undoFieldChange(field: PromptField): void {
@@ -636,7 +739,7 @@ export function CanvasView({
     onNotify({ type: "error", text: t("复制失败，请检查系统剪贴板权限。") });
   }
 
-  async function pasteFieldText(field: PromptField): Promise<void> {
+  async function pasteAllFieldText(field: PromptField): Promise<void> {
     const result = await window.suyanApi.readClipboardText();
     if (!result.ok) {
       onNotify({ type: "error", text: t("读取剪贴板失败，请检查系统剪贴板权限。") });
@@ -649,14 +752,66 @@ export function CanvasView({
       return;
     }
 
+    // 从正向提示词粘贴时，把带标签或内联的负向约束拆到负向提示词框。
+    // 没有新的负向约束时也要清空旧内容，避免把上一段创作的规则误带过来。
+    // 负向提示词自己的粘贴按钮保持原样粘贴，方便用户输入完整的负向规则。
+    const splitPrompt = field === "positive"
+      ? splitNegativePromptFromPrompt(pastedText, "")
+      : null;
+    const promptSourceText = splitPrompt?.prompt ?? pastedText;
+    const nextText = limitCanvasPromptText(promptSourceText);
+    const negativeSourceText = splitPrompt?.negativePrompt ?? null;
+    const nextNegativeText = negativeSourceText === null ? null : limitCanvasPromptText(negativeSourceText);
+    const wasTruncated = nextText !== promptSourceText || nextNegativeText !== negativeSourceText;
+
     // 粘贴前先清空当前文本框，避免叠在旧内容后面。
     const textareaRef = field === "positive" ? positivePromptRef : negativePromptRef;
-    updateFieldText(field, pastedText, "action");
+    updateFieldText(field, nextText, "action");
+    if (nextNegativeText !== null && nextNegativeText !== canvasDraft.negativePrompt) {
+      updateFieldText("negative", nextNegativeText, "action");
+    }
+    // 负向提示词即使被自动拆出，也默认保持收起；用户可按需点击眼睛按钮查看。
+    if (splitPrompt) {
+      onDraftChange({ negativePromptHidden: true });
+    }
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(pastedText.length, pastedText.length);
+      textareaRef.current?.setSelectionRange(nextText.length, nextText.length);
     });
-    onNotify({ type: "success", text: t("已从剪贴板粘贴。") });
+    onNotify({
+      type: wasTruncated ? "info" : "success",
+      text: wasTruncated ? t("提示词最多支持 3000 字，超出部分未粘贴。") : t("已从剪贴板粘贴。"),
+    });
+  }
+
+  async function pasteSelectedText(field: PromptField, event: ClipboardEvent<HTMLTextAreaElement>): Promise<void> {
+    event.preventDefault();
+    const textarea = event.currentTarget;
+    const currentText = getFieldText(field);
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const result = await window.suyanApi.readClipboardText();
+    if (!result.ok) {
+      onNotify({ type: "error", text: t("读取剪贴板失败，请检查系统剪贴板权限。") });
+      return;
+    }
+
+    const pastedText = result.data.text;
+    if (!pastedText) {
+      onNotify({ type: "info", text: t("剪贴板中没有文本内容。") });
+      return;
+    }
+
+    const replacement = replaceCanvasPromptSelection(currentText, pastedText, selectionStart, selectionEnd);
+    updateFieldText(field, replacement.text, "action");
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(replacement.selectionStart, replacement.selectionEnd);
+    });
+    onNotify({
+      type: replacement.truncated ? "info" : "success",
+      text: replacement.truncated ? t("提示词最多支持 3000 字，超出部分未粘贴。") : t("已粘贴到选区。"),
+    });
   }
 
   async function optimizeFieldText(field: PromptField): Promise<void> {
@@ -676,7 +831,10 @@ export function CanvasView({
         promptKind: field,
       });
       if (optimizedPrompt?.trim()) {
-        updateFieldText(field, optimizedPrompt.trim(), "action");
+        const wasTruncated = updateFieldText(field, optimizedPrompt.trim(), "action");
+        if (wasTruncated) {
+          onNotify({ type: "info", text: t("提示词最多支持 3000 字，超出部分已截断。") });
+        }
       }
     } finally {
       setOptimizingField(null);
@@ -788,8 +946,11 @@ export function CanvasView({
       return;
     }
     if (!isDoubaoWeb && !hasUsableApi) {
-      setErrorText(t("请先在模型配置中启用一个配置，并填写 API Key。"));
-      onNotify({ type: "error", text: t("还没有可用的图像生成配置，请先打开模型配置。") });
+      const message = activeProfile?.provider === "ollama"
+        ? t("Ollama 当前仅支持文本和图像分析，不能用于生图，请选择生图 API。")
+        : t("请先在模型配置中启用一个配置，并填写 API Key。");
+      setErrorText(message.trim());
+      onNotify({ type: "error", text: activeProfile?.provider === "ollama" ? message : t("还没有可用的图像生成配置，请先打开模型配置。") });
       onOpenAiSettings();
       return;
     }
@@ -813,17 +974,31 @@ export function CanvasView({
     // 新请求失败时不会清空旧预览，避免一次失败就丢掉上一批可见的成果。
     setErrorText("");
     setThinkingKeywords(extractPromptKeywords(cleanPrompt));
+    setAtmosphereTone(resolveCanvasAtmosphereTone(cleanPrompt));
+    const generationRunId = useLibraryStore.getState().canvasGenerationRunId + 1;
+    setGenerationRunId(generationRunId);
     generationStartedAtRef.current = performance.now();
     setGenerationElapsedMs(null);
     setPhase("thinking");
     setIsGenerating(true);
-    void runGeneration(cleanPrompt);
+    void runGeneration(cleanPrompt, generationRunId);
   }
 
-  async function runGeneration(cleanPrompt: string) {
-    // 阶段二：GENERATING —— 真实调用 onGenerate / onImportGeneratedImages。
-    // 请求在最短 thinking 展示的同时发起；标题直接使用本次提示词，不再额外调用文本模型。
-    setPhase("generating");
+  async function runGeneration(cleanPrompt: string, generationRunId: number) {
+    const isCurrentRun = () => useLibraryStore.getState().canvasGenerationRunId === generationRunId;
+    const parsingStartedAt = performance.now();
+    // 请求立即发起；短暂的 thinking 视觉阶段与真实网络请求并行。
+    // 页面卸载不会取消这个计时器，返回画布时 store 仍能得到正确的生成阶段。
+    const parsingTimer = window.setTimeout(() => {
+      const state = useLibraryStore.getState();
+      if (
+        state.canvasGenerationRunId === generationRunId &&
+        state.canvasIsGenerating &&
+        state.canvasPhase === "thinking"
+      ) {
+        setPhase("generating");
+      }
+    }, promptParsingPhaseMs);
     // 反向提示词按用户填写原样发送并入库：不再追加去水印约束，
     // 否则库里存的反向提示词与用户所写不一致，回传画布重生成时后缀还会累加。
     const effectiveNegativePrompt = canvasDraft.negativePrompt.trim();
@@ -839,15 +1014,21 @@ export function CanvasView({
         prompt: cleanPrompt,
         negativePrompt: effectiveNegativePrompt,
       }));
+      // 快速接口也要完成一次可感知的「提示词进入画布」阶段；这里等待的是视觉窗口，
+      // 真实请求早已在上面启动，不会把网络请求延迟到 thinking 结束后才发送。
+      await waitForCanvasPhaseWindow(parsingStartedAt, promptParsingPhaseMs);
+      if (!isCurrentRun()) {
+        return;
+      }
       if (!data) {
         // 用户主动取消或调用方提前返回空：保留旧预览，不强行清空成空态。
-        setPhase(results.length > 0 ? "created" : "empty");
+        setPhase(useLibraryStore.getState().canvasGenerationResults.length > 0 ? "created" : "empty");
         return;
       }
       if (data.images.length === 0) {
         setErrorText(t("接口没有返回可保存的{media}，请检查模型和接口地址。", { media: isVideoModel ? t("视频") : t("图片") }));
         // 接口返回但无图：这种是配置/接口问题，清成空态更明确；旧预览保留意义不大。
-        setPhase("empty");
+        setPhase(useLibraryStore.getState().canvasGenerationResults.length > 0 ? "created" : "empty");
         return;
       }
 
@@ -856,25 +1037,34 @@ export function CanvasView({
       const previewResults: CanvasGenerationResult[] = data.images.map((image) => ({
         ...image,
         saved: false,
+        generationBatchId: generationRunId,
         requestPrompt: cleanPrompt,
         requestNegativePrompt: effectiveNegativePrompt,
       }));
       onLastGenerationModelChange(data.model);
-      onGenerationResultsChange(previewResults);
+      setCanvasLastGenerationCount(previewResults.length);
+      // 生成结果是当前运行期间的累计作品流：新批次追加到末尾，不能替换已经展示的批次。
+      const existingResults = useLibraryStore.getState().canvasGenerationResults;
+      onGenerationResultsChange([...existingResults, ...previewResults]);
       // 阶段三：REVEAL —— 结果就位后播 ~500ms 揭示动画，随后进入 CREATED。
       setPhase("reveal");
-      if (revealTimerRef.current) {
-        clearTimeout(revealTimerRef.current);
-      }
-      revealTimerRef.current = setTimeout(() => setPhase("created"), revealPhaseMs);
+      window.setTimeout(() => {
+        const state = useLibraryStore.getState();
+        if (state.canvasGenerationRunId === generationRunId && state.canvasPhase === "reveal") {
+          setPhase("created");
+        }
+      }, revealPhaseMs);
       // 自动收录为素材：默认关闭，用户在画布顶部手动开启后才走入库链路。
       // 关闭时结果只在画布预览（导出/复制走 dataUrl 无需 imageFileName），不再自动落盘。
       if (!canvasDraft.autoArchiveEnabled) {
         return;
       }
+      if (!isCurrentRun()) {
+        return;
+      }
       setIsArchivingBatch(true);
       const savedItems = await onImportGeneratedImages(data.images, {
-        title: cleanPrompt,
+        title: compactAutomaticPromptTitle(cleanPrompt),
         prompt: cleanPrompt,
         negativePrompt: effectiveNegativePrompt,
         generationMethod: data.model,
@@ -890,29 +1080,43 @@ export function CanvasView({
             }
           : {}),
       });
-      if (savedItems.length === data.images.length) {
-        onGenerationResultsChange(
-          previewResults.map((result, index) => ({
-            ...result,
-            imageFileName: savedItems[index]?.imageFileName,
+      if (isCurrentRun() && savedItems.length === data.images.length) {
+        const currentResults = useLibraryStore.getState().canvasGenerationResults;
+        onGenerationResultsChange(currentResults.map((existing) => {
+          const identityIndex = previewResults.indexOf(existing);
+          const previewIndex = identityIndex >= 0
+            ? identityIndex
+            : previewResults.findIndex((candidate) => candidate.dataUrl === existing.dataUrl);
+          if (previewIndex < 0 || !savedItems[previewIndex]?.imageFileName) {
+            return existing;
+          }
+          return {
+            ...existing,
+            imageFileName: savedItems[previewIndex].imageFileName,
             saved: true,
-          })),
-        );
+          };
+        }));
       }
     } catch (error) {
+      if (!isCurrentRun()) {
+        return;
+      }
       const message = error instanceof Error ? error.message : t("生成图片失败，请稍后重试。");
       setErrorText(message);
       onNotify({ type: "error", text: message });
       // 新请求失败：保留上一批可见的预览结果，而不是清成空态；
       // 用户可基于上一批重新调整提示词后重试，不会一次失败就丢成果。
-      setPhase(results.length > 0 ? "created" : "empty");
+      setPhase(useLibraryStore.getState().canvasGenerationResults.length > 0 ? "created" : "empty");
     } finally {
-      setIsGenerating(false);
-      setIsArchivingBatch(false);
-      const startedAt = generationStartedAtRef.current;
-      if (startedAt !== null) {
-        setGenerationElapsedMs(Math.max(0, performance.now() - startedAt));
-        generationStartedAtRef.current = null;
+      window.clearTimeout(parsingTimer);
+      if (isCurrentRun()) {
+        setIsGenerating(false);
+        setIsArchivingBatch(false);
+        const startedAt = generationStartedAtRef.current;
+        if (startedAt !== null) {
+          setGenerationElapsedMs(Math.max(0, performance.now() - startedAt));
+          generationStartedAtRef.current = null;
+        }
       }
     }
   }
@@ -963,7 +1167,7 @@ export function CanvasView({
       const savedItems = await onImportGeneratedImages(
         [{ dataUrl: result.dataUrl, revisedPrompt: result.revisedPrompt, attributionId: result.attributionId, mediaType: result.mediaType }],
         {
-          title: cleanPrompt,
+          title: compactAutomaticPromptTitle(cleanPrompt),
           prompt: cleanPrompt,
           negativePrompt: effectiveNegativePrompt,
           generationMethod: lastModel || canvasDraft.generationProvider,
@@ -982,10 +1186,19 @@ export function CanvasView({
 
       const savedItem = savedItems[0];
       if (savedItem?.imageFileName) {
-        // 回填这一张：其它结果保持不变。
+        // 回填这一张：收录等待期间可能已经追加新批次，必须读取当前数组，不能使用
+        // 旧渲染闭包里的 results 覆盖后来追加的作品。结果数组只追加不重排，原索引稳定。
+        const currentResults = useLibraryStore.getState().canvasGenerationResults;
+        const targetIndex = currentResults[index]?.dataUrl === result.dataUrl
+          ? index
+          : currentResults.findIndex((existing) => existing === result);
+        if (targetIndex < 0) {
+          onNotify({ type: "error", text: t("这张生成结果已不存在，请刷新后重试。") });
+          return;
+        }
         onGenerationResultsChange(
-          results.map((existing, existingIndex) =>
-            existingIndex === index
+          currentResults.map((existing, existingIndex) =>
+            existingIndex === targetIndex
               ? { ...existing, imageFileName: savedItem.imageFileName, saved: true }
               : existing,
           ),
@@ -1011,7 +1224,15 @@ export function CanvasView({
       return;
     }
 
-    const pendingResults = results.filter((result) => !result.saved);
+    // 记录这次点击时的原始位置。生成结果只追加到数组末尾，因此即使收录等待期间
+    // 有新批次完成，原批次的位置仍稳定；回填时再读取 store 当前数组，不能写回旧闭包。
+    const pendingResultIndices = results.reduce<number[]>((indices, result, index) => {
+      if (!result.saved) {
+        indices.push(index);
+      }
+      return indices;
+    }, []);
+    const pendingResults = pendingResultIndices.map((index) => results[index]);
     if (pendingResults.length === 0) {
       onNotify({
         type: "info",
@@ -1022,7 +1243,7 @@ export function CanvasView({
 
     setIsArchivingBatch(true);
     try {
-      // 整批共用同一次生成的提示词快照（results 每次生成整体替换，同批同源）；
+      // 整批共用这次点击时第一张待收录作品的提示词快照；生成结果会跨批次累计，
       // 缺快照时才回退到当前草稿。
       const snapshot = pendingResults[0];
       const cleanPrompt = snapshot?.requestPrompt?.trim() || canvasDraft.prompt.trim();
@@ -1037,7 +1258,7 @@ export function CanvasView({
           ...(result.mediaType ? { mediaType: result.mediaType } : {}),
         })),
         {
-          title: cleanPrompt,
+          title: compactAutomaticPromptTitle(cleanPrompt),
           prompt: cleanPrompt,
           negativePrompt: effectiveNegativePrompt,
           generationMethod: lastModel || selectedModel || canvasDraft.generationProvider,
@@ -1058,14 +1279,14 @@ export function CanvasView({
         throw new Error(`导出不完整：应保存 ${pendingResults.length} 个生成结果，实际保存 ${savedItems.length} 个。`);
       }
 
-      let savedIndex = 0;
+      const currentResults = useLibraryStore.getState().canvasGenerationResults;
       onGenerationResultsChange(
-        results.map((result) => {
-          if (result.saved) {
+        currentResults.map((result, resultIndex) => {
+          const pendingIndex = pendingResultIndices.indexOf(resultIndex);
+          if (pendingIndex < 0 || result.saved) {
             return result;
           }
-          const savedItem = savedItems[savedIndex];
-          savedIndex += 1;
+          const savedItem = savedItems[pendingIndex];
           return {
             ...result,
             imageFileName: savedItem.imageFileName,
@@ -1083,7 +1304,7 @@ export function CanvasView({
   }
 
   return (
-    <section className="mx-auto w-full max-w-[min(100%,1400px)] px-3 py-4 min-[640px]:px-5 min-[900px]:px-6 min-[1024px]:px-8 min-[1440px]:px-10 min-[1024px]:py-6">
+    <section className="mx-auto w-full max-w-none px-3 py-4 min-[640px]:px-5 min-[900px]:px-6 min-[1024px]:px-8 min-[1440px]:px-10 min-[1024px]:py-6">
       <div className="canvas-page-heading mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="mb-2 inline-flex items-center gap-2 text-xs font-medium tracking-wide text-muted">
@@ -1095,10 +1316,15 @@ export function CanvasView({
       </div>
 
       <div
-        className={`canvas-layout relative grid items-stretch gap-4 ${isCreationPanelCollapsed ? "" : "lg:grid-cols-[380px_minmax(0,1fr)]"}`}
+        className="canvas-layout relative grid items-stretch gap-4"
         data-sidebar-collapsed={isCreationPanelCollapsed}
+        data-results-hidden={isResultsPanelHidden}
+        style={{
+          "--canvas-creation-width": `${liveCreationPanelWidth}px`,
+          "--canvas-results-width": `${liveResultsPanelWidth}px`,
+        } as CSSProperties}
       >
-        <div className="canvas-sidebar-toggle">
+        <div className="canvas-sidebar-toggle" aria-label={t("画布侧栏控制")}>
           <IconTooltipButton
             aria-controls="canvas-creation-panel"
             aria-expanded={!isCreationPanelCollapsed}
@@ -1109,6 +1335,16 @@ export function CanvasView({
             tooltipAlign={isCreationPanelCollapsed ? "start" : "end"}
             variant="ghost"
           />
+          <IconTooltipButton
+            aria-controls="canvas-results-panel"
+            aria-expanded={!isResultsPanelHidden}
+            data-feature-guide="canvas-results-panel-toggle"
+            icon={isResultsPanelHidden ? <PanelRightOpen size={18} /> : <PanelRightClose size={18} />}
+            label={isResultsPanelHidden ? t("显示作品展示区") : t("隐藏作品展示区")}
+            onClick={() => onDraftChange({ resultsPanelHidden: !isResultsPanelHidden })}
+            tooltipAlign={isCreationPanelCollapsed ? "start" : "end"}
+            variant="ghost"
+          />
         </div>
         <div
           id="canvas-creation-panel"
@@ -1116,9 +1352,37 @@ export function CanvasView({
           role="region"
           hidden={isCreationPanelCollapsed}
           inert={isCreationPanelCollapsed}
-          className="self-start rounded-3xl border border-border bg-panel p-4 min-[640px]:p-5"
+          className="relative self-start rounded-3xl border border-border bg-panel p-4 min-[640px]:p-5"
           ref={creationPanelRef}
         >
+          <div
+            aria-label={t("调整创作区宽度")}
+            aria-orientation="vertical"
+            aria-valuemax={maxCanvasCreationPanelWidth}
+            aria-valuemin={minCanvasCreationPanelWidth}
+            aria-valuenow={liveCreationPanelWidth}
+            className={`canvas-creation-resize-handle absolute -right-2 top-0 z-10 hidden h-full w-4 cursor-col-resize items-center justify-center touch-none lg:flex ${isCreationResizing ? "is-resizing" : ""}`}
+            onKeyDown={handleCreationResizeKeyDown}
+            onPointerCancel={finishCreationResize}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              creationResizeStartRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startWidth: liveCreationPanelWidth,
+              };
+              creationResizeWidthRef.current = liveCreationPanelWidth;
+              setIsCreationResizing(true);
+            }}
+            onPointerMove={(event) => updateCreationWidthFromPointer(event.clientX)}
+            onPointerUp={finishCreationResize}
+            role="separator"
+            tabIndex={0}
+            title={t("拖动调整创作区宽度")}
+          >
+            <GripVertical aria-hidden="true" className="text-muted/80" size={14} />
+          </div>
           <div className="mb-4 flex items-center justify-between">
             <div>
               <h2 className="font-semibold text-foreground">{t("创作")}</h2>
@@ -1128,19 +1392,9 @@ export function CanvasView({
 
           <div className="flex items-center justify-between gap-3">
             <label className="text-xs font-medium text-muted" htmlFor="canvas-prompt">{t("描述你想创作的画面")}</label>
-            <button
-              aria-expanded={!canvasDraft.positivePromptHidden}
-              aria-label={canvasDraft.positivePromptHidden ? t("显示正向提示词") : t("隐藏正向提示词")}
-              className="inline-flex size-8 items-center justify-center rounded-lg border border-border bg-background text-muted transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-              onClick={() => onDraftChange({ positivePromptHidden: !canvasDraft.positivePromptHidden })}
-              type="button"
-            >
-              {canvasDraft.positivePromptHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-            </button>
           </div>
 
-          {!canvasDraft.positivePromptHidden ? (
-            <PromptTextField
+          <PromptTextField
               field="positive"
               label=""
               placeholder={t("描述主体、场景、光线、镜头和风格…")}
@@ -1155,12 +1409,13 @@ export function CanvasView({
               onClear={() => clearFieldText("positive")}
               onCopy={() => void copyFieldText("positive")}
               onOptimize={() => void optimizeFieldText("positive")}
-              onPaste={() => void pasteFieldText("positive")}
+              onPasteAll={() => void pasteAllFieldText("positive")}
+              onKeyboardPaste={(event) => void pasteSelectedText("positive", event)}
               onUndo={() => undoFieldChange("positive")}
               actionRows={
                 <div data-feature-guide="canvas-prompt-actions" className="mt-2 flex items-stretch gap-1.5" aria-label={t("提示词操作")}>
                   <button
-                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-primary/40 bg-primary/10 px-2 text-xs font-semibold text-primary transition hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-primary/40 bg-primary/10 px-2 text-xs font-semibold text-primary transition hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={optimizingField !== null}
                     onClick={() => void optimizeFieldText("positive")}
                     type="button"
@@ -1171,7 +1426,7 @@ export function CanvasView({
                   <button
                     className="inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-background px-2 text-xs font-medium text-foreground transition hover:border-primary/45 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={optimizingField !== null}
-                    onClick={() => void pasteFieldText("positive")}
+                    onClick={() => void pasteAllFieldText("positive")}
                     type="button"
                   >
                     <ClipboardPaste size={14} />
@@ -1246,7 +1501,6 @@ export function CanvasView({
                 </>
               }
             />
-          ) : null}
           <input
             accept="image/*"
             className="hidden"
@@ -1284,7 +1538,8 @@ export function CanvasView({
               onClear={() => clearFieldText("negative")}
               onCopy={() => void copyFieldText("negative")}
               onOptimize={() => void optimizeFieldText("negative")}
-              onPaste={() => void pasteFieldText("negative")}
+              onPasteAll={() => void pasteAllFieldText("negative")}
+              onKeyboardPaste={(event) => void pasteSelectedText("negative", event)}
               onUndo={() => undoFieldChange("negative")}
             />
           ) : null}
@@ -1324,8 +1579,8 @@ export function CanvasView({
                   <ChevronDown className={`transition-transform ${isConfigMenuOpen ? "rotate-180" : ""}`} size={14} />
                 </span>
               </div>
-              <div className="mt-2 truncate text-foreground">
-                {`${activeProfile?.name ?? t("未选择配置")} · ${selectedModel || t("未选择模型")}`}
+              <div className="mt-2 min-w-0 text-foreground">
+                <MarqueeText text={`${activeProfile?.name ?? t("未选择配置")} · ${selectedModel || t("未选择模型")}`} />
               </div>
             </button>
 
@@ -1368,7 +1623,7 @@ export function CanvasView({
                         >
                           <span className="min-w-0 truncate font-medium">{profile.name || t("未命名 API")}</span>
                           <span className="flex min-w-0 items-center justify-between gap-2">
-                            <span className="truncate">{model.label || model.id}</span>
+                            <MarqueeText className="min-w-0 flex-1" text={model.label || model.id} />
                             {isSelected ? <Check className="shrink-0" size={14} /> : null}
                           </span>
                         </button>
@@ -1473,9 +1728,10 @@ export function CanvasView({
           webCanvasHostRef={doubaoWebCanvasHostRef}
           phase={phase}
           lastModel={lastModel}
+          currentGenerationCount={lastGenerationCount}
           results={results}
           thinkingKeywords={thinkingKeywords}
-          blurPreviewSrc={canvasDraft.referenceImages[0]?.dataUrl || ""}
+          atmosphereTone={atmosphereTone}
           generationElapsedMs={generationElapsedMs}
           lockedHeight={isCreationPanelCollapsed ? null : creationPanelHeight}
           onOpenPreview={(index) => {
@@ -1488,6 +1744,24 @@ export function CanvasView({
           archivingIndex={archivingIndex}
           archivingBatch={isArchivingBatch}
         />
+
+        {!isResultsPanelHidden ? (
+          <CanvasResultsPanel
+            results={results}
+            lockedHeight={isCreationPanelCollapsed ? null : creationPanelHeight}
+            width={liveResultsPanelWidth}
+            onWidthPreview={setLiveResultsPanelWidth}
+            onWidthCommit={(width) => {
+              const nextWidth = normalizeCanvasResultsPanelWidth(width);
+              setLiveResultsPanelWidth(nextWidth);
+              onDraftChange({ resultsPanelWidth: nextWidth });
+            }}
+            onOpenPreview={(index) => {
+              setPreviewIndex(index);
+              onFullscreenPreviewChange(true);
+            }}
+          />
+        ) : null}
       </div>
 
       {previewIndex !== null && results[previewIndex] ? (
@@ -1624,7 +1898,8 @@ type PromptTextFieldProps = {
   onClear: () => void;
   onCopy: () => void;
   onOptimize: () => void;
-  onPaste: () => void;
+  onPasteAll: () => void;
+  onKeyboardPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onUndo: () => void;
   actionRows?: ReactNode;
   floatingOverlay?: ReactNode;
@@ -1647,7 +1922,8 @@ function PromptTextField({
   onClear,
   onCopy,
   onOptimize,
-  onPaste,
+  onPasteAll,
+  onKeyboardPaste,
   onUndo,
   actionRows,
   floatingOverlay,
@@ -1658,6 +1934,38 @@ function PromptTextField({
 }: PromptTextFieldProps) {
   const { t } = useLocale();
   const textareaId = field === "positive" ? "canvas-prompt" : "canvas-negative-prompt";
+  const heightRef = useRef(height);
+  const onHeightChangeRef = useRef(onHeightChange);
+  heightRef.current = height;
+  onHeightChangeRef.current = onHeightChange;
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !onHeightChangeRef.current) {
+      return;
+    }
+
+    const reportHeight = () => {
+      const nextHeight = Math.round(textarea.getBoundingClientRect().height);
+      // The inline height is the persisted value. Ignore the observer's initial
+      // callback and any reflow that merely reflects that same value.
+      if (nextHeight <= 0 || nextHeight === heightRef.current) {
+        return;
+      }
+      onHeightChangeRef.current?.(nextHeight);
+    };
+
+    const observer = new ResizeObserver(reportHeight);
+    observer.observe(textarea);
+    reportHeight();
+    return () => {
+      // Flush a drag that ended immediately before the page switched and the
+      // observer had a chance to deliver its notification.
+      reportHeight();
+      observer.disconnect();
+    };
+  }, [textareaRef]);
+
   return (
     <div className={label ? "" : "mt-2"}>
       <div data-feature-guide={field === "positive" ? "canvas-prompt-editor" : undefined}>
@@ -1667,20 +1975,27 @@ function PromptTextField({
             className={`${field === "positive" ? "min-h-48" : "min-h-20"} w-full resize-y rounded-2xl border border-border bg-background px-3 py-3 text-sm leading-6 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20`}
             data-feature-guide={field === "positive" ? "canvas-prompt-resize" : undefined}
             id={textareaId}
+            maxLength={maxCanvasPromptLength}
             onChange={(event) => onChange(event.target.value)}
-             onPointerUp={(event) => onHeightChange?.(Math.round(event.currentTarget.getBoundingClientRect().height))}
+            onPaste={onKeyboardPaste}
             placeholder={placeholder}
             ref={textareaRef}
             value={value}
-             style={height === undefined ? undefined : { height: `${height}px` }}
+            style={height === undefined ? undefined : { height: `${height}px` }}
           />
           {floatingOverlay}
         </div>
       </div>
+      <div
+        className={`mt-1 flex justify-end px-1 text-[11px] tabular-nums ${value.length >= maxCanvasPromptLength ? "text-warning" : "text-muted"}`}
+        title={t("提示词最多 3000 字")}
+      >
+        {t("提示词字数：{count}/{max}", { count: value.length, max: maxCanvasPromptLength })}
+      </div>
       {actionRows ?? (
         <div className="mt-2 grid grid-cols-5 gap-1.5" aria-label={`${label || t("负向提示词")}${t("操作")}`}>
           <PromptActionButton icon={<Copy size={14} />} iconOnly={iconOnlyActions} label={t("复制")} onClick={onCopy} />
-          <PromptActionButton icon={<ClipboardPaste size={14} />} iconOnly={iconOnlyActions} label={t("粘贴")} onClick={onPaste} />
+          <PromptActionButton icon={<ClipboardPaste size={14} />} iconOnly={iconOnlyActions} label={t("粘贴")} onClick={onPasteAll} />
           <PromptActionButton disabled={disabled} icon={isOptimizing ? <LoaderCircle className="animate-spin" size={14} /> : <WandSparkles size={14} />} iconOnly={iconOnlyActions} label={isOptimizing ? t("优化中") : t("优化")} onClick={onOptimize} />
           <PromptActionButton disabled={!canUndo} icon={<Undo2 size={14} />} iconOnly={iconOnlyActions} label={t("返回")} onClick={onUndo} />
           <PromptActionButton icon={<Trash2 size={14} />} iconOnly={iconOnlyActions} label={t("清空")} onClick={onClear} tone="danger" />
@@ -2124,9 +2439,10 @@ type CreativeCanvasProps = {
   webCanvasHostRef: RefObject<HTMLDivElement | null>;
   phase: CanvasPhase;
   lastModel: string;
+  currentGenerationCount?: number;
   results: CanvasGenerationResult[];
   thinkingKeywords: string[];
-  blurPreviewSrc: string;
+  atmosphereTone?: CanvasAtmosphereTone;
   generationElapsedMs: number | null;
   lockedHeight: number | null;
   onOpenPreview: (index: number) => void;
@@ -2270,6 +2586,295 @@ function DoubaoOptionCard({
   );
 }
 
+export function orderCanvasResultsForDisplay(results: CanvasGenerationResult[]): Array<{ result: CanvasGenerationResult; index: number }> {
+  const groups = new Map<string, Array<{ result: CanvasGenerationResult; index: number }>>();
+
+  results.forEach((result, index) => {
+    // 新结果都有批次号；旧的内存结果没有批次号时按单张兼容，避免丢失展示。
+    const key = result.generationBatchId === undefined
+      ? `legacy-${index}`
+      : `batch-${result.generationBatchId}`;
+    const group = groups.get(key) ?? [];
+    group.push({ result, index });
+    groups.set(key, group);
+  });
+
+  return Array.from(groups.values()).reverse().reduce<Array<{ result: CanvasGenerationResult; index: number }>>(
+    (ordered, group) => ordered.concat(group),
+    [],
+  );
+}
+
+const canvasPromptTooltipDelayMs = 5000;
+
+type CanvasGeneratedResultTileProps = {
+  result: CanvasGenerationResult;
+  index: number;
+  displayIndex: number;
+  prompt: string;
+  onOpenPreview: (index: number) => void;
+};
+
+function CanvasGeneratedResultTile({ result, index, displayIndex, prompt, onOpenPreview }: CanvasGeneratedResultTileProps) {
+  const { t } = useLocale();
+  const mediaRef = useRef<HTMLDivElement>(null);
+  const tooltipTimerRef = useRef<number | null>(null);
+  const tooltipId = useId();
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+
+  function clearTooltipTimer(): void {
+    if (tooltipTimerRef.current !== null) {
+      window.clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+  }
+
+  function hideTooltip(): void {
+    clearTooltipTimer();
+    setTooltipVisible(false);
+    setTooltipPosition(null);
+  }
+
+  function scheduleTooltip(): void {
+    clearTooltipTimer();
+    setTooltipVisible(false);
+    setTooltipPosition(null);
+    tooltipTimerRef.current = window.setTimeout(() => {
+      tooltipTimerRef.current = null;
+      const media = mediaRef.current;
+      if (!media) {
+        return;
+      }
+      const rect = media.getBoundingClientRect();
+      const tooltipWidth = Math.min(360, Math.max(240, window.innerWidth - 24));
+      const left = Math.min(
+        Math.max(12, rect.left),
+        Math.max(12, window.innerWidth - tooltipWidth - 12),
+      );
+      const estimatedHeight = 120;
+      const top = rect.bottom + 10 + estimatedHeight <= window.innerHeight
+        ? rect.bottom + 10
+        : Math.max(12, rect.top - estimatedHeight - 10);
+      setTooltipPosition({ top, left });
+      setTooltipVisible(true);
+    }, canvasPromptTooltipDelayMs);
+  }
+
+  useEffect(() => {
+    return () => clearTooltipTimer();
+  }, []);
+
+  useEffect(() => {
+    if (!tooltipVisible) {
+      return;
+    }
+    const hideOnViewportChange = () => hideTooltip();
+    window.addEventListener("resize", hideOnViewportChange);
+    window.addEventListener("scroll", hideOnViewportChange, true);
+    return () => {
+      window.removeEventListener("resize", hideOnViewportChange);
+      window.removeEventListener("scroll", hideOnViewportChange, true);
+    };
+  }, [tooltipVisible]);
+
+  return (
+    <>
+      <button
+        aria-describedby={tooltipVisible ? tooltipId : undefined}
+        aria-label={t("查看第 {index} 张生成作品", { index: displayIndex + 1 })}
+        className="group block w-full overflow-hidden rounded-2xl border border-border/70 bg-background/55 text-left transition hover:border-primary/55 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        onBlur={hideTooltip}
+        onClick={() => onOpenPreview(index)}
+        onFocus={scheduleTooltip}
+        type="button"
+      >
+        <div
+          className="relative aspect-[4/3] overflow-hidden bg-background/70"
+          onPointerEnter={scheduleTooltip}
+          onPointerLeave={hideTooltip}
+          ref={mediaRef}
+        >
+          {result.mediaType === "video" ? (
+            <video
+              aria-hidden="true"
+              className="h-full w-full object-contain"
+              muted
+              playsInline
+              preload="metadata"
+              src={result.dataUrl}
+            />
+          ) : (
+            <img
+              alt=""
+              className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.03]"
+              src={result.dataUrl}
+            />
+          )}
+          <span className="absolute left-2 top-2 inline-flex min-w-6 items-center justify-center rounded-full bg-background/85 px-1.5 py-1 text-[10px] font-semibold tabular-nums text-foreground shadow-sm backdrop-blur">
+            {result.mediaType === "video" ? <Film size={11} /> : displayIndex + 1}
+          </span>
+          {result.saved ? (
+            <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-background/85 px-1.5 py-1 text-[10px] text-primary shadow-sm backdrop-blur">
+              <Check size={10} /> {t("已收录")}
+            </span>
+          ) : null}
+        </div>
+      </button>
+      {tooltipVisible && tooltipPosition
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed z-[10001] max-w-[min(22.5rem,calc(100vw-1.5rem))] rounded-xl border border-border/80 bg-panel/95 px-3 py-2 text-xs leading-5 text-foreground shadow-2xl backdrop-blur"
+              id={tooltipId}
+              role="tooltip"
+              style={{ top: tooltipPosition.top, left: tooltipPosition.left }}
+            >
+              {prompt}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
+function CanvasResultsPanel({
+  results,
+  lockedHeight,
+  width,
+  onWidthPreview,
+  onWidthCommit,
+  onOpenPreview,
+}: {
+  results: CanvasGenerationResult[];
+  lockedHeight: number | null;
+  width: number;
+  onWidthPreview: (width: number) => void;
+  onWidthCommit: (width: number) => void;
+  onOpenPreview: (index: number) => void;
+}) {
+  const { t } = useLocale();
+  const resultsListRef = useRef<HTMLDivElement>(null);
+  const resizeStartRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  const resizeWidthRef = useRef(width);
+  const [isResizing, setIsResizing] = useState(false);
+  const orderedResults = orderCanvasResultsForDisplay(results);
+
+  resizeWidthRef.current = width;
+
+  function clampWidth(value: number): number {
+    return Math.max(minCanvasResultsPanelWidth, Math.min(maxCanvasResultsPanelWidth, Math.round(value)));
+  }
+
+  function updateWidthFromPointer(clientX: number): void {
+    const start = resizeStartRef.current;
+    if (!start) {
+      return;
+    }
+    const nextWidth = clampWidth(start.startWidth - (clientX - start.startX));
+    resizeWidthRef.current = nextWidth;
+    onWidthPreview(nextWidth);
+  }
+
+  function finishResize(event?: ReactPointerEvent<HTMLDivElement>): void {
+    const start = resizeStartRef.current;
+    if (!start) {
+      return;
+    }
+    if (event && event.currentTarget.hasPointerCapture(start.pointerId)) {
+      event.currentTarget.releasePointerCapture(start.pointerId);
+    }
+    resizeStartRef.current = null;
+    setIsResizing(false);
+    onWidthCommit(resizeWidthRef.current);
+  }
+
+  function handleResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    let delta = 0;
+    if (event.key === "ArrowLeft") delta = 16;
+    if (event.key === "ArrowRight") delta = -16;
+    if (event.key === "Home") delta = minCanvasResultsPanelWidth - width;
+    if (event.key === "End") delta = maxCanvasResultsPanelWidth - width;
+    if (delta === 0) return;
+    event.preventDefault();
+    onWidthCommit(clampWidth(width + delta));
+  }
+
+  // 新批次置顶后回到列表顶部，让刚生成的作品立即进入可视区域。
+  useEffect(() => {
+    if (results.length > 0) {
+      resultsListRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [results.length]);
+
+  return (
+    <section
+      id="canvas-results-panel"
+      aria-labelledby="canvas-results-heading"
+      className="canvas-results-panel relative flex min-h-0 self-stretch flex-col rounded-3xl border border-border/50 p-3"
+      data-feature-guide="canvas-results-panel"
+      role="region"
+      style={lockedHeight !== null ? { height: `${lockedHeight}px` } : undefined}
+    >
+      <div
+        aria-label={t("调整生成作品区宽度")}
+        aria-orientation="vertical"
+        aria-valuemax={maxCanvasResultsPanelWidth}
+        aria-valuemin={minCanvasResultsPanelWidth}
+        aria-valuenow={width}
+        className={`canvas-results-resize-handle absolute -left-2 top-0 z-10 hidden h-full w-4 cursor-col-resize items-center justify-center touch-none lg:flex ${isResizing ? "is-resizing" : ""}`}
+        onKeyDown={handleResizeKeyDown}
+        onPointerCancel={finishResize}
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          resizeStartRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width };
+          resizeWidthRef.current = width;
+          setIsResizing(true);
+        }}
+        onPointerMove={(event) => updateWidthFromPointer(event.clientX)}
+        onPointerUp={finishResize}
+        role="separator"
+        tabIndex={0}
+        title={t("拖动调整生成作品区宽度")}
+      >
+        <GripVertical aria-hidden="true" className="text-muted/80" size={14} />
+      </div>
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-2 px-1">
+        <div className="min-w-0">
+          <h2 className="truncate text-sm font-semibold text-foreground" id="canvas-results-heading">{t("生成作品")}</h2>
+          <p className="mt-1 text-[11px] text-muted">{t("点击查看大图")}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-1 text-[11px] font-medium tabular-nums text-primary">
+          {results.length}
+        </span>
+      </div>
+
+      {results.length === 0 ? (
+        <div className="flex min-h-36 flex-1 items-center justify-center rounded-2xl border border-dashed border-border/80 bg-background/35 px-4 text-center text-xs leading-5 text-muted">
+          {t("生成后的作品会显示在这里")}
+        </div>
+      ) : (
+        <div ref={resultsListRef} className="canvas-results-panel__list min-h-0 max-h-full flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5" aria-label={t("生成作品列表")}>
+          {orderedResults.map(({ result, index }, displayIndex) => {
+            const prompt = result.requestPrompt?.trim() || result.revisedPrompt?.trim() || t("生成作品 {index}", { index: displayIndex + 1 });
+            return (
+              <CanvasGeneratedResultTile
+                displayIndex={displayIndex}
+                index={index}
+                key={`${result.dataUrl.slice(0, 32)}-${index}`}
+                onOpenPreview={onOpenPreview}
+                prompt={prompt}
+                result={result}
+              />
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function CreativeCanvas({
   webCanvasEnabled,
   webCanvasLoginVisible,
@@ -2278,8 +2883,9 @@ export function CreativeCanvas({
   phase,
   lastModel,
   results,
+  currentGenerationCount = results.length,
   thinkingKeywords,
-  blurPreviewSrc,
+  atmosphereTone = "neutral",
   generationElapsedMs,
   lockedHeight,
   onOpenPreview,
@@ -2296,18 +2902,18 @@ export function CreativeCanvas({
     : webCanvasLoading
       ? t("正在连接豆包网页画布…")
       : phase === "thinking"
-        ? t("正在理解你的想法…")
+        ? t("创作核心正在唤醒…")
         : phase === "generating"
           ? webCanvasEnabled
             ? t("豆包正在后台生成…")
-            : t("AI 正在创作中…")
+            : t("创作核心正在汇聚能量…")
           : results.length > 0
             ? lastModel
               ? t("模型：{model}", { model: lastModel })
-              : t("已生成 {count} 张", { count: results.length })
+              : t("已生成 {count} 张", { count: currentGenerationCount })
             : webCanvasEnabled
               ? t("豆包已就绪 · 作品会出现在这里")
-              : t("作品会出现在这里");
+              : t("创作核心已待命 · 作品会在这里诞生");
 
   return (
     <div
@@ -2327,7 +2933,7 @@ export function CreativeCanvas({
                 {t("用时 {duration}", { duration: formatElapsedDuration(generationElapsedMs, t) })}
               </span>
             ) : null}
-            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{t("已生成 {count} 张", { count: results.length })}</span>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-primary">{t("已生成 {count} 张", { count: currentGenerationCount })}</span>
           </div>
         ) : null}
       </div>
@@ -2339,12 +2945,13 @@ export function CreativeCanvas({
             {t("正在连接豆包网页画布…")}
           </div>
         ) : isBusyPhase ? (
-          <CanvasGeneratingStage phase={phase} keywords={thinkingKeywords} blurPreviewSrc={blurPreviewSrc} />
+          <CanvasGeneratingStage phase={phase} keywords={thinkingKeywords} tone={atmosphereTone} />
         ) : results.length === 0 ? (
           <CanvasEmptyStage />
         ) : (
           <CanvasResultStage
              results={results}
+             currentGenerationCount={currentGenerationCount}
              lastModel={lastModel}
              reveal={phase === "reveal"}
              onOpenPreview={onOpenPreview}
@@ -2377,11 +2984,10 @@ export function CreativeCanvas({
 function CanvasEmptyStage() {
   const { t } = useLocale();
   return (
-    <CanvasMotionBackdrop blurPreviewSrc="" mode="empty" className="flex min-h-0 flex-1 px-6 py-8 text-center">
-      <div className="canvas-empty-content flex flex-1 flex-col items-center justify-center gap-4">
-        <Sparkles className="text-primary/55" size={30} strokeWidth={1.3} />
-        <h3 className="font-medium text-foreground">{t("留一片空白，给你的想象")}</h3>
-        <p className="max-w-60 text-xs leading-6 text-muted">{t("从一个想法开始，作品会在这里与你见面。")}</p>
+    <CanvasMotionBackdrop mode="empty" className="flex min-h-0 flex-1 px-6 py-8 text-center">
+      <div className="canvas-empty-content flex flex-1 flex-col items-center justify-end gap-2">
+        <h3 className="font-medium text-foreground">{t("等待灵感生成")}</h3>
+        <p className="max-w-60 text-xs leading-6 text-muted">{t("从一个想法开始，创作核心会在这里苏醒。")}</p>
       </div>
     </CanvasMotionBackdrop>
   );
@@ -2390,11 +2996,11 @@ function CanvasEmptyStage() {
 function CanvasGeneratingStage({
   phase,
   keywords,
-  blurPreviewSrc,
+  tone,
 }: {
   phase: CanvasPhase;
   keywords: string[];
-  blurPreviewSrc: string;
+  tone: CanvasAtmosphereTone;
 }) {
   const { t } = useLocale();
   const isThinking = phase === "thinking";
@@ -2433,33 +3039,11 @@ function CanvasGeneratingStage({
   }, [isThinking]);
 
   return (
-    <CanvasMotionBackdrop blurPreviewSrc={blurPreviewSrc} mode={isThinking ? "thinking" : "busy"} className="flex min-h-0 flex-1 items-center justify-center px-4 py-4 sm:px-6">
-      <div className="flex min-h-0 w-full flex-1 items-center justify-center">
-        <div className="canvas-status-card relative z-10 flex w-full max-w-sm flex-col items-center gap-4 px-2 py-4 text-center">
-          <div className="canvas-status-symbol flex size-14 shrink-0 items-center justify-center text-primary/75">
-            {isThinking ? <Brain size={28} strokeWidth={1.4} /> : <Sparkles size={28} strokeWidth={1.4} />}
-          </div>
-          <div>
-            <h3 className="text-lg font-medium tracking-wide text-foreground" role="status">{isThinking ? t("正在理解你的想法") : t("正在创作")}</h3>
-            <p className={`canvas-waiting-message mt-3 min-h-12 text-sm leading-6 text-muted ${isMessageLeaving ? "canvas-waiting-message--leaving" : ""}`}>{message}</p>
-          </div>
-          <div className="relative h-0.5 w-40 overflow-hidden rounded-full bg-border/50" aria-hidden="true">
-            <span className="canvas-progress-indeterminate absolute inset-y-0 left-0 block bg-primary" />
-          </div>
-          {keywords.length > 0 ? (
-            <div className="mt-1 flex flex-wrap items-center justify-center gap-1.5">
-              {keywords.map((keyword, index) => (
-                <span
-                  key={`${keyword}-${index}`}
-                  className="canvas-prompt-tag max-w-full truncate px-2.5 py-1 text-[11px] leading-none"
-                  title={keyword}
-                  style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}
-                >
-                  {keyword}
-                </span>
-              ))}
-            </div>
-          ) : null}
+    <CanvasMotionBackdrop keywords={keywords} mode={isThinking ? "thinking" : "busy"} tone={tone} className="flex min-h-0 flex-1 items-center justify-center px-4 py-4 sm:px-6">
+      <div className="canvas-generating-content relative flex min-h-0 w-full flex-1 items-center justify-center">
+        <div className="canvas-status-card canvas-status-card--below-core z-10 flex w-full max-w-sm flex-col items-center gap-2 px-2 py-4 text-center">
+          <h3 className="text-lg font-medium tracking-wide text-foreground" role="status">{t("灵感汇集ing")}</h3>
+          <p className={`canvas-waiting-message min-h-12 text-sm leading-6 text-muted ${isMessageLeaving ? "canvas-waiting-message--leaving" : ""}`}>{message}</p>
         </div>
       </div>
     </CanvasMotionBackdrop>
@@ -2472,6 +3056,7 @@ function CanvasGeneratingStage({
  */
 function CanvasResultStage({
   results,
+  currentGenerationCount,
   lastModel,
   reveal,
   onOpenPreview,
@@ -2482,6 +3067,7 @@ function CanvasResultStage({
   archivingBatch,
 }: {
   results: CanvasGenerationResult[];
+  currentGenerationCount: number;
   lastModel: string;
   reveal: boolean;
   onOpenPreview: (index: number) => void;
@@ -2497,10 +3083,11 @@ function CanvasResultStage({
   const [finishingMessage] = useState(() => pickCanvasWaitingMessage("finishing"));
   const [isRevealingArtwork, setIsRevealingArtwork] = useState(false);
 
-  // 新一批结果就位（数量变化）后回到第一张，并兜住越界索引。
+  // 新一批结果就位后自动显示该批次的第一张；底层结果仍按旧到新累计保存。
   useEffect(() => {
-    setActiveIndex((index) => (index < total ? index : 0));
-  }, [total]);
+    const latestBatchSize = Math.min(Math.max(1, currentGenerationCount), total);
+    setActiveIndex(total > 0 ? total - latestBatchSize : 0);
+  }, [currentGenerationCount, total]);
 
   const safeIndex = activeIndex < total ? activeIndex : 0;
   const active = results[safeIndex];
@@ -2513,7 +3100,7 @@ function CanvasResultStage({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <CanvasMotionBackdrop blurPreviewSrc={active.dataUrl} mode={isRevealingArtwork ? "reveal" : "result"} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+      <CanvasMotionBackdrop mode={reveal || isRevealingArtwork ? "reveal" : "result"} className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
         <div className="relative flex min-h-0 flex-1 flex-col">
           <CanvasResultCard
             key={`${active.dataUrl.slice(0, 32)}-${safeIndex}`}

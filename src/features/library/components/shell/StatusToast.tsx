@@ -1,6 +1,8 @@
 import { type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Check, Info, X } from "lucide-react";
 import { useLocale } from "@/components/LocaleProvider";
+import { RotatingLoadingTip } from "@/components/ui/RotatingLoadingTip";
 
 export type ToastStatusMessage = {
   autoDismissMs: number | null;
@@ -16,40 +18,52 @@ type StatusToastProps = {
 export function StatusToast({ message, onClose }: StatusToastProps) {
   const { t } = useLocale();
   const toneClassName = getStatusToastToneClassName(message.type);
-  const title = getStatusToastTitle(message);
   const isPending = message.autoDismissMs === null;
+  const isProcessing = message.type === "info" && isPending;
+  const title = isProcessing ? message.text : getStatusToastTitle(message);
   const durationStyle = isPending
     ? undefined
     : ({
         "--status-toast-duration": `${message.autoDismissMs}ms`,
       } as CSSProperties);
 
-  return (
+  return createPortal(
     <div
       aria-atomic="true"
       aria-live={message.type === "error" ? "assertive" : "polite"}
-      className="pointer-events-none fixed left-1/2 top-[calc(var(--app-window-content-top)+0.75rem)] z-[9990] flex w-[calc(100vw-2rem)] -translate-x-1/2 justify-center"
+      className="pointer-events-none fixed left-1/2 top-[calc(var(--app-window-content-top)+1rem)] z-[2147483646] flex w-[calc(100vw-2rem)] -translate-x-1/2 justify-center"
       role={message.type === "error" ? "alert" : "status"}
     >
       <button
         aria-label={t("关闭消息提示")}
-        className="status-toast pointer-events-auto relative flex min-h-[58px] w-fit min-w-64 max-w-[calc(100vw-2rem)] items-center justify-center gap-2.5 overflow-hidden rounded-[13px] border border-border bg-panel px-5 text-center shadow-image outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-primary/25 sm:max-w-96"
+        className="status-toast pointer-events-auto relative flex min-h-[76px] w-full max-w-[20rem] items-center justify-center gap-3 overflow-hidden rounded-[15px] border border-border bg-panel px-5 py-3.5 text-center shadow-image outline-none transition-transform hover:-translate-y-0.5 focus-visible:ring-2 focus-visible:ring-primary/25"
         style={durationStyle}
         type="button"
         onClick={onClose}
       >
-        <span className={`flex size-[22px] shrink-0 items-center justify-center rounded-full ${toneClassName.icon}`}>
+        <span className={`flex size-[24px] shrink-0 items-center justify-center rounded-full ${toneClassName.icon}`}>
           {message.type === "success" ? (
-            <Check size={13} strokeWidth={3} />
+            <Check size={14} strokeWidth={3} />
           ) : message.type === "error" ? (
-            <X size={13} strokeWidth={3} />
+            <X size={14} strokeWidth={3} />
           ) : (
-            <Info size={13} strokeWidth={2.5} />
+            <Info size={14} strokeWidth={2.5} />
           )}
         </span>
-        <span className="grid min-w-0 max-w-[17rem] flex-none gap-0.5 text-center">
-          <span className="truncate text-[13px] font-bold leading-[18px] text-foreground">{t(title)}</span>
-          <span className="truncate text-xs leading-[17px] text-muted">{t(message.text)}</span>
+        <span className="grid min-w-0 flex-1 gap-1.5 text-center">
+          <span
+            className={`status-toast__text-sheen break-words whitespace-normal text-foreground ${
+              isProcessing ? "text-sm font-black leading-[22px]" : "text-[13px] font-bold leading-[20px]"
+            }`}
+          >
+            {t(title)}
+          </span>
+          {!isProcessing ? (
+            <span className="status-toast__text-sheen status-toast__text-sheen--muted break-words whitespace-normal text-xs leading-[18px] text-muted">
+              {t(message.text)}
+            </span>
+          ) : null}
+          {isProcessing ? <RotatingLoadingTip className="justify-center status-toast__tip" kind="processing" /> : null}
         </span>
         <span
           className={`absolute bottom-0 left-0 h-0.5 ${toneClassName.progress} ${
@@ -57,7 +71,8 @@ export function StatusToast({ message, onClose }: StatusToastProps) {
           }`}
         />
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -88,7 +103,7 @@ function getStatusToastTitle(message: ToastStatusMessage): string {
   }
 
   if (message.type === "info") {
-    return message.autoDismissMs === null ? "正在处理" : "提示";
+    return "提示";
   }
 
   if (message.text.includes("导入")) {

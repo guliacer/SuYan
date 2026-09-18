@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { Check, Copy, Download, ExternalLink, Eye, EyeOff, FileCode2, FileText, GitBranch, LoaderCircle, PackageOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useLocale } from "@/components/LocaleProvider";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import type { PromptGithubProject, PromptGithubRelease, PromptGithubReleaseAsset } from "../types";
 import { getGithubReadmeRawUrl } from "../utils/githubProject";
 import { parseGithubMarkdown, type GithubMarkdownBlock } from "../utils/githubMarkdown";
@@ -91,10 +92,13 @@ export function GithubProjectReleases({ project, compact = false }: { project: P
 
   function openAssetMenu(event: MouseEvent<HTMLButtonElement>, release: PromptGithubRelease, asset: PromptGithubReleaseAsset) {
     const rect = event.currentTarget.getBoundingClientRect();
+    const bounds = getAppOverlayBounds(8);
     const width = 232;
     const height = 104;
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    const top = rect.bottom + height <= window.innerHeight - 8 ? rect.bottom + 6 : Math.max(8, rect.top - height - 6);
+    const left = clampOverlayPosition(rect.left, width, bounds.left, bounds.right);
+    const top = rect.bottom + height <= bounds.bottom
+      ? rect.bottom + 6
+      : clampOverlayPosition(rect.top - height - 6, height, bounds.top, bounds.bottom);
     setCopiedAssetKey(null);
     setMenu({ release, asset, left, top });
   }

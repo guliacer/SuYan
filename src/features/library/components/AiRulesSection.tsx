@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/Button";
 import { useLocale } from "@/components/LocaleProvider";
 import { TextArea } from "@/components/ui/TextArea";
 import { TextField } from "@/components/ui/TextField";
+import { MarqueeText } from "@/components/ui/MarqueeText";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import {
   aiFeatureActionMeta,
   normalizeAiRulePresetIds,
@@ -261,7 +263,7 @@ export function AiRulesSection({ api }: { api: AiSettingsApi }) {
             </div>
 
             <div data-feature-guide="ai-rules-model" className="grid gap-3 min-[720px]:grid-cols-2">
-              <label className="grid content-start gap-2 text-xs font-medium text-muted">
+              <label className="grid min-w-0 content-start gap-2 text-xs font-medium text-muted">
                 <span className="flex items-center justify-between gap-2">
                   <span>{t("服务商 / 模型来源")}</span>
                   <span className="font-normal">{providerOptions.length} {t("个选项")}</span>
@@ -283,35 +285,25 @@ export function AiRulesSection({ api }: { api: AiSettingsApi }) {
                 />
               </label>
 
-              <label className="grid content-start gap-2 text-xs font-medium text-muted">
+              <label className="grid min-w-0 content-start gap-2 text-xs font-medium text-muted">
                 <span className="flex items-center justify-between gap-2">
                   <span>{t("使用模型")}</span>
                   <span className="font-normal">
                     {selectedActionModels.length > 0 ? `${selectedActionModels.length} ${t("个适用模型")}` : t("没有适用模型")}
                   </span>
                 </span>
-                <select
-                  className="h-10 rounded-md border border-border bg-panel px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
+                <ModelNameSelect
                   disabled={selectedActionModels.length === 0}
+                  models={selectedActionModels}
                   value={selectedActionModel?.id ?? ""}
-                  onChange={(event) =>
+                  onChange={(modelId) =>
                     patchActionPreference(selectedAction, {
                       source: "remote",
                       profileId: selectedActionProfile?.id,
-                      modelId: event.target.value,
+                      modelId,
                     })
                   }
-                >
-                  {selectedActionModels.length > 0 ? (
-                    selectedActionModels.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label || model.id}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="">{t("没有可用模型")}{t(selectedActionMeta.capability === "vision" ? "图片" : selectedActionMeta.capability === "image-generation" ? "生图" : "文本")}</option>
-                  )}
-                </select>
+                />
                 {selectedActionModels.length === 0 ? (
                   <span className="text-[11px] leading-4 text-warning">
                     {t("当前服务商仍可保留配置；请在模型配置中为模型勾选")}
@@ -534,12 +526,13 @@ function BrandProviderSelect({
       }
 
       const rect = button.getBoundingClientRect();
-      const width = Math.max(240, Math.min(360, rect.width));
+      const bounds = getAppOverlayBounds(8);
+      const width = Math.min(Math.max(240, Math.min(360, rect.width)), bounds.right - bounds.left);
       const menuHeight = Math.min(320, Math.max(64, options.length * 48 + 12));
-      const top = rect.bottom + menuHeight <= window.innerHeight - 8
+      const top = rect.bottom + menuHeight <= bounds.bottom
         ? rect.bottom + 4
-        : Math.max(8, rect.top - menuHeight - 4);
-      const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
+        : clampOverlayPosition(rect.top - menuHeight - 4, menuHeight, bounds.top, bounds.bottom);
+      const left = clampOverlayPosition(rect.left, width, bounds.left, bounds.right);
       setMenuPosition({ left, top, width });
     };
 
@@ -610,6 +603,131 @@ function BrandProviderSelect({
                   </button>
                 );
               }) : <p className="px-2 py-3 text-xs text-muted">{t("没有可用服务商")}</p>}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
+type ModelNameOption = {
+  id: string;
+  label?: string | null;
+};
+
+function ModelNameSelect({
+  disabled,
+  models,
+  value,
+  onChange,
+}: {
+  disabled: boolean;
+  models: readonly ModelNameOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useLocale();
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0, width: 260 });
+  const selected = models.find((model) => model.id === value) ?? models[0];
+  const selectedLabel = selected?.label || selected?.id || t("没有可用模型");
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const button = buttonRef.current;
+      if (!button) {
+        return;
+      }
+
+      const rect = button.getBoundingClientRect();
+      const bounds = getAppOverlayBounds(8);
+      const width = Math.min(Math.max(240, Math.min(420, rect.width)), bounds.right - bounds.left);
+      const menuHeight = Math.min(320, Math.max(64, models.length * 44 + 12));
+      const top = rect.bottom + menuHeight <= bounds.bottom
+        ? rect.bottom + 4
+        : clampOverlayPosition(rect.top - menuHeight - 4, menuHeight, bounds.top, bounds.bottom);
+      const left = clampOverlayPosition(rect.left, width, bounds.left, bounds.right);
+      setMenuPosition({ left, top, width });
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+
+    updatePosition();
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [models.length, open]);
+
+  return (
+    <>
+      <button
+        aria-controls={open ? "ai-model-options" : undefined}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        className="flex h-10 min-w-0 w-full items-center justify-between gap-3 rounded-md border border-border bg-panel px-3 text-left text-sm text-foreground outline-none transition-colors hover:border-primary/60 focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={disabled}
+        ref={buttonRef}
+        title={selectedLabel}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <MarqueeText className="flex-1" text={selectedLabel} />
+        <ChevronDown className={`shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`} size={15} />
+      </button>
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="grid max-h-80 gap-1 overflow-y-auto rounded-md border border-border bg-panel p-1.5 shadow-xl"
+              id="ai-model-options"
+              ref={menuRef}
+              role="listbox"
+              style={{ left: menuPosition.left, top: menuPosition.top, width: menuPosition.width, position: "fixed", zIndex: 9999 }}
+            >
+              {models.map((model) => {
+                const isSelected = model.id === value;
+                const label = model.label || model.id;
+                return (
+                  <button
+                    aria-selected={isSelected}
+                    className={`grid min-h-10 min-w-0 grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                      isSelected ? "bg-primary text-primary-foreground" : "text-muted hover:bg-primary-soft hover:text-foreground"
+                    }`}
+                    key={model.id}
+                    role="option"
+                    title={model.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(model.id);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className={`flex size-4 items-center justify-center rounded-full border ${isSelected ? "border-primary-foreground" : "border-muted"}`}>
+                      {isSelected ? <Check size={11} /> : null}
+                    </span>
+                    <span className="min-w-0">
+                      <MarqueeText className="text-sm font-medium" text={label} />
+                      <span className={`block truncate text-[11px] ${isSelected ? "text-primary-foreground/75" : "text-muted"}`}>{model.id}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>,
             document.body,
           )

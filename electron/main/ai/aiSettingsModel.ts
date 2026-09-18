@@ -3,6 +3,7 @@ import type {
   AiFeatureAction,
   AiProviderModelCapability,
   AiProviderModelSettings,
+  AiProviderKind,
   AiRecognitionSourcePreferences,
   AiProviderSettings,
   PublicAiProviderProfile,
@@ -17,6 +18,7 @@ import {
   normalizeAiRecognitionSourcePreferences,
   normalizeAiActionRules,
   normalizeAiRulePresetIds,
+  normalizeAiProviderModelCapabilities,
 } from "../../../src/features/library/types/ai";
 import { AppError } from "../ipc/errors";
 
@@ -34,6 +36,7 @@ type PersistedAiProviderProfile = {
   id: string;
   name: string;
   enabled: boolean;
+  provider?: AiProviderKind;
   baseUrl: string;
   model: string;
   models?: AiProviderModelSettings[];
@@ -185,6 +188,7 @@ export function toPersistedAiSettingsFile(
         id: profile.id,
         name: profile.name,
         enabled: profile.enabled,
+        ...(profile.provider ? { provider: profile.provider } : {}),
         baseUrl: profile.baseUrl,
         model: profile.model,
         models: profile.models,
@@ -274,6 +278,13 @@ export function validateAiProviderSettings(settings: AiProviderSettings): void {
     return;
   }
 
+  if (settings.provider === "ollama") {
+    if (!settings.baseUrl || !settings.model) {
+      throw new AppError("AI_SETTINGS_INCOMPLETE", "请先填写 Ollama 地址和模型。");
+    }
+    return;
+  }
+
   if (!settings.baseUrl || !settings.model || !settings.apiKey) {
     throw new AppError("AI_SETTINGS_INCOMPLETE", "请先填写接口地址、模型和 API Key。");
   }
@@ -294,6 +305,7 @@ function toPublicAiProviderProfile(profile: AiProviderSettings): PublicAiProvide
     id: profile.id,
     name: profile.name,
     enabled: profile.enabled,
+    ...(profile.provider ? { provider: profile.provider } : {}),
     baseUrl: profile.baseUrl,
     hasApiKey: Boolean(profile.apiKey),
     apiKeyPreview: maskApiKeyPreview(profile.apiKey),
@@ -314,6 +326,7 @@ function mergeAiProviderProfilePayload(
       id: payload.id || currentProfile?.id,
       name: payload.name,
       enabled: payload.enabled,
+      provider: payload.provider ?? currentProfile?.provider,
       baseUrl: payload.baseUrl,
       apiKey: nextApiKey,
       model: payload.model,
@@ -348,16 +361,24 @@ function normalizeProfileList(input: readonly unknown[]): AiProviderSettings[] {
 function normalizeAiProviderProfile(input: unknown, index: number): AiProviderSettings {
   const source = isRecord(input) ? input : {};
   const id = normalizeProfileId(source.id, index);
-  const model = normalizeString(source.model) || defaultAiProviderProfile.model;
-  const models = normalizeAiProviderModels(source.models, model);
+  const provider = source.provider === "ollama" ? "ollama" : undefined;
+  const model = normalizeString(source.model) || (provider === "ollama" ? "" : defaultAiProviderProfile.model);
+  const models = normalizeAiProviderModels(source.models, model, {
+    allowEmpty: provider === "ollama",
+    fallbackCapabilities: provider === "ollama" ? ["text"] : ["text", "vision"],
+  }).map((candidate) => ({
+    ...candidate,
+    capabilities: normalizeAiProviderModelCapabilities(candidate.capabilities, provider),
+  }));
 
   return {
     id,
     name: normalizeString(source.name) || (index === 0 ? defaultAiProviderProfile.name : `API ${index + 1}`),
     enabled: typeof source.enabled === "boolean" ? source.enabled : defaultAiProviderProfile.enabled,
-    baseUrl: normalizeString(source.baseUrl) || defaultAiProviderProfile.baseUrl,
+    ...(provider ? { provider } : {}),
+    baseUrl: normalizeString(source.baseUrl) || (provider === "ollama" ? "http://127.0.0.1:11434" : defaultAiProviderProfile.baseUrl),
     apiKey: normalizeString(source.apiKey),
-    model: models.some((item) => item.id === model) ? model : models[0]?.id || defaultAiProviderProfile.model,
+    model: models.some((item) => item.id === model) ? model : models[0]?.id || (provider === "ollama" ? "" : defaultAiProviderProfile.model),
     models,
   };
 }
@@ -365,6 +386,7 @@ function normalizeAiProviderProfile(input: unknown, index: number): AiProviderSe
 export function normalizeAiProviderModels(
   input: unknown,
   fallbackModelId = defaultAiProviderProfile.model,
+  options: { allowEmpty?: boolean; fallbackCapabilities?: AiProviderModelCapability[] } = {},
 ): AiProviderModelSettings[] {
   const models: AiProviderModelSettings[] = [];
   const usedIds = new Set<string>();
@@ -381,13 +403,13 @@ export function normalizeAiProviderModels(
     models.push(model);
   }
 
-  const fallbackModel = normalizeString(fallbackModelId) || defaultAiProviderProfile.model;
+  const fallbackModel = normalizeString(fallbackModelId) || (options.allowEmpty ? "" : defaultAiProviderProfile.model);
 
-  if (models.length === 0 || !usedIds.has(fallbackModel)) {
+  if (fallbackModel && (models.length === 0 || !usedIds.has(fallbackModel))) {
     models.unshift({
       id: fallbackModel,
       label: fallbackModel,
-      capabilities: ["text", "vision"],
+      capabilities: options.fallbackCapabilities ?? ["text", "vision"],
     });
   }
 

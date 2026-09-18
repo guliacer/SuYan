@@ -8,8 +8,8 @@ import type {
 } from "../types/library";
 
 export type ResolvedThemeMode = "light" | "dark";
-export const DEFAULT_THEME_PRESET = "raycast" as const;
-export const DEFAULT_THEME_ACCENT = "coral" as const;
+export const DEFAULT_THEME_PRESET = "proof" as const;
+export const DEFAULT_THEME_ACCENT = "sage" as const;
 export const DEFAULT_THEME_CUSTOM_ACCENT = "#ff6363" as const;
 export const DEFAULT_THEME_OPACITY = 100 as const;
 export const DEFAULT_THEME_ACCENT_OPACITY = 100 as const;
@@ -257,7 +257,7 @@ export function resolveThemePreset(value: unknown): ThemePreset {
 }
 
 export function getThemePresetLabel(themePreset: ThemePreset): string {
-  return themePresetOptions.find((option) => option.value === themePreset)?.label ?? "Raycast";
+  return themePresetOptions.find((option) => option.value === themePreset)?.label ?? "Proof";
 }
 
 export type ThemeRoot = {

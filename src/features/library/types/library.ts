@@ -2,6 +2,7 @@ import type { BuiltinModuleState } from "../utils/moduleRegistry";
 import type { CanvasDraftSettings } from "./canvas";
 import type { PromptViewSettings } from "../../prompts/types";
 import type { AppLanguage } from "../../../types/locale";
+import type { VisualLifeSettings } from "../utils/visualLife";
 import type {
   CategoryAssignmentSource,
   CategoryCandidateProposal,
@@ -238,9 +239,9 @@ export type LibraryViewSettings = {
   generationModelOrder: string[];
   hiddenGenerationModels: string[];
   themeMode: ThemeMode;
-  /** 主题预设；缺失时兼容旧设置并回退到 Raycast。 */
+  /** 主题预设；缺失时兼容旧设置并回退到 Proof。 */
   themePreset: ThemePreset;
-  /** 按钮与交互强调色；缺失时兼容旧设置并回退到资源推荐的珊瑚色。 */
+  /** 按钮与交互强调色；缺失时兼容旧设置并回退到 Proof 的鼠尾草色。 */
   themeAccent: ThemeAccent;
   /** 旧版主题不透明度兼容字段，保存时等同于导航区不透明度。 */
   themeOpacity: number;
@@ -260,12 +261,16 @@ export type LibraryViewSettings = {
   themeAccentMemory: ThemeAccentMemoryByPreset;
   /** 自定义主题的颜色和背景图设置。 */
   customTheme: ThemeCustomTheme;
+  /** 素材卡片悬停时的轻量视觉生命效果。 */
+  visualLife: VisualLifeSettings;
   /** 居中工作区相对于内容区域的宽度比例。 */
   workspaceWidthPercent: number;
   /** 主边栏入口的显示状态；素材浏览与系统设置由归一化逻辑强制启用。 */
   sidebarEntryVisibility: SidebarEntryVisibility;
   /** 已完成或跳过的页面功能引导 id；缺失时兼容旧版本并从未完成开始。 */
   featureGuideCompleted?: string[];
+  /** 已确认版本级欢迎/更新引导的应用版本；缺失时按新安装或旧版本升级处理。 */
+  featureGuideVersion?: string | null;
   autoNsfwGrading: boolean;
   blurNsfwImages: boolean;
   nsfwGradingSpeed: NsfwGradingSpeed;

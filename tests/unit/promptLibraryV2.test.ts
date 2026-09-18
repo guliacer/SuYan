@@ -64,7 +64,19 @@ describe("提示词库纯函数", () => {
       { title: "第一行", content: "第一行\n正文" },
       { title: "第二条", content: "第二条" },
     ]);
-    expect(derivePromptTitle("a".repeat(60))).toBe(`${"a".repeat(50)}…`);
+    expect(derivePromptTitle("a".repeat(60))).toBe(`${"a".repeat(39)}…`);
+  });
+
+  it("keeps automatic titles within language-specific display limits", async () => {
+    const { automaticPromptTitleLimits, compactAutomaticPromptTitle } = await import("../../src/features/prompts/utils/promptTitle");
+    const chineseTitle = compactAutomaticPromptTitle("一".repeat(40));
+    const englishTitle = compactAutomaticPromptTitle("a".repeat(60));
+
+    expect(Array.from(chineseTitle).length).toBe(automaticPromptTitleLimits.cjk);
+    expect(chineseTitle.endsWith("…")).toBe(true);
+    expect(Array.from(englishTitle).length).toBe(automaticPromptTitleLimits.latin);
+    expect(englishTitle.endsWith("…")).toBe(true);
+    expect(compactAutomaticPromptTitle("用户自定义标题")).toBe("用户自定义标题");
   });
 
   it("脱敏只改变输出，不改变原文并覆盖常见凭据", async () => {

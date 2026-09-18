@@ -3,6 +3,7 @@ import { useLocale } from "@/components/LocaleProvider";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
+import { RotatingLoadingTip } from "@/components/ui/RotatingLoadingTip";
 import { useAccountStore } from "../../account/store/useAccountStore";
 
 type AiSettingsExportDialogProps = {
@@ -132,6 +133,7 @@ export function AiSettingsExportDialog({ isBusy, onClose, onExport }: AiSettings
         ) : null}
 
         {error ? <p className="rounded-lg border border-danger bg-danger-soft px-3 py-2 text-xs text-danger">{error}</p> : null}
+        {isExporting ? <RotatingLoadingTip kind="export" /> : null}
 
         <div className="flex justify-end gap-2">
           <Button className="min-h-8 px-2.5 py-1.5 text-xs" variant="ghost" onClick={onClose}>

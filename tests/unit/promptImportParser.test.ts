@@ -1406,7 +1406,7 @@ describe("promptImportParser", () => {
       statusId: "2027928833253642365",
       username: "mehvishs25",
     });
-    expect(draft?.title).toBe("Nano Banana Pro on Gemini and GPT Image 1…");
+    expect(draft?.title).toBe("Nano Banana Pro on Gemini and GPT Image…");
     expect(draft?.prompt).toContain("high-speed commercial luxury shake photography");
     expect(draft?.tags).toEqual(["网页分享", "X", "图像提示词"]);
     expect(draft?.generationMethod).toBe("Nano Banana Pro");

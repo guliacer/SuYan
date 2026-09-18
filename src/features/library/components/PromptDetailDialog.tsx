@@ -50,12 +50,15 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
+import { MarqueeText } from "@/components/ui/MarqueeText";
 import { AppDialog } from "@/components/ui/AppDialog";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import { useLocale } from "@/components/LocaleProvider";
 import { AppLogoMark } from "@/components/ui/AppLogoMark";
 import { Button } from "@/components/ui/Button";
 import { ConfirmBubble } from "@/components/ui/ConfirmBubble";
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
+import { RotatingLoadingTip } from "@/components/ui/RotatingLoadingTip";
 import { TextArea } from "@/components/ui/TextArea";
 import { NsfwImage } from "./NsfwImage";
 import { VideoDetailSection } from "./video/VideoDetailSection";
@@ -245,8 +248,15 @@ type PromptDetailDialogProps = {
   onPushPromptToCanvas: (prompt: string, negativePrompt: string) => void;
   onNavigateNext: () => void;
   onNavigatePrevious: () => void;
-  /** Export the whole prompt group (zip) — used when the detail has multiple effect images. */
-  onShareGroup?: () => void;
+  /** Export the current prompt group as a ZIP share package. */
+  onShareGroup: () => void;
+  /** Register a manually entered category before assigning it to the item. */
+  onUpsertCustomCategory?: (input: {
+    id?: string | null;
+    name: string;
+    group?: string | null;
+    parentId?: string | null;
+  }) => Promise<string | null>;
   onSave: (patch: PromptDetailSavePatch, options?: PromptDetailSaveOptions) => Promise<void>;
   onSaveGenerationModelPreferences: (patch: {
     generationModelOrder?: string[];
@@ -260,7 +270,6 @@ type PromptDetailDialogProps = {
   onOptimizePrompt: (payload: AiOptimizePromptPayload) => Promise<string | null>;
   onTranslatePrompt: (payload: AiTranslatePromptPayload) => Promise<AiTranslatePromptData | null>;
   onReverseImagePrompt: (payload: AiReverseImagePromptPayload) => Promise<string | null>;
-  onShareText?: (text: string) => void;
   onToggleImageLike: () => void;
   onGenerateVideoFrames: (itemId: string) => Promise<boolean>;
   onImportVideoReferenceImages: (itemId: string) => Promise<boolean>;
@@ -293,6 +302,7 @@ export function PromptDetailDialog({
   onNavigateNext,
   onNavigatePrevious,
   onShareGroup,
+  onUpsertCustomCategory,
   onSave,
   onSaveGenerationModelPreferences,
   onSaveAiActionModelPreference,
@@ -300,7 +310,6 @@ export function PromptDetailDialog({
   onOptimizePrompt,
   onTranslatePrompt,
   onReverseImagePrompt,
-  onShareText,
   onToggleImageLike,
   onGenerateVideoFrames,
   onImportVideoReferenceImages,
@@ -380,6 +389,10 @@ export function PromptDetailDialog({
   const [deletingReferenceImage, setDeletingReferenceImage] = useState<string | null>(null);
   const deleteActionRef = useRef<HTMLDivElement | null>(null);
   const aiProfileMenuRef = useRef<HTMLDivElement | null>(null);
+  const detailSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const categoryCommitChainRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingCategoryChipsRef = useRef<string[] | null>(null);
+  const pendingTagDraftsRef = useRef<string[] | null>(null);
   const recognitionSourceSaveRevisionRef = useRef(0);
   const aiModelPreferenceSaveRevisionRef = useRef<Partial<Record<AiProfileAction, number>>>({});
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
@@ -417,15 +430,6 @@ export function PromptDetailDialog({
   const copyPromptText = useMemo(
     () => buildPromptTextFromParts(activePromptDraft, isNegativePromptVisible ? activeNegativePromptDraft : "", t),
     [activeNegativePromptDraft, activePromptDraft, isNegativePromptVisible, t],
-  );
-  const shareText = useMemo(
-    () => buildShareText({
-      title: titleDraft,
-      author: item.author,
-      tags: tagDrafts,
-      promptText,
-    }, t),
-    [item.author, promptText, tagDrafts, titleDraft, t],
   );
   const sourceLabel = item.sourceUrl ? t("网络提示词") : t("本地提示词");
   const modelLabel = resolveGenerationModelLabel({
@@ -864,6 +868,20 @@ export function PromptDetailDialog({
     };
   }, [compressSettingsOpen]);
 
+  function enqueueDetailSave(
+    patch: PromptDetailSavePatch,
+    options: PromptDetailSaveOptions = {},
+  ): Promise<void> {
+    const task = detailSaveChainRef.current
+      .catch(() => undefined)
+      .then(() => onSave(patch, options));
+    detailSaveChainRef.current = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+
   function commitTitle() {
     const nextTitle = titleDraft.trim();
 
@@ -871,7 +889,7 @@ export function PromptDetailDialog({
       return;
     }
 
-    void onSave({ title: nextTitle });
+    void enqueueDetailSave({ title: nextTitle });
   }
 
   function commitAuthor() {
@@ -884,7 +902,7 @@ export function PromptDetailDialog({
       return;
     }
 
-    void onSave({ authorName: nextAuthorName, authorUrl: nextAuthorUrl });
+    void enqueueDetailSave({ authorName: nextAuthorName, authorUrl: nextAuthorUrl });
   }
 
   function cancelAuthorEditing() {
@@ -933,7 +951,7 @@ export function PromptDetailDialog({
    * 绝不能再把次分类塞进 tags —— saveItem 会对 tags 做标签清洗，
    * 分类名会被整体剥掉（本次「关闭卡片后只剩一个分类」的根因）。
    */
-  function commitCategoryChips(
+  async function persistCategoryChips(
     nextCategories: readonly string[],
     extraPatch: PromptDetailSavePatch = {},
   ) {
@@ -942,23 +960,55 @@ export function PromptDetailDialog({
       maxAiCategoryCount,
     );
     const nextCategory = normalizedCategories[0] ?? "未分类";
-    const nextGenreIds = categoryTaxonomy
-      ? normalizedCategories
-          .map((label) => resolveCategoryIdFromLegacyName(categoryTaxonomy, label))
-          .filter((id): id is string => Boolean(id))
-      : [];
-    const nextCategoryId = nextGenreIds[0] ?? null;
+    const nextGenreIds: string[] = [];
 
+    for (const label of normalizedCategories) {
+      let categoryId = categoryTaxonomy ? resolveCategoryIdFromLegacyName(categoryTaxonomy, label) : null;
+
+      // A manually entered label may be a new category or a taxonomy group name
+      // rather than an assignable system leaf. Register it so secondary categories
+      // survive save/reload instead of disappearing from genreIds.
+      if (!categoryId && onUpsertCustomCategory) {
+        categoryId = await onUpsertCustomCategory({
+          name: label,
+          group: "自定义分类",
+          parentId: null,
+        });
+      }
+
+      if (categoryId && categoryId !== "system:uncategorized" && !nextGenreIds.includes(categoryId)) {
+        nextGenreIds.push(categoryId);
+      }
+    }
+
+    const nextCategoryId = nextGenreIds[0] ?? null;
     setEditingChip(null);
     setCategoryDraft("");
     setSavedCategory(nextCategory);
     setSavedGenreIds(nextGenreIds);
-    void onSave({
+    await enqueueDetailSave({
       category: nextCategory,
       categoryId: nextCategoryId,
       genreIds: nextGenreIds.length > 0 ? nextGenreIds : null,
       ...extraPatch,
     });
+  }
+
+  function commitCategoryChips(
+    nextCategories: readonly string[],
+    extraPatch: PromptDetailSavePatch = {},
+  ): Promise<void> {
+    const snapshot = [...nextCategories];
+    pendingCategoryChipsRef.current = snapshot;
+
+    const task = categoryCommitChainRef.current
+      .catch(() => undefined)
+      .then(() => persistCategoryChips(snapshot, extraPatch));
+    categoryCommitChainRef.current = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
   }
 
   function addCategoryChip(nextValue = categoryDraft) {
@@ -969,21 +1019,24 @@ export function PromptDetailDialog({
       return;
     }
 
-    commitCategoryChips(addTags(categoryChips, [nextCategory]));
+    const currentCategories = pendingCategoryChipsRef.current ?? categoryChips;
+    void commitCategoryChips(addTags(currentCategories, [nextCategory]));
   }
 
   function renameCategoryChip(originalCategory: string, nextValue: string) {
     const nextCategory = resolveCategoryChoice(nextValue, knownCategories);
+    const currentCategories = pendingCategoryChipsRef.current ?? categoryChips;
     const nextCategories =
       nextCategory === "未分类"
-        ? categoryChips.filter((category) => !isSameLabel(category, originalCategory))
-        : categoryChips.map((category) => (isSameLabel(category, originalCategory) ? nextCategory : category));
+        ? currentCategories.filter((category) => !isSameLabel(category, originalCategory))
+        : currentCategories.map((category) => (isSameLabel(category, originalCategory) ? nextCategory : category));
 
-    commitCategoryChips(nextCategories);
+    void commitCategoryChips(nextCategories);
   }
 
   function removeCategoryChip(categoryToRemove: string) {
-    commitCategoryChips(categoryChips.filter((category) => !isSameLabel(category, categoryToRemove)));
+    const currentCategories = pendingCategoryChipsRef.current ?? categoryChips;
+    void commitCategoryChips(currentCategories.filter((category) => !isSameLabel(category, categoryToRemove)));
   }
 
   function commitVisibleTags(
@@ -997,7 +1050,8 @@ export function PromptDetailDialog({
       .slice(0, maxAiTagCount);
 
     setTagDrafts(nextTags);
-    void onSave({ tags: nextTags }, options);
+    pendingTagDraftsRef.current = nextTags;
+    void enqueueDetailSave({ tags: nextTags }, options);
   }
 
   function commitModel(nextValue: string | null) {
@@ -1007,20 +1061,20 @@ export function PromptDetailDialog({
     setSavedGenerationMethod(nextGenerationMethod ?? (item.sourceUrl ? "网络提示词" : "本地提示词"));
     setIsModelMenuOpen(false);
     setModelSearch("");
-    void onSave({ generationMethod: nextGenerationMethod });
+    void enqueueDetailSave({ generationMethod: nextGenerationMethod });
   }
 
   function commitPromptType(nextPromptType: PromptContentType) {
     if (nextPromptType === "video" && !videoRuntimeAvailable) {
       setSavedPromptType(nextPromptType);
-      void onSave({ promptType: nextPromptType });
+      void enqueueDetailSave({ promptType: nextPromptType });
       setModuleNoticeText(t("视频媒体功能需要视频依赖（FFmpeg），请先安装。"));
       return;
     }
 
     setModuleNoticeText("");
     setSavedPromptType(nextPromptType);
-    void onSave({ promptType: nextPromptType });
+    void enqueueDetailSave({ promptType: nextPromptType });
   }
 
   
@@ -1154,10 +1208,11 @@ export function PromptDetailDialog({
     event.preventDefault();
     event.stopPropagation();
 
+    const bounds = getAppOverlayBounds(16);
     const menuWidth = 572;
     const menuHeight = 560;
-    const left = Math.max(16, Math.min(event.clientX, window.innerWidth - menuWidth - 16));
-    const top = Math.max(16, Math.min(event.clientY, window.innerHeight - menuHeight - 16));
+    const left = clampOverlayPosition(event.clientX, menuWidth, bounds.left, bounds.right);
+    const top = clampOverlayPosition(event.clientY, menuHeight, bounds.top, bounds.bottom);
 
     setActiveAiProfileMenu({
       action,
@@ -1322,7 +1377,7 @@ export function PromptDetailDialog({
 
       // 单次保存：category / categoryId / genreIds 全部由 commitCategoryChips 一次写完。
       // 之前这里额外补了一次 onSave，两次背靠背写入互相覆盖，是次分类丢失的另一半原因。
-      commitCategoryChips(nextCategories, {
+      await commitCategoryChips(nextCategories, {
         categorySource: "ai",
         categoryConfidence:
           result.analysis.taxonomyBand === "high"
@@ -1408,7 +1463,7 @@ export function PromptDetailDialog({
     setNegativePromptDraft(nextNegativePrompt);
     setPromptUndoSnapshot(null);
     setIsNegativePromptVisible(nextNegativePrompt.trim().length > 0 && isNegativePromptVisible);
-    void onSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
+    void enqueueDetailSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
   }
 
   function commitPrompt() {
@@ -1416,7 +1471,7 @@ export function PromptDetailDialog({
     const nextNegativePrompt = negativePromptDraft.trim();
 
     if (nextPrompt !== item.prompt || nextNegativePrompt !== item.negativePrompt) {
-      void onSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
+      void enqueueDetailSave({ prompt: nextPrompt, negativePrompt: nextNegativePrompt });
     }
   }
 
@@ -1521,7 +1576,7 @@ export function PromptDetailDialog({
         }
 
         if (Object.keys(patch).length > 0) {
-          void onSave(patch);
+          void enqueueDetailSave(patch);
         }
       }
     } finally {
@@ -1640,7 +1695,7 @@ export function PromptDetailDialog({
       rememberPromptUndoSnapshot();
       setPromptDraft(nextPrompt);
       setAnalysisResult(null);
-      void onSave({ prompt: nextPrompt });
+      void enqueueDetailSave({ prompt: nextPrompt });
     } finally {
       setIsReversingImagePrompt(false);
     }
@@ -1654,18 +1709,21 @@ export function PromptDetailDialog({
       return;
     }
 
-    const nextTags = addTags(visibleTagDrafts, [tag]).slice(0, maxAiTagCount);
+    const currentTags = pendingTagDraftsRef.current ?? visibleTagDrafts;
+    const nextTags = addTags(currentTags, [tag]).slice(0, maxAiTagCount);
     setNewTagDraft("");
     commitVisibleTags(nextTags, { preserveManualTags: true });
   }
 
   function removeTag(tag: string) {
-    commitVisibleTags(visibleTagDrafts.filter((itemTag) => itemTag !== tag), { preserveManualTags: true });
+    const currentTags = pendingTagDraftsRef.current ?? visibleTagDrafts;
+    commitVisibleTags(currentTags.filter((itemTag) => itemTag !== tag), { preserveManualTags: true });
   }
 
   function renameTag(originalTag: string, nextValue: string) {
     const nextTag = nextValue.trim();
-    const withoutOriginalTag = visibleTagDrafts.filter((tag) => tag !== originalTag);
+    const currentTags = pendingTagDraftsRef.current ?? visibleTagDrafts;
+    const withoutOriginalTag = currentTags.filter((tag) => tag !== originalTag);
     const nextTags = nextTag && !categoryChips.some((category) => isSameLabel(category, nextTag))
       ? addTags(withoutOriginalTag, [nextTag]).slice(0, maxAiTagCount)
       : withoutOriginalTag;
@@ -2170,6 +2228,7 @@ export function PromptDetailDialog({
                 {analysisNoticeText}
               </p>
             ) : null}
+            {isAnalyzing ? <RotatingLoadingTip className="mt-3" kind="analysis" /> : null}
 
             {!isPromptEditing ? (
               <div className="mt-4 grid gap-3">
@@ -2246,6 +2305,7 @@ export function PromptDetailDialog({
                         className={`min-w-0 bg-transparent text-[11px] text-foreground outline-none transition-[width] duration-150 ${
                           categoryDraft ? "w-16" : "w-0 focus:w-16"
                         }`}
+                        disabled={isBusy}
                         value={categoryDraft}
                         onBlur={addCategoryFromInput}
                         onChange={(event) => setCategoryDraft(event.target.value)}
@@ -2553,15 +2613,9 @@ export function PromptDetailDialog({
               className="h-10 min-w-0 rounded-md px-1.5 text-xs min-[560px]:h-12 min-[560px]:px-3 min-[560px]:text-sm"
               icon={<Share2 size={17} />}
               title={t("分享")}
-              onClick={() => {
-                if (imageCount > 1 && onShareGroup) {
-                  onShareGroup();
-                  return;
-                }
-                onShareText?.(shareText);
-              }}
+              onClick={onShareGroup}
             >
-              <span className="min-w-0 truncate">{imageCount > 1 && onShareGroup ? t("分享本组") : t("分享")}</span>
+              <span className="min-w-0 truncate">{imageCount > 1 ? t("分享本组") : t("分享")}</span>
             </Button>
             <Button
               className="h-10 min-w-0 rounded-md px-1.5 text-xs min-[560px]:h-12 min-[560px]:px-3 min-[560px]:text-sm border-progress bg-progress text-primary-foreground hover:bg-progress/90"
@@ -2980,8 +3034,8 @@ function AiProfileQuickSwitchMenu({
                       {selected ? <Check size={11} /> : null}
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{model.label || model.id}</span>
-                      <span className="block truncate text-[11px] text-muted">{model.id}</span>
+                      <MarqueeText className="text-sm font-medium" text={model.label || model.id} />
+                      <MarqueeText className="text-[11px] text-muted" text={model.id} />
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <AiModelCapabilityIcons capabilities={model.capabilities} />
@@ -3080,6 +3134,7 @@ function AiCascadeBranchButton({ active, detail, icon, label, onActivate }: AiCa
       className={`grid min-h-9 grid-cols-[22px_minmax(0,1fr)_14px] items-center gap-1.5 rounded-xl px-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
         active ? "bg-primary-soft text-foreground" : "text-muted hover:bg-background hover:text-foreground"
       }`}
+      title={detail}
       type="button"
       onClick={onActivate}
       onMouseEnter={onActivate}
@@ -3089,7 +3144,7 @@ function AiCascadeBranchButton({ active, detail, icon, label, onActivate }: AiCa
       </span>
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-medium">{label}</span>
-        <span className="block truncate text-[11px] text-muted">{detail}</span>
+        <MarqueeText className="text-[11px] text-muted" text={detail} />
       </span>
       <ChevronRight size={13} />
     </button>
@@ -3914,7 +3969,7 @@ function isPublicAiProfileReady(profile: PublicAiProviderProfile): boolean {
   return Boolean(
     profile.enabled &&
       profile.baseUrl &&
-      profile.hasApiKey &&
+      (profile.provider === "ollama" || profile.hasApiKey) &&
       profile.models.some((model) => model.id === profile.model),
   );
 }
@@ -3948,27 +4003,6 @@ function formatCompactUrl(value: string): string {
   } catch {
     return value;
   }
-}
-
-function buildShareText({
-  title,
-  author,
-  tags,
-  promptText,
-}: {
-  title: string;
-  author: string | null;
-  tags: string[];
-  promptText: string;
-}, translate: (text: string) => string = (text) => text): string {
-  const parts = [
-    title.trim() ? `${translate("标题：")}${title.trim()}` : "",
-    author ? `${translate("作者：")}${author}` : "",
-    tags.length > 0 ? `${translate("标签：")}${tags.join(translate("，"))}` : "",
-    `${translate("提示词：")}\n${promptText}`,
-  ].filter(Boolean);
-
-  return parts.join("\n\n");
 }
 
 type ReferenceImageThumbProps = {

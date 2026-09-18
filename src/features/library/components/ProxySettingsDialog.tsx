@@ -118,8 +118,8 @@ export function ProxySettingsDialog({
   }
 
   const body = (
-      <div data-feature-guide="system-preferences-panel-proxy" className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
-        <section className="grid gap-3 rounded-md border border-border bg-background p-4">
+      <div data-feature-guide="system-preferences-panel-proxy" className={`grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
+        <section className="grid gap-2.5 rounded-md border border-border bg-background p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">{t("连接方式")}</p>
@@ -142,14 +142,14 @@ export function ProxySettingsDialog({
             </Button>
           </div>
 
-          <div className="grid gap-2 min-[720px]:grid-cols-3" role="radiogroup" aria-label={t("选择代理模式")}>
+          <div className="grid gap-1.5 min-[720px]:grid-cols-3" role="radiogroup" aria-label={t("选择代理模式")}>
             {proxyModeOptions.map((option) => {
               const selected = draft.mode === option.value;
 
               return (
                 <button
                   aria-checked={selected}
-                  className={`grid min-h-28 content-start gap-2 rounded-md border px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                  className={`grid h-16 min-h-0 content-center gap-1.5 rounded-lg border px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                     selected
                       ? "border-primary bg-primary-soft text-foreground shadow-elevated"
                       : "border-border bg-panel text-muted hover:bg-primary-soft hover:text-foreground"
@@ -163,7 +163,7 @@ export function ProxySettingsDialog({
                   }}
                 >
                   <span className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold">{t(option.label)}</span>
+                    <span className="truncate text-xs font-semibold min-[900px]:text-sm">{t(option.label)}</span>
                     <span
                       className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
                         selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"
@@ -172,7 +172,7 @@ export function ProxySettingsDialog({
                       {selected ? <Check size={12} /> : null}
                     </span>
                   </span>
-                  <span className="text-xs leading-5">{t(option.description)}</span>
+                  <span className="text-[11px] leading-4 text-muted min-[900px]:text-xs">{t(option.description)}</span>
                 </button>
               );
             })}
@@ -189,31 +189,33 @@ export function ProxySettingsDialog({
             </span>
           </div>
 
-          <label className="grid gap-2 text-xs font-medium text-muted">
-            {t("代理地址")}
-            <TextField
-              disabled={draft.mode !== "custom" || isBusy}
-              placeholder={t("http://127.0.0.1:7890 或 socks5://127.0.0.1:7890")}
-              value={draft.server}
-              onChange={(event) => {
-                setDraft((current) => ({ ...current, server: event.target.value }));
-                setFeedbackText("");
-              }}
-            />
-          </label>
+          <div className="grid gap-3 min-[720px]:grid-cols-2">
+            <label className="grid gap-2 text-xs font-medium text-muted">
+              {t("代理地址")}
+              <TextField
+                disabled={draft.mode !== "custom" || isBusy}
+                placeholder={t("http://127.0.0.1:7890 或 socks5://127.0.0.1:7890")}
+                value={draft.server}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, server: event.target.value }));
+                  setFeedbackText("");
+                }}
+              />
+            </label>
 
-          <label className="grid gap-2 text-xs font-medium text-muted">
-            {t("绕过地址")}
-            <TextField
-              disabled={draft.mode !== "custom" || isBusy}
-              placeholder="localhost,127.0.0.1,<local>"
-              value={draft.bypassRules}
-              onChange={(event) => {
-                setDraft((current) => ({ ...current, bypassRules: event.target.value }));
-                setFeedbackText("");
-              }}
-            />
-          </label>
+            <label className="grid gap-2 text-xs font-medium text-muted">
+              {t("绕过地址")}
+              <TextField
+                disabled={draft.mode !== "custom" || isBusy}
+                placeholder="localhost,127.0.0.1,<local>"
+                value={draft.bypassRules}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, bypassRules: event.target.value }));
+                  setFeedbackText("");
+                }}
+              />
+            </label>
+          </div>
 
           {validationError ? (
             <p className="rounded-md border border-danger bg-danger-soft px-3 py-2 text-sm text-danger">

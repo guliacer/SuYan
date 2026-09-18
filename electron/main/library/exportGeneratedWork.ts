@@ -9,6 +9,7 @@ import { getSharp } from "../runtime/imageRuntime";
 import { decodeGeneratedImageDataUrl, decodeGeneratedMediaDataUrl } from "./generatedImageData";
 import { attributeGeneratedWork } from "./workAttribution";
 import { embedWorkInPng } from "./workImageExchange";
+import { compactAutomaticPromptTitle } from "../../../src/features/prompts/utils/promptTitle";
 
 /** Unsaved canvas export uses main's generation receipt, never a renderer-supplied account. */
 export async function exportGeneratedWork(value: unknown): Promise<ExportImageData> {
@@ -31,7 +32,7 @@ export async function exportGeneratedWork(value: unknown): Promise<ExportImageDa
   let bytes = decoded.buffer;
   if (!video) {
     const now = new Date().toISOString();
-    const item = attributeGeneratedWork({ id: randomUUID(), imageFileName: "", title: input.prompt.slice(0, 120) || "AI 生成作品",
+    const item = attributeGeneratedWork({ id: randomUUID(), imageFileName: "", title: compactAutomaticPromptTitle(input.prompt, "AI 生成作品"),
       prompt: input.prompt, negativePrompt: input.negativePrompt, generationMethod: input.generationMethod, tags: [], createdAt: now, updatedAt: now }, input.dataUrl, input.attributionId);
     bytes = await embedWorkInPng(await getSharp()(bytes).png({ compressionLevel: 6, palette: false, quality: 100 }).toBuffer(), item);
   }

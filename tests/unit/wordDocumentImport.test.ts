@@ -180,6 +180,31 @@ describe("wordDocumentImport", () => {
     ]);
   });
 
+  it("keeps every paragraph of a multiline prompt after the image", () => {
+    const blocks = extractWordDocumentBlocks(`
+      <w:document>
+        <w:body>
+          <w:p><w:r><w:drawing><a:blip r:embed="rId1"/></w:drawing></w:r></w:p>
+          <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+          <w:p><w:r><w:t>画面风格：日系奇幻冒险画面。</w:t><w:br/><w:t>核心元素：两名背包旅行者。</w:t><w:cr/><w:t>主体动作：沿着山路向前探索。</w:t></w:r></w:p>
+          <w:p><w:r><w:t>具体内容：前景是蜿蜒的修长草，远处是云层与山脉。</w:t></w:r></w:p>
+          <w:p><w:r><w:t>构图方式：采用竖向三分法构图，引导视线向远方延伸。</w:t></w:r></w:p>
+        </w:body>
+      </w:document>
+    `);
+
+    expect(pairWordDocumentPrompts(blocks)).toEqual([
+      {
+        imageRelationshipId: "rId1",
+        groupId: "page-group-1",
+        pageIndex: 0,
+        pairingMode: "next-page",
+        prompt:
+          "画面风格：日系奇幻冒险画面。\n核心元素：两名背包旅行者。\n主体动作：沿着山路向前探索。\n\n具体内容：前景是蜿蜒的修长草，远处是云层与山脉。\n\n构图方式：采用竖向三分法构图，引导视线向远方延伸。",
+      },
+    ]);
+  });
+
   it("does not merge different prompts that happen to share one page", () => {
     const blocks = extractWordDocumentBlocks(`
       <w:document>

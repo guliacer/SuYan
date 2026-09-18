@@ -25,7 +25,7 @@ import {
   resolveStatusFeedbackTone,
   type StatusFeedbackMessage,
 } from "../utils/statusFeedback";
-import { maskAiBaseUrl, normalizeAiBaseUrl } from "../utils/aiBaseUrl";
+import { maskAiBaseUrl, normalizeAiBaseUrlForProvider } from "../utils/aiBaseUrl";
 import { useAiSettingsAutoSave } from "../hooks/useAiSettingsAutoSave";
 import {
   addUniqueModels,
@@ -185,16 +185,23 @@ export function useAiSettings({
   const isApiKeyRevealed = selectedProfile?.id === revealedApiKeyProfileId;
   const revealedApiKey = selectedProfile ? revealedApiKeys[selectedProfile.id] ?? "" : "";
   const canCopySelectedApiKey = selectedProfile
-    ? Boolean(selectedProfile.apiKey.trim() || (!selectedProfile.clearApiKey && selectedProfile.hasApiKey))
+    ? selectedProfile.provider !== "ollama" && Boolean(selectedProfile.apiKey.trim() || (!selectedProfile.clearApiKey && selectedProfile.hasApiKey))
     : false;
   const hasCompleteConnection = selectedProfile
-    ? Boolean(selectedProfile.baseUrl.trim() && selectedProfile.model.trim() && selectedApiKeyState?.willHaveApiKey)
+    ? Boolean(
+        selectedProfile.baseUrl.trim() &&
+          selectedProfile.model.trim() &&
+          (selectedProfile.provider === "ollama" || selectedApiKeyState?.willHaveApiKey),
+      )
     : false;
   const canTestSelectedProfile = selectedProfile ? canTestProfile(selectedProfile) : false;
   const testableProfileCount = profiles.filter(canTestProfile).length;
   const incompleteEnabledProfiles = profiles.filter((profile) => profile.enabled && !isProfileComplete(profile));
   const normalizedProfiles = useMemo(
-    () => profiles.map(ensureProfileSelectedModel).map((profile) => ({ ...profile, baseUrl: normalizeAiBaseUrl(profile.baseUrl) })),
+    () => profiles.map(ensureProfileSelectedModel).map((profile) => ({
+      ...profile,
+      baseUrl: normalizeAiBaseUrlForProvider(profile.baseUrl, profile.provider),
+    })),
     [profiles],
   );
   const canSaveSettings = profiles.length > 0 && incompleteEnabledProfiles.length === 0;
@@ -295,7 +302,7 @@ export function useAiSettings({
       return;
     }
 
-    const normalized = normalizeAiBaseUrl(selectedProfile.baseUrl);
+    const normalized = normalizeAiBaseUrlForProvider(selectedProfile.baseUrl, selectedProfile.provider);
     if (!normalized) {
       setFeedbackText(t("请先填写接口地址。"));
       return;
@@ -316,7 +323,7 @@ export function useAiSettings({
       return;
     }
 
-    const normalized = normalizeAiBaseUrl(result.data.text);
+    const normalized = normalizeAiBaseUrlForProvider(result.data.text, selectedProfile.provider);
     if (!normalized) {
       setFeedbackText(t("剪贴板中没有可用的接口地址。"));
       return;
@@ -332,7 +339,9 @@ export function useAiSettings({
       return;
     }
 
-    patchProfile(selectedProfile.id, { baseUrl: normalizeAiBaseUrl(selectedProfile.baseUrl) });
+    patchProfile(selectedProfile.id, {
+      baseUrl: normalizeAiBaseUrlForProvider(selectedProfile.baseUrl, selectedProfile.provider),
+    });
   }
 
   function handleClearBaseUrl() {
@@ -421,7 +430,7 @@ export function useAiSettings({
     let changed = false;
 
     if (parsed.baseUrl) {
-      patch.baseUrl = normalizeAiBaseUrl(parsed.baseUrl);
+      patch.baseUrl = normalizeAiBaseUrlForProvider(parsed.baseUrl, selectedProfile.provider);
       changed = true;
     }
     if (parsed.apiKey) {
@@ -582,28 +591,43 @@ export function useAiSettings({
     }
   }
 
+  async function queryModelsForProfile(
+    profileId: string,
+    profilePatch: Partial<AiProviderProfileDraft> = {},
+  ) {
+    const currentProfile = profiles.find((profile) => profile.id === profileId);
+    if (!currentProfile) {
+      return;
+    }
+
+    const targetProfile = { ...currentProfile, ...profilePatch };
+    const queryProfiles = profiles.map((profile) => profile.id === profileId ? targetProfile : profile);
+    const queryPayload = buildModelQueryPayload({ profiles: queryProfiles, selectedProfileId: profileId });
+
+    setFeedbackText(t("正在查询 {name} 的模型...", { name: targetProfile.name || t("当前 API") }));
+    const models = await onListModels(queryPayload);
+
+    if (!models) {
+      setFeedbackText(t("模型查询失败。"));
+      return null;
+    }
+
+    setModelPicker({
+      profileId,
+      query: "",
+      models,
+      selectedModelIds: targetProfile.models.map((model) => model.id),
+    });
+    setFeedbackText(t("已查询到 {count} 个模型。", { count: models.length }));
+    return models;
+  }
+
   async function handleListModels() {
     if (!selectedProfile) {
       return;
     }
 
-    const queryPayload = buildModelQueryPayload({ profiles, selectedProfileId: selectedProfile.id });
-
-    setFeedbackText(t("正在查询 {name} 的模型...", { name: selectedProfile.name || t("当前 API") }));
-    const models = await onListModels(queryPayload);
-
-    if (!models) {
-      setFeedbackText(t("模型查询失败。"));
-      return;
-    }
-
-    setModelPicker({
-      profileId: selectedProfile.id,
-      query: "",
-      models,
-      selectedModelIds: selectedProfile.models.map((model) => model.id),
-    });
-    setFeedbackText(t("已查询到 {count} 个模型。", { count: models.length }));
+    await queryModelsForProfile(selectedProfile.id);
   }
 
   function addManualModel() {
@@ -650,7 +674,7 @@ export function useAiSettings({
   function toggleModelCapability(profileId: string, modelId: string, capability: AiProviderModelCapability) {
     const profile = profiles.find((item) => item.id === profileId);
 
-    if (!profile) {
+    if (!profile || (profile.provider === "ollama" && (capability === "image-generation" || capability === "video-generation"))) {
       return;
     }
 
@@ -971,6 +995,7 @@ export function useAiSettings({
     handleCopyApiKey,
     handleCopyBaseUrl,
     handleListModels,
+    queryModelsForProfile,
     handleNormalizeBaseUrl,
     handlePasteApiKey,
     handlePasteBaseUrl,

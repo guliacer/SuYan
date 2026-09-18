@@ -3,6 +3,7 @@ import type {
   AiFeatureAction,
   AiModelSelection,
   AiProviderModelSettings,
+  AiProviderKind,
   AiRecognitionSourcePreferences,
   AiRulePreset,
   PublicAiProviderSettings,
@@ -23,6 +24,7 @@ export type AiActionProfileDraft = {
   id: string;
   name: string;
   enabled: boolean;
+  provider?: AiProviderKind;
   baseUrl: string;
   model: string;
   models: AiProviderModelSettings[];
@@ -181,6 +183,7 @@ function toPublicProfilePayload(profile: AiActionProfileDraft): SaveAiProviderPr
     id: profile.id,
     name: profile.name,
     enabled: profile.enabled,
+    ...(profile.provider ? { provider: profile.provider } : {}),
     baseUrl: profile.baseUrl,
     model: profile.model,
     models: profile.models,

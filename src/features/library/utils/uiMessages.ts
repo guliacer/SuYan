@@ -21,6 +21,12 @@ export const uiErrorMessage: Record<string, string> = {
   AI_KEY_ENCRYPTION_UNAVAILABLE: "系统无法安全保存 API Key。",
   AI_MODEL_CAPABILITY_MISMATCH: "当前模型能力不匹配，请更换模型。",
   AI_MODEL_MISSING: "当前 API 没有可用模型，请添加或查询。",
+  AI_OLLAMA_UNAVAILABLE: "无法连接 Ollama，请确认 Ollama 已启动并监听当前地址。",
+  AI_OLLAMA_TIMEOUT: "Ollama 响应超时，请检查本地模型是否仍在运行。",
+  AI_OLLAMA_MODEL_NOT_FOUND: "Ollama 未找到当前模型，请先安装该模型。",
+  AI_OLLAMA_REQUEST_FAILED: "Ollama 请求失败，请检查本地服务和模型配置。",
+  AI_OLLAMA_RESPONSE_INVALID: "Ollama 返回的响应格式不合法。",
+  AI_PROVIDER_UNSUPPORTED: "当前服务商不支持此功能，请选择适用的服务商。",
   AI_OPTIMIZE_PAYLOAD_INVALID: "AI 优化参数不合法。",
   AI_PROFILE_DISABLED: "当前 API 未启用，请先启用。",
   AI_REMOTE_REQUEST_FAILED: "远程 AI 请求失败，请检查网络或接口。",
@@ -57,6 +63,11 @@ const dynamicFallbackErrorCodes = new Set([
   "AI_REMOTE_REQUEST_FAILED",
   "AI_REMOTE_RESPONSE_INVALID",
   "AI_REMOTE_TIMEOUT",
+  "AI_OLLAMA_UNAVAILABLE",
+  "AI_OLLAMA_TIMEOUT",
+  "AI_OLLAMA_MODEL_NOT_FOUND",
+  "AI_OLLAMA_REQUEST_FAILED",
+  "AI_OLLAMA_RESPONSE_INVALID",
 ]);
 
 export function getUiErrorMessage(code: string, fallback: string): string {

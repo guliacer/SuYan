@@ -2093,7 +2093,7 @@ function isNegativeAnalysisSection(section: PromptAnalysisSection): boolean {
 function cleanNegativePromptValue(value: string): string {
   return value
     .trim()
-    .replace(/^(?:反向提示词|负向提示词|负面提示词|反向|负向|负面|避免内容|negative prompt|negative|avoid)\s*[:：]\s*/i, "")
+    .replace(/^(?:反向提示词|负向提示词|负面提示词|负面约束|反向|负向|负面|避免内容|negative prompt|negative|avoid)\s*[:：]\s*/i, "")
     .replace(/[。.!！]+$/u, "")
     .trim();
 }
@@ -2106,9 +2106,10 @@ function removePromptValue(prompt: string, value: string): string {
   }
 
   return prompt
-    .replace(new RegExp(`\\s*${escapeRegExp(trimmedValue)}\\s*`, "u"), " ")
+    .replace(new RegExp(`[ \\t]*${escapeRegExp(trimmedValue)}[ \\t]*`, "u"), "")
+    .replace(/\r\n?/g, "\n")
     .replace(/[ \t]+/g, " ")
-    .replace(/\s*([,，。；;])\s*/g, "$1")
+    .replace(/[ \t]*([,，。；;])[ \t]*/g, "$1")
     .replace(/([,，；;]){2,}/g, "$1")
     .trim();
 }
@@ -2119,7 +2120,7 @@ function extractLabeledNegativePromptBlocks(prompt: string): { prompt: string; v
   let isCollectingNegativeBlock = false;
 
   for (const line of prompt.replace(/\r\n/g, "\n").split("\n")) {
-    const fullLineMatch = line.match(/^\s*(?:反向提示词|负向提示词|负面提示词|negative prompt|negative|avoid)\s*[:：]\s*(.*)$/iu);
+    const fullLineMatch = line.match(/^\s*(?:反向提示词|负向提示词|负面提示词|负面约束|negative prompt|negative|avoid)\s*[:：]\s*(.*)$/iu);
 
     if (fullLineMatch) {
       values.push(...splitNegativePromptValueBlock(fullLineMatch[1] ?? ""));
@@ -2128,7 +2129,7 @@ function extractLabeledNegativePromptBlocks(prompt: string): { prompt: string; v
     }
 
     const inlineLineMatch = line.match(
-      /^(.*?)(?:^|[\s,，。；;])(?:反向提示词|负向提示词|负面提示词|negative prompt|negative|avoid)\s*[:：]\s*(.*)$/iu,
+      /^(.*?)(?:^|[\s,，。；;])(?:反向提示词|负向提示词|负面提示词|负面约束|negative prompt|negative|avoid)\s*[:：]\s*(.*)$/iu,
     );
 
     if (inlineLineMatch) {
@@ -2176,15 +2177,16 @@ function isPositivePromptLabelLine(line: string): boolean {
 
 function cleanPromptAfterNegativeRemoval(prompt: string): string {
   return prompt
+    .replace(/\r\n?/g, "\n")
     .replace(
-      /(^|[\n,，。；;])\s*(?:反向提示词|负向提示词|负面提示词|negative prompt|negative|avoid)\s*[:：]\s*(?=$|[\n,，。；;])/giu,
+      /(^|[\n,，。；;])\s*(?:反向提示词|负向提示词|负面提示词|负面约束|negative prompt|negative|avoid)\s*[:：]\s*(?=$|[\n,，。；;])/giu,
       "$1",
     )
     .replace(/[ \t]+/g, " ")
-    .replace(/\s*([,，。；;])\s*/g, "$1")
+    .replace(/[ \t]*([,，。；;])[ \t]*/g, "$1")
     .replace(/([,，；;]){2,}/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s*[,，。；;]\s*$/u, "")
+    .replace(/[ \t]*[,，。；;][ \t]*$/u, "")
     .trim();
 }
 

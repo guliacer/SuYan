@@ -154,11 +154,11 @@ const personalProjectRecommendations: PromptSiteRecommendation[] = [
     tags: ["个人项目", "提示词"],
   },
   {
-    title: "TapRelay-remote-adapter-test",
+    title: "TapRelay",
     domain: "github.com",
-    url: "https://github.com/guliacer/TapRelay-remote-adapter-test",
-    description: "TapRelay 远程适配器测试项目。",
-    tags: ["个人项目", "测试工具"],
+    url: "https://github.com/guliacer/TapRelay",
+    description: "跨设备通知工具，生图完成或失败后可向手机发送提醒。",
+    tags: ["个人项目", "手机通知", "生图提醒"],
   },
   {
     title: "ComfyUI-GuliNodes",

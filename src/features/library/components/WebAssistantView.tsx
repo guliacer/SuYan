@@ -21,6 +21,7 @@ import {
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
 import { useLocale } from "@/components/LocaleProvider";
 import { CAPSULE_TONES, type CapsuleTone } from "@/components/ui/capsuleTones";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import type { StatusFeedbackMessage } from "../utils/statusFeedback";
 import { useLibraryStore } from "../store/useLibraryStore";
 import {
@@ -148,15 +149,12 @@ function SiteChip({
 }
 
 function clampDirectoryPosition(anchor: DOMRect): DirectoryPosition {
-  const viewportPadding = 12;
-  const width = Math.min(520, Math.max(280, window.innerWidth - viewportPadding * 2));
-  const left = Math.min(
-    Math.max(viewportPadding, anchor.left),
-    Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
-  );
+  const bounds = getAppOverlayBounds(12);
+  const width = Math.min(520, Math.max(280, bounds.right - bounds.left));
+  const left = clampOverlayPosition(anchor.left, width, bounds.left, bounds.right);
   const preferredTop = anchor.bottom + 8;
-  const top = Math.min(preferredTop, Math.max(viewportPadding, window.innerHeight - 260));
-  const maxHeight = Math.max(220, window.innerHeight - top - viewportPadding);
+  const top = clampOverlayPosition(preferredTop, 260, bounds.top, bounds.bottom);
+  const maxHeight = Math.max(220, bounds.bottom - top);
   return { left, maxHeight, top, width };
 }
 

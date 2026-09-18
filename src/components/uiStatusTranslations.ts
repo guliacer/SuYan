@@ -31,6 +31,7 @@ const staticStatusTranslations: Record<string, string> = {
   "正在翻译提示词...": "Translating the prompt...",
   "已完成提示词翻译。": "Prompt translation completed.",
   "需要可用效果图才能进行图像反推。": "A usable result image is required for image-to-prompt.",
+  "正在反推图像…": "Running image-to-prompt…",
   "正在进行图像反推...": "Running image-to-prompt...",
   "已完成图像反推。": "Image-to-prompt completed.",
   "网络代理已保存并应用。": "Network proxy saved and applied.",

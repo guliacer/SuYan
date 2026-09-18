@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { CheckCircle2, Download, LoaderCircle, Minus, TriangleAlert, X } from "lucide-react";
 import type { ExportTaskProgress } from "../../types/exportTask";
 import { useLocale } from "@/components/LocaleProvider";
+import { RotatingLoadingTip } from "./RotatingLoadingTip";
 
 /** A modeless panel: no backdrop, focus trap, or page-wide pointer interception. */
 export function ExportProgressPanel() {
@@ -23,7 +24,7 @@ export function ExportProgressPanel() {
     : task.status === "completed" ? <CheckCircle2 size={18} />
       : task.status === "failed" ? <TriangleAlert size={18} /> : <Download size={18} />;
   return createPortal(
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[9900] max-w-[calc(100vw-2rem)]">
+    <div className="export-progress-viewport">
       {minimized ? (
         <button type="button" onClick={() => setMinimized(false)} aria-label={t("展开导出进度")}
           className="pointer-events-auto flex items-center gap-2 rounded-xl border border-border bg-panel px-4 py-3 text-sm text-foreground shadow-image focus-visible:ring-2 focus-visible:ring-primary">
@@ -44,6 +45,7 @@ export function ExportProgressPanel() {
           </header>
           <div className="space-y-3 p-4">
             <p role="status" className="break-words text-sm">{t(task.phase)}</p>
+            {running ? <RotatingLoadingTip className="-mt-1" kind="export" /> : null}
             {task.percent !== null && <div>
               <div className="mb-1.5 flex justify-between text-xs text-muted tabular-nums">
                 <span>{task.total !== undefined ? `${task.completed ?? 0} / ${task.total}` : t("当前进度")}</span>

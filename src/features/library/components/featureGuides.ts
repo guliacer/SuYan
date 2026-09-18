@@ -13,7 +13,7 @@ export type FeatureGuideDefinition = {
   steps: readonly FeatureGuideStep[];
 };
 
-export type FeatureGuideId = SidebarEntryId | "promptCard" | "promptCardMasonry" | "promptDetail" | "canvasResult";
+export type FeatureGuideId = SidebarEntryId | "promptCard" | "promptCardMasonry" | "promptDetail" | "canvasResult" | "visualLife";
 
 /**
  * Feature tours are intentionally bound to controls instead of page roots.
@@ -212,15 +212,24 @@ export const featureGuideDefinitions: Record<FeatureGuideId, FeatureGuideDefinit
   },
   systemPreferences: {
     title: "系统设置",
-    intro: "系统设置按左侧分区组织；点击下一步会依次打开每个设置区域并说明实际用途，主题进入后还有专属引导。",
+    intro: "系统设置按左侧分区组织；点击下一步会依次打开每个设置区域并说明实际用途，视觉生命和主题另有专属引导。",
     steps: [
       { title: "网络代理", description: "用于网页助手、远程下载和其他网络请求。可以选择直连、系统代理或自定义代理；自定义模式下填写代理地址和绕过地址，必要时先自动检测再测试连接。", target: '[data-feature-guide="system-preferences-panel-proxy"]' },
-      { title: "启动加速", description: "这里查看当前会话是否启用硬件加速，并在 GPU 加速和稳定模式之间切换。GPU 发生多次崩溃时软件会自动降级，修复驱动后可重新启用；模式变化通常需要重启生效。", target: '[data-feature-guide="system-preferences-panel-performance"]' },
       { title: "创作页面背景", description: "控制标题栏下方主工作区的整页背景。可以使用默认柔雾、经典白色、自定义颜色或本地图片；选择后会自动保存，生成卡片本身的效果不受影响。", target: '[data-feature-guide="system-preferences-panel-canvasBackground"]' },
       { title: "界面布局", description: "拖动工作区宽度滑块调整背景层与主工作区的比例，中央预览会同步展示结果。数值越高，创作区越宽；修改会立即应用。", target: '[data-feature-guide="system-preferences-panel-layout"]' },
       { title: "边栏入口", description: "按分组控制左侧导航是否显示。固定入口不能关闭，其他入口可用复选框隐藏或恢复；设置会即时保存，并影响之后的导航区域。", target: '[data-feature-guide="system-preferences-panel-sidebar"]' },
       { title: "模块管理", description: "管理可选功能和运行依赖。可用模块可以启用或停用，视频处理和本地 NSFW 识别等依赖在这里安装、恢复或删除；删除前会提示受影响的功能。", target: '[data-feature-guide="system-preferences-panel-modules"]' },
       { title: "启动图库", description: "管理软件启动时轮播的图片。点击图片可以预览，使用“添加图片”或“粘贴图片”导入，单张图片可以移除，也可以恢复内置默认图库；修改会自动保存。", target: '[data-feature-guide="system-preferences-panel-startupGallery"]' },
+    ],
+  },
+  visualLife: {
+    title: "视觉生命",
+    intro: "视觉生命把图像内部的扫光和卡片外部的扩散光效分开控制；首次使用可以按这四步选择适合自己的组合。",
+    steps: [
+      { title: "开启图像内扫光", description: "扫光只在图像内部掠过，默认开启；关闭后，图像仍可独立使用卡片外部光效。", target: '[data-feature-guide="visual-life-sheen-toggle"]' },
+      { title: "开启卡片外部光效", description: "外部光效从卡片边缘向外扩散，不覆盖图像内容；关闭后，只保留图像内扫光。", target: '[data-feature-guide="visual-life-outer-toggle"]' },
+      { title: "选择外部效果池", description: "默认只启用星尘、宇宙尘埃和流星；可以按喜好增加或减少效果，气泡效果已移除。", target: '[data-feature-guide="visual-life-effect-pool"]' },
+      { title: "调整模式与强度", description: "模式决定如何选取效果，强度控制粒子数量和透明度；设置只影响悬停时的外扩效果，不改变图像尺寸。", target: '[data-feature-guide="visual-life-mode"], [data-feature-guide="visual-life-intensity"]' },
     ],
   },
   logExport: {

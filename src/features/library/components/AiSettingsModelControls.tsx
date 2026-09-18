@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import { useLocale } from "@/components/LocaleProvider";
 import { Button } from "@/components/ui/Button";
-import type { AiProviderModelCapability, AiProviderModelSettings } from "../types/ai";
+import { MarqueeText } from "@/components/ui/MarqueeText";
+import type { AiProviderKind, AiProviderModelCapability, AiProviderModelSettings } from "../types/ai";
 import {
   normalizeModelSearch,
   toggleStringSelection,
@@ -20,14 +21,21 @@ type ModelRowProps = {
   active: boolean;
   canDelete: boolean;
   model: AiProviderModelSettings;
+  provider?: AiProviderKind;
   onDelete: () => void;
   onSelect: () => void;
   onToggleCapability: (capability: AiProviderModelCapability) => void;
 };
 
-export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggleCapability }: ModelRowProps) {
+export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggleCapability, provider = "openai-compatible" }: ModelRowProps) {
   const { t } = useLocale();
   const modelLabel = model.label || model.id;
+  const capabilities = provider === "ollama" ? (["text", "vision"] as const) : ([
+    "text",
+    "vision",
+    "image-generation",
+    "video-generation",
+  ] as const);
 
   return (
     <div
@@ -48,35 +56,23 @@ export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggl
           {active ? <Check size={11} /> : null}
         </span>
         <span className="min-w-0">
-          <span className="block truncate font-medium text-foreground">{modelLabel}</span>
-          <span className="block truncate text-[11px] text-muted">{model.id}</span>
+          <MarqueeText className="font-medium text-foreground" text={modelLabel} />
+          <MarqueeText className="text-[11px] text-muted" text={model.id} />
         </span>
       </button>
       <div className="flex items-center gap-1.5">
-        <CapabilityButton
-          active={model.capabilities.includes("text")}
-          icon={<FileText size={13} />}
-          label={t("文本")}
-          onClick={() => onToggleCapability("text")}
-        />
-        <CapabilityButton
-          active={model.capabilities.includes("vision")}
-          icon={<ImageIcon size={13} />}
-          label={t("图像")}
-          onClick={() => onToggleCapability("vision")}
-        />
-        <CapabilityButton
-          active={model.capabilities.includes("image-generation")}
-          icon={<Sparkles size={13} />}
-          label={t("生图")}
-          onClick={() => onToggleCapability("image-generation")}
-        />
-        <CapabilityButton
-          active={model.capabilities.includes("video-generation")}
-          icon={<Film size={13} />}
-          label={t("视频")}
-          onClick={() => onToggleCapability("video-generation")}
-        />
+        {capabilities.map((capability) => {
+          const metadata = capabilityMetadata[capability];
+          return (
+            <CapabilityButton
+              active={model.capabilities.includes(capability)}
+              icon={metadata.icon}
+              key={capability}
+              label={t(metadata.label)}
+              onClick={() => onToggleCapability(capability)}
+            />
+          );
+        })}
       </div>
       <div className="flex items-center justify-center gap-1">
         <button
@@ -113,6 +109,13 @@ export function ModelRow({ active, canDelete, model, onDelete, onSelect, onToggl
     </div>
   );
 }
+
+const capabilityMetadata: Record<AiProviderModelCapability, { icon: React.ReactNode; label: string }> = {
+  text: { icon: <FileText size={13} />, label: "文本" },
+  vision: { icon: <ImageIcon size={13} />, label: "图像" },
+  "image-generation": { icon: <Sparkles size={13} />, label: "生图" },
+  "video-generation": { icon: <Film size={13} />, label: "视频" },
+};
 
 type CapabilityButtonProps = {
   active: boolean;
@@ -190,6 +193,7 @@ export function ModelPickerPanel({
                   selected ? "bg-primary-soft text-foreground" : "text-muted hover:bg-panel hover:text-foreground"
                 }`}
                 key={model.id}
+                title={model.id}
                 type="button"
                 onClick={() => onToggleModel(model.id)}
               >
@@ -200,7 +204,7 @@ export function ModelPickerPanel({
                 >
                   {selected ? <Check size={11} /> : null}
                 </span>
-                <span className="min-w-0 truncate">{model.label || model.id}</span>
+                <MarqueeText className="min-w-0" text={model.label || model.id} />
                 <ModelCapabilityIcons capabilities={model.capabilities} />
               </button>
             );

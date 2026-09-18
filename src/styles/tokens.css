@@ -1,33 +1,122 @@
 @import "tailwindcss";
 
+.model-name-marquee {
+  display: block;
+  white-space: nowrap;
+}
+
+.model-name-marquee__track {
+  display: inline-block;
+  min-width: max-content;
+  white-space: inherit;
+}
+
+.model-name-marquee[data-overflowing="true"] .model-name-marquee__track {
+  animation: model-name-marquee var(--model-name-marquee-duration, 6s) ease-in-out infinite;
+  will-change: transform;
+}
+
+.rotating-loading-tip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.3rem;
+  overflow: hidden;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}
+
+.rotating-loading-tip__icon {
+  flex: 0 0 auto;
+  color: var(--color-primary);
+  opacity: 0.72;
+}
+
+.rotating-loading-tip__dot {
+  flex: 0 0 auto;
+  opacity: 0.58;
+}
+
+.rotating-loading-tip__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  animation: rotating-loading-tip-in 240ms ease-out;
+}
+
+@keyframes rotating-loading-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotating-loading-tip__text {
+    animation: none;
+  }
+}
+
+@keyframes model-name-marquee {
+  0%,
+  16% {
+    transform: translateX(0);
+  }
+
+  68% {
+    transform: translateX(calc(-1 * var(--model-name-marquee-distance, 0px)));
+  }
+
+  84%,
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-name-marquee[data-overflowing="true"] .model-name-marquee__track {
+    animation: none;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
 :root { --canvas-default-custom-color: #ffffff; }
 
 @theme {
-  --color-background: #f6f6f7;
-  --color-foreground: #1a1c1f;
+  --color-background: #f5f9f8;
+  --color-foreground: #17302f;
   --color-panel: #ffffff;
-  --color-muted: rgb(26 28 31 / 49.4%);
-  --color-border: rgb(26 28 31 / 8%);
-  --color-primary: #ff6363;
-  --color-primary-strong: #e55353;
-  --color-primary-soft: #fff0f0;
+  --color-muted: rgb(23 48 47 / 54%);
+  --color-border: rgb(23 48 47 / 10%);
+  --color-primary: #0f766e;
+  --color-primary-strong: #0c5f59;
+  --color-primary-soft: #e3f5f2;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #496c91;
-  --color-secondary-strong: #385673;
-  --color-secondary-soft: #e8f0f8;
+  --color-secondary: #53669c;
+  --color-secondary-strong: #44547f;
+  --color-secondary-soft: #edf0fa;
   --color-secondary-foreground: #ffffff;
-  --color-secondary-ink: #304d6d;
-  --color-secondary-border: #b8cbdc;
-  --color-tertiary: #996e39;
-  --color-tertiary-soft: #f5e9d9;
+  --color-secondary-ink: #414a66;
+  --color-secondary-border: #c2cae0;
+  --color-tertiary: #a06a38;
+  --color-tertiary-soft: #f4e9de;
   --color-tertiary-foreground: #ffffff;
-  --color-tertiary-ink: #714d24;
-  --color-tertiary-border: #d6bc99;
+  --color-tertiary-ink: #6b4727;
+  --color-tertiary-border: #d8b99b;
   --color-danger: #e25507;
   --color-danger-strong: #c64a05;
   --color-danger-soft: #fff0e8;
   --color-danger-foreground: #ffffff;
-  --color-progress: #ff6363;
+  --color-progress: #0f766e;
   --color-warning: #e25507;
   --color-warning-soft: #fff3eb;
   --color-capsule-sage: #e7ede4;
@@ -57,18 +146,18 @@
   --color-overlay: #0d0d0d;
   --color-tooltip: #0d0d0d;
   --color-tooltip-foreground: #ffffff;
-  --color-chrome-start: #f3f3f4;
+  --color-chrome-start: #edf7f5;
   --color-chrome-mid: #ffffff;
-  --color-chrome-end: #f0f0f1;
+  --color-chrome-end: #e2f0ed;
   --color-chrome-underlay: #ffffff;
-  --color-chrome-border: rgb(26 28 31 / 10%);
-  --color-chrome-foreground: #030303;
-  --color-chrome-muted: rgb(26 28 31 / 49.4%);
+  --color-chrome-border: rgb(23 48 47 / 10%);
+  --color-chrome-foreground: #17302f;
+  --color-chrome-muted: rgb(23 48 47 / 54%);
   --color-chrome-control: rgb(255 255 255 / 76%);
-  --color-atmosphere-base: #f6f6f7;
-  --color-atmosphere-start: #f3d9df;
-  --color-atmosphere-mid: #f0e5fb;
-  --color-atmosphere-end: #dbeef5;
+  --color-atmosphere-base: #f5f9f8;
+  --color-atmosphere-start: #dff0ed;
+  --color-atmosphere-mid: #e5f5f2;
+  --color-atmosphere-end: #d7ebe7;
   --font-sans: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif;
   --font-mono: "Jetbrains Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --shadow-elevated: 0 8px 24px rgb(13 13 13 / 10%);
@@ -121,20 +210,20 @@
     linear-gradient(132deg, color-mix(in srgb, var(--color-atmosphere-start) 88%, transparent) 0%, transparent 38%),
     linear-gradient(36deg, transparent 34%, color-mix(in srgb, var(--color-atmosphere-mid) 80%, transparent) 69%, transparent 100%),
     linear-gradient(178deg, color-mix(in srgb, var(--color-atmosphere-base) var(--theme-background-opacity), transparent), color-mix(in srgb, var(--color-atmosphere-end) var(--theme-background-opacity), transparent));
-  --color-background: #f6f6f7;
-  --color-foreground: #1a1c1f;
+  --color-background: #f5f9f8;
+  --color-foreground: #17302f;
   --color-panel: #ffffff;
-  --color-muted: rgb(26 28 31 / 49.4%);
-  --color-border: rgb(26 28 31 / 8%);
-  --color-primary: #ff6363;
-  --color-primary-strong: #e55353;
-  --color-primary-soft: #fff0f0;
+  --color-muted: rgb(23 48 47 / 54%);
+  --color-border: rgb(23 48 47 / 10%);
+  --color-primary: #0f766e;
+  --color-primary-strong: #0c5f59;
+  --color-primary-soft: #e3f5f2;
   --color-primary-foreground: #ffffff;
   --color-danger: #e25507;
   --color-danger-strong: #c64a05;
   --color-danger-soft: #fff0e8;
   --color-danger-foreground: #ffffff;
-  --color-progress: #ff6363;
+  --color-progress: #0f766e;
   --color-warning: #e25507;
   --color-warning-soft: #fff3eb;
   --color-capsule-sage: #e7ede4;
@@ -164,18 +253,18 @@
   --color-overlay: #0d0d0d;
   --color-tooltip: #0d0d0d;
   --color-tooltip-foreground: #ffffff;
-  --color-chrome-start: #f3f3f4;
+  --color-chrome-start: #edf7f5;
   --color-chrome-mid: #ffffff;
-  --color-chrome-end: #f0f0f1;
+  --color-chrome-end: #e2f0ed;
   --color-chrome-underlay: #ffffff;
-  --color-chrome-border: rgb(26 28 31 / 10%);
-  --color-chrome-foreground: #030303;
-  --color-chrome-muted: rgb(26 28 31 / 49.4%);
+  --color-chrome-border: rgb(23 48 47 / 10%);
+  --color-chrome-foreground: #17302f;
+  --color-chrome-muted: rgb(23 48 47 / 54%);
   --color-chrome-control: rgb(255 255 255 / 76%);
-  --color-atmosphere-base: #f6f6f7;
-  --color-atmosphere-start: #f3d9df;
-  --color-atmosphere-mid: #f0e5fb;
-  --color-atmosphere-end: #dbeef5;
+  --color-atmosphere-base: #f5f9f8;
+  --color-atmosphere-start: #dff0ed;
+  --color-atmosphere-mid: #e5f5f2;
+  --color-atmosphere-end: #d7ebe7;
   --shadow-elevated: 0 8px 24px rgb(13 13 13 / 10%);
   --shadow-image: 0 16px 36px rgb(13 13 13 / 14%);
 }
@@ -183,20 +272,20 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     color-scheme: dark;
-    --color-background: #181818;
-    --color-foreground: #ffffff;
-    --color-panel: #242424;
-    --color-muted: rgb(255 255 255 / 65%);
-    --color-border: rgb(255 255 255 / 8%);
-    --color-primary: #ff7a7a;
-    --color-primary-strong: #ff9292;
-    --color-primary-soft: #3a2424;
-    --color-primary-foreground: #181818;
+    --color-background: #10201f;
+    --color-foreground: #e7f7f4;
+    --color-panel: #18302e;
+    --color-muted: rgb(231 247 244 / 64%);
+    --color-border: rgb(231 247 244 / 11%);
+    --color-primary: #4fd1c5;
+    --color-primary-strong: #73e0d5;
+    --color-primary-soft: #1b4541;
+    --color-primary-foreground: #10201f;
     --color-danger: #ff853f;
     --color-danger-strong: #ffab78;
     --color-danger-soft: #3a241b;
     --color-danger-foreground: #181818;
-    --color-progress: #ff7a7a;
+    --color-progress: #4fd1c5;
     --color-warning: #ff853f;
     --color-warning-soft: #3a241b;
     --color-capsule-sage: #263129;
@@ -226,18 +315,18 @@
     --color-overlay: #0d0d0d;
     --color-tooltip: #0d0d0d;
     --color-tooltip-foreground: #ffffff;
-    --color-chrome-start: #1c1c1c;
-    --color-chrome-mid: #242424;
-    --color-chrome-end: #181818;
-    --color-chrome-underlay: #242424;
-    --color-chrome-border: rgb(255 255 255 / 10%);
-    --color-chrome-foreground: #ffffff;
-    --color-chrome-muted: rgb(255 255 255 / 65%);
+    --color-chrome-start: #122725;
+    --color-chrome-mid: #1a3532;
+    --color-chrome-end: #0e1b1a;
+    --color-chrome-underlay: #18302e;
+    --color-chrome-border: rgb(231 247 244 / 11%);
+    --color-chrome-foreground: #e7f7f4;
+    --color-chrome-muted: rgb(231 247 244 / 64%);
     --color-chrome-control: rgb(255 255 255 / 8%);
-    --color-atmosphere-base: #181818;
-    --color-atmosphere-start: #432a38;
-    --color-atmosphere-mid: #30264b;
-    --color-atmosphere-end: #1f3e47;
+    --color-atmosphere-base: #10201f;
+    --color-atmosphere-start: #1d4a45;
+    --color-atmosphere-mid: #214640;
+    --color-atmosphere-end: #193b3a;
     --shadow-elevated: 0 14px 34px rgb(0 0 0 / 28%);
     --shadow-image: 0 20px 42px rgb(0 0 0 / 34%);
     --app-window-shadow:
@@ -251,20 +340,20 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --color-background: #181818;
-  --color-foreground: #ffffff;
-  --color-panel: #242424;
-  --color-muted: rgb(255 255 255 / 65%);
-  --color-border: rgb(255 255 255 / 8%);
-  --color-primary: #ff7a7a;
-  --color-primary-strong: #ff9292;
-  --color-primary-soft: #3a2424;
-  --color-primary-foreground: #181818;
+  --color-background: #10201f;
+  --color-foreground: #e7f7f4;
+  --color-panel: #18302e;
+  --color-muted: rgb(231 247 244 / 64%);
+  --color-border: rgb(231 247 244 / 11%);
+  --color-primary: #4fd1c5;
+  --color-primary-strong: #73e0d5;
+  --color-primary-soft: #1b4541;
+  --color-primary-foreground: #10201f;
   --color-danger: #ff853f;
   --color-danger-strong: #ffab78;
   --color-danger-soft: #3a241b;
   --color-danger-foreground: #181818;
-  --color-progress: #ff7a7a;
+  --color-progress: #4fd1c5;
   --color-warning: #ff853f;
   --color-warning-soft: #3a241b;
   --color-capsule-sage: #263129;
@@ -294,18 +383,18 @@
   --color-overlay: #0d0d0d;
   --color-tooltip: #0d0d0d;
   --color-tooltip-foreground: #ffffff;
-  --color-chrome-start: #1c1c1c;
-  --color-chrome-mid: #242424;
-  --color-chrome-end: #181818;
-  --color-chrome-underlay: #242424;
-  --color-chrome-border: rgb(255 255 255 / 10%);
-  --color-chrome-foreground: #ffffff;
-  --color-chrome-muted: rgb(255 255 255 / 65%);
+  --color-chrome-start: #122725;
+  --color-chrome-mid: #1a3532;
+  --color-chrome-end: #0e1b1a;
+  --color-chrome-underlay: #18302e;
+  --color-chrome-border: rgb(231 247 244 / 11%);
+  --color-chrome-foreground: #e7f7f4;
+  --color-chrome-muted: rgb(231 247 244 / 64%);
   --color-chrome-control: rgb(255 255 255 / 8%);
-  --color-atmosphere-base: #181818;
-  --color-atmosphere-start: #432a38;
-  --color-atmosphere-mid: #30264b;
-  --color-atmosphere-end: #1f3e47;
+  --color-atmosphere-base: #10201f;
+  --color-atmosphere-start: #1d4a45;
+  --color-atmosphere-mid: #214640;
+  --color-atmosphere-end: #193b3a;
   --shadow-elevated: 0 14px 34px rgb(0 0 0 / 28%);
   --shadow-image: 0 20px 42px rgb(0 0 0 / 34%);
   --app-window-shadow:
@@ -1134,6 +1223,73 @@ html[data-theme-switching="true"] *::after {
   animation: status-toast-in 200ms ease-out;
 }
 
+/* A restrained theme-colored sheen makes a waiting state feel alive without
+   competing with the actual status text. The paused states below restore the
+   normal token color for reduced-motion users. */
+.status-toast__text-sheen,
+.status-toast__text-sheen--muted {
+  --status-toast-sheen-base: var(--color-foreground);
+  background-image:
+    linear-gradient(
+      112deg,
+      var(--status-toast-sheen-base) 0%,
+      var(--status-toast-sheen-base) 36%,
+      color-mix(in srgb, var(--color-primary) 66%, var(--status-toast-sheen-base)) 50%,
+      var(--status-toast-sheen-base) 64%,
+      var(--status-toast-sheen-base) 100%
+    );
+  background-position: 120% 0;
+  background-size: 240% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent !important;
+  animation: status-toast-text-sheen 3.6s ease-in-out infinite;
+  will-change: background-position;
+}
+
+.status-toast__text-sheen--muted {
+  --status-toast-sheen-base: var(--color-muted);
+}
+
+.status-toast__tip {
+  width: min(100%, 17rem);
+  margin-inline: auto;
+  margin-top: 0.35rem;
+  align-items: center;
+  line-height: 1.1rem;
+}
+
+.status-toast__tip .rotating-loading-tip__text {
+  max-width: 13rem;
+  color: var(--color-muted);
+  line-height: 1.1rem;
+  text-align: center;
+}
+
+@keyframes status-toast-text-sheen {
+  0%,
+  18% {
+    background-position: 120% 0;
+  }
+
+  58%,
+  76%,
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-toast__text-sheen,
+  .status-toast__text-sheen--muted {
+    background-image: none;
+    animation: none;
+    color: var(--status-toast-sheen-base) !important;
+    -webkit-text-fill-color: var(--status-toast-sheen-base);
+  }
+}
+
 .status-toast-progress {
   transform-origin: left center;
   animation: status-toast-progress var(--status-toast-duration, 1800ms) linear forwards;
@@ -1143,6 +1299,21 @@ html[data-theme-switching="true"] *::after {
   width: 42%;
   border-radius: 999px;
   animation: status-toast-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+/* The export task remains modeless, but its progress must stay in the user's
+   visual focus instead of disappearing into a screen corner. */
+.export-progress-viewport {
+  position: fixed;
+  inset: var(--app-window-content-top) var(--app-window-gutter) var(--app-window-gutter);
+  z-index: 2147483645;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+  pointer-events: none;
 }
 
 html,
@@ -1817,6 +1988,8 @@ textarea {
   z-index: 30;
   top: calc(1rem + 1px);
   right: calc(1rem + 1px);
+  display: flex;
+  gap: 4px;
 }
 .canvas-layout[data-sidebar-collapsed="true"] > .canvas-sidebar-toggle {
   left: calc(1rem + 1px);
@@ -1827,7 +2000,7 @@ textarea {
   animation: canvas-sidebar-focus-in 180ms ease-out;
 }
 .canvas-layout[data-sidebar-collapsed="true"] .canvas-workspace-heading {
-  padding-left: 3rem;
+  padding-left: 5.5rem;
 }
 @media (min-width: 640px) {
   .canvas-sidebar-toggle { top: calc(1.25rem + 1px); right: calc(1.25rem + 1px); }
@@ -1835,7 +2008,7 @@ textarea {
 }
 @media (min-width: 1024px) {
   .canvas-layout[data-sidebar-collapsed="false"] > .canvas-sidebar-toggle {
-    left: calc(380px - 1.25rem - 2.25rem - 1px);
+    left: calc(380px - 1.25rem - 4.75rem - 1px);
     right: auto;
   }
 }
@@ -1854,12 +2027,21 @@ textarea {
   --canvas-light-surface: color-mix(in srgb, var(--color-panel) 92%, var(--canvas-white));
   --canvas-pointer-ink: oklch(from var(--canvas-theme-color) clamp(0.58, l, 0.78) calc(c * 1.8) h);
   --canvas-pointer-light: color-mix(in srgb, var(--canvas-theme-color) 38%, var(--canvas-white));
+  --canvas-space-surface: #08131c;
+  --canvas-space-surface-mid: #0f1d2a;
+  --canvas-core-blue: #80c4dc;
+  --canvas-core-violet: #9b8fd0;
+  --canvas-core-gold: #d4ad6a;
+  --canvas-surface-foreground: #f3f7f7;
+  --canvas-surface-muted: color-mix(in srgb, #f3f7f7 64%, transparent);
 }
 .library-background-layer[data-current-view="canvas"] > .library-workspace-surface {
   z-index: 1;
   background: transparent;
   border-color: transparent;
   box-shadow: none;
+  /* CanvasView uses the same adjustable workspace width as every other page. */
+  width: min(100%, var(--library-workspace-width, 88%));
 }
 .canvas-page-atmosphere {
   position: absolute;
@@ -1892,14 +2074,25 @@ textarea {
   position: absolute;
   top: 0;
   left: 0;
-  width: 48%;
-  height: 52%;
-  border-radius: 46% 54% 62% 38% / 58% 43% 57% 42%;
-  background: radial-gradient(ellipse at 48% 52%, var(--canvas-mist-color), color-mix(in srgb, var(--canvas-mist-color) 68%, transparent) 26%, transparent 70%);
+  width: var(--mist-width, 40%);
+  height: var(--mist-height, 34%);
+  border-radius: var(--mist-radius, 50%);
+  background:
+    radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-mist-color) 42%, transparent), color-mix(in srgb, var(--canvas-mist-color) 15%, transparent) 30%, transparent 68%),
+    radial-gradient(ellipse at 62% 38%, color-mix(in srgb, var(--canvas-core-violet) 7%, transparent), transparent 66%);
+  filter: blur(var(--mist-blur, 54px)) saturate(0.82);
+  mix-blend-mode: screen;
+  mask-image: radial-gradient(ellipse at center, #000 0%, rgb(0 0 0 / 0.82) 34%, transparent 76%);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 0%, rgb(0 0 0 / 0.82) 34%, transparent 76%);
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  transform-origin: center;
+  will-change: transform, opacity;
   opacity: 0;
 }
 .canvas-mist-node--light {
-  background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--canvas-light-surface) 12%, transparent), color-mix(in srgb, var(--canvas-light-surface) 8%, transparent) 30%, transparent 72%);
+  background: radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-light-surface) 8%, transparent), color-mix(in srgb, var(--canvas-light-surface) 2.5%, transparent) 36%, transparent 78%);
+  filter: blur(var(--mist-blur, 68px)) saturate(0.72);
 }
 .canvas-page-grain {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' opacity='.5' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
@@ -1909,12 +2102,85 @@ textarea {
 .canvas-page-atmosphere[data-motion-paused="true"] * { animation-play-state: paused !important; }
 
 .canvas-layout > #canvas-creation-panel,
-.canvas-workspace {
+.canvas-workspace,
+.canvas-results-panel {
   border-color: color-mix(in srgb, var(--color-panel) 70%, var(--color-border));
   box-shadow: 0 8px 32px color-mix(in srgb, var(--color-foreground) 3%, transparent);
 }
-.canvas-layout > #canvas-creation-panel {
-  background: color-mix(in srgb, var(--color-chrome-control) 6%, transparent);
+.canvas-layout > #canvas-creation-panel,
+.canvas-results-panel {
+  background: var(--canvas-surface);
+}
+.canvas-workspace {
+  background: var(--canvas-surface);
+}
+.canvas-layout {
+  --canvas-creation-width: 380px;
+  --canvas-results-width: 220px;
+  --canvas-surface:
+    radial-gradient(ellipse 72% 88% at 18% 18%, color-mix(in srgb, var(--color-chrome-start) 16%, transparent), transparent 68%),
+    radial-gradient(ellipse 70% 78% at 84% 76%, color-mix(in srgb, var(--color-chrome-end) 13%, transparent), transparent 70%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 76%, transparent), color-mix(in srgb, var(--color-chrome-control) 16%, transparent) 52%, color-mix(in srgb, var(--color-panel) 68%, transparent));
+  --canvas-workspace-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
+}
+@media (min-width: 1024px) {
+  .canvas-layout[data-sidebar-collapsed="false"][data-results-hidden="false"] {
+    grid-template-columns: var(--canvas-creation-width) minmax(0, 1fr) var(--canvas-results-width);
+  }
+  .canvas-layout[data-sidebar-collapsed="true"][data-results-hidden="false"] {
+    grid-template-columns: minmax(0, 1fr) var(--canvas-results-width);
+  }
+  .canvas-layout[data-sidebar-collapsed="false"][data-results-hidden="true"] {
+    grid-template-columns: var(--canvas-creation-width) minmax(0, 1fr);
+  }
+  .canvas-layout[data-sidebar-collapsed="true"][data-results-hidden="true"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.canvas-results-panel {
+  min-height: 0;
+  max-height: 100%;
+}
+.canvas-results-panel__list {
+  min-height: 0;
+  max-height: 100%;
+  scrollbar-gutter: stable;
+}
+.canvas-results-resize-handle {
+  color: var(--color-muted);
+}
+.canvas-creation-resize-handle {
+  color: var(--color-muted);
+}
+.canvas-creation-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 1.25rem;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.canvas-creation-resize-handle:hover::before,
+.canvas-creation-resize-handle:focus-visible::before,
+.canvas-creation-resize-handle.is-resizing::before {
+  opacity: 1;
+}
+.canvas-results-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 1.25rem;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.canvas-results-resize-handle:hover::before,
+.canvas-results-resize-handle:focus-visible::before,
+.canvas-results-resize-handle.is-resizing::before {
+  opacity: 1;
 }
 .library-background-layer[data-current-view="canvas"] .canvas-backdrop[data-canvas-mode="empty"] .canvas-focus-halo {
   animation: canvas-page-idle-breathe 16s ease-in-out infinite;
@@ -1927,18 +2193,37 @@ textarea {
   .canvas-page-atmosphere * { animation: none !important; }
 }
 
-/* Quiet studio base, with computation effects only while generating or revealing. */
+/* Quiet studio base. All three canvas states share this same light-sensitive space. */
 .canvas-workspace {
-  /* Keep the previous studio treatment inside the artwork card only. */
-  --canvas-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
-  --canvas-paper-center: color-mix(in srgb, var(--canvas-light-surface) 97%, var(--canvas-theme-color));
+  /* The outer shell and its inner stage share the same mist gradient. */
+  --canvas-stage-surface: var(--canvas-surface);
+  --canvas-paper-center: var(--canvas-space-surface);
   --canvas-mist-color: oklch(from var(--canvas-theme-color) l calc(c * 1.8) h);
   --canvas-ai-ink: var(--canvas-theme-color);
-  --canvas-reveal-duration: 600ms;
-  background: var(--canvas-surface);
+  --canvas-reveal-duration: 1500ms;
+  background: var(--canvas-stage-surface);
 }
 .canvas-workspace .canvas-mist-node--light {
   background: radial-gradient(ellipse at 50% 50%, var(--canvas-light-surface), color-mix(in srgb, var(--canvas-light-surface) 80%, transparent) 30%, transparent 72%);
+}
+
+/* Prompt-derived atmosphere is intentionally restrained: it colors the reveal
+ * field only and never attempts to draw the prompt's subject. */
+.canvas-backdrop[data-canvas-tone="forest"] {
+  --canvas-ai-ink: #5a927b;
+  --canvas-mist-color: color-mix(in srgb, #5a927b 22%, transparent);
+}
+.canvas-backdrop[data-canvas-tone="ocean"] {
+  --canvas-ai-ink: #5b86a1;
+  --canvas-mist-color: color-mix(in srgb, #5b86a1 22%, transparent);
+}
+.canvas-backdrop[data-canvas-tone="warm"] {
+  --canvas-ai-ink: #b08064;
+  --canvas-mist-color: color-mix(in srgb, #b08064 20%, transparent);
+}
+.canvas-backdrop[data-canvas-tone="violet"] {
+  --canvas-ai-ink: #8877a4;
+  --canvas-mist-color: color-mix(in srgb, #8877a4 20%, transparent);
 }
 
 /* Page-only alternatives: the artwork card retains its own studio surface. */
@@ -1968,7 +2253,7 @@ textarea {
 .library-background-layer[data-current-view="canvas"]:is([data-background-mode="white"], [data-background-mode="color"]) .canvas-page-heading .text-foreground { color: var(--canvas-page-foreground); }
 .library-background-layer[data-current-view="canvas"]:is([data-background-mode="white"], [data-background-mode="color"]) .canvas-page-heading .text-muted { color: var(--canvas-page-muted); }
 /* Keep form text legible when the user chooses a dark or detailed page background. */
-.library-background-layer[data-current-view="canvas"]:is([data-background-mode="white"], [data-background-mode="color"], [data-background-mode="image"]) #canvas-creation-panel {
+.library-background-layer[data-current-view="canvas"]:is([data-background-mode="white"], [data-background-mode="color"], [data-background-mode="image"]) :is(#canvas-creation-panel, .canvas-results-panel) {
   background: color-mix(in srgb, var(--color-panel) 94%, transparent);
 }
 .library-background-layer[data-current-view="canvas"][data-background-mode="image"] .canvas-page-heading > div {
@@ -1995,10 +2280,24 @@ textarea {
   position: absolute;
   inset: 0;
 }
-.canvas-studio-surface {
-  background: var(--canvas-paper-center);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-panel) 40%, transparent);
+.canvas-backdrop > .canvas-background-layers > .canvas-mist-field {
+  opacity: 0.16;
 }
+.canvas-backdrop[data-canvas-mode="thinking"] > .canvas-background-layers > .canvas-mist-field,
+.canvas-backdrop[data-canvas-mode="busy"] > .canvas-background-layers > .canvas-mist-field {
+  opacity: 0.2;
+}
+.canvas-studio-surface {
+  background:
+    radial-gradient(ellipse 56% 62% at 50% 43%, color-mix(in srgb, var(--canvas-core-violet) 12%, transparent), transparent 70%),
+    radial-gradient(ellipse 42% 52% at 50% 48%, color-mix(in srgb, var(--canvas-core-blue) 8%, transparent), transparent 68%),
+    linear-gradient(145deg, var(--canvas-space-surface), var(--canvas-space-surface-mid) 56%, var(--canvas-space-surface));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+}
+.canvas-backdrop .text-foreground { color: var(--canvas-surface-foreground); }
+.canvas-backdrop .text-muted { color: var(--canvas-surface-muted); }
+.canvas-backdrop .border-border { border-color: color-mix(in srgb, #ffffff 18%, transparent); }
+.canvas-backdrop .canvas-result-actions .text-foreground { color: var(--color-foreground); }
 .canvas-pointer-field {
   position: absolute;
   inset: 0;
@@ -2065,71 +2364,327 @@ textarea {
 }
 .canvas-focus-halo {
   background: radial-gradient(ellipse 55% 55% at 50% 46%, var(--canvas-paper-center), transparent 72%);
-  opacity: 0.1;
+  opacity: 0.08;
 }
 .canvas-backdrop[data-canvas-mode="result"] .canvas-focus-halo,
-.canvas-backdrop[data-canvas-mode="thinking"] .canvas-focus-halo {
+.canvas-backdrop[data-canvas-mode="thinking"] .canvas-focus-halo,
+.canvas-backdrop[data-canvas-mode="busy"] .canvas-focus-halo {
   animation: canvas-focus-breathe 12s ease-in-out infinite;
 }
 
-.canvas-compute-field {
+/* Creation Core: one shared visual anchor for idle, generation and reveal. */
+.canvas-creation-core {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 420ms ease-out, transform 700ms ease-out;
+}
+.canvas-creation-core[data-core-state="result"] {
+  opacity: 0;
+  transform: scale(0.72);
+}
+.canvas-core-aura,
+.canvas-core-energy-layer,
+.canvas-core-particle-field,
+.canvas-core-orbit,
+.canvas-core-logo-shell {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: min(86%, 660px);
-  height: min(84%, 660px);
+}
+.canvas-core-aura {
+  width: min(48%, 15rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--canvas-core-blue) 20%, transparent), color-mix(in srgb, var(--canvas-core-violet) 9%, transparent) 36%, transparent 70%);
+  opacity: 0.42;
+  filter: blur(14px);
+  animation: canvas-core-aura-breathe 6s ease-in-out infinite;
+}
+.canvas-core-energy-layer {
+  width: min(72%, 24rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.56);
+  will-change: transform, opacity;
+}
+.canvas-core-energy-layer--blue {
+  background: radial-gradient(circle, transparent 48%, color-mix(in srgb, var(--canvas-core-blue) 24%, transparent) 49.2%, transparent 52.4%);
+  box-shadow: 0 0 34px color-mix(in srgb, var(--canvas-core-blue) 11%, transparent);
+}
+.canvas-core-energy-layer--violet {
+  width: min(61%, 20rem);
+  background: radial-gradient(circle, transparent 47%, color-mix(in srgb, var(--canvas-core-violet) 22%, transparent) 48.5%, transparent 52.5%);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--canvas-core-violet) 10%, transparent);
+}
+.canvas-core-energy-layer--gold {
+  width: min(51%, 16rem);
+  background: radial-gradient(circle, transparent 46%, color-mix(in srgb, var(--canvas-core-gold) 22%, transparent) 48%, transparent 53%);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--canvas-core-gold) 10%, transparent);
+}
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-energy-layer--blue {
+  animation: canvas-core-energy-wave 8s ease-out -1.2s infinite;
+}
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-energy-layer--violet {
+  animation: canvas-core-energy-wave 8s ease-out -3.8s infinite;
+}
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-energy-layer--gold {
+  animation: canvas-core-energy-wave 8s ease-out -6.2s infinite;
+}
+.canvas-creation-core[data-core-state="reveal"] .canvas-core-energy-layer {
+  animation: canvas-core-energy-return var(--canvas-reveal-duration) ease-in both;
+}
+.canvas-core-particle-field {
+  inset: 0;
+  overflow: hidden;
+  transform: none;
+}
+.canvas-core-particle {
+  position: absolute;
+  left: var(--core-particle-x);
+  top: var(--core-particle-y);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--canvas-core-blue);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--canvas-core-blue) 40%, transparent);
+  opacity: 0.2;
   transform: translate(-50%, -50%);
 }
-.canvas-energy-field,
-.canvas-energy-core,
-.canvas-neural-field,
+.canvas-core-particle:nth-child(3n + 2) {
+  background: var(--canvas-core-violet);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--canvas-core-violet) 40%, transparent);
+}
+.canvas-core-particle:nth-child(3n) {
+  background: var(--canvas-core-gold);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--canvas-core-gold) 38%, transparent);
+}
+.canvas-creation-core[data-core-state="dormant"] .canvas-core-particle {
+  animation: canvas-core-particle-drift 7s ease-in-out var(--core-particle-delay) infinite;
+}
+.canvas-creation-core[data-core-state="awakening"] .canvas-core-particle {
+  animation: canvas-core-particle-converge 2.8s cubic-bezier(.22, .68, .3, 1) var(--core-particle-delay) infinite;
+}
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-particle {
+  animation: canvas-core-particle-resonate 5.8s ease-in-out var(--core-particle-delay) infinite;
+}
+.canvas-creation-core[data-core-state="reveal"] .canvas-core-particle {
+  animation: canvas-core-particle-collapse var(--canvas-reveal-duration) ease-in both;
+}
+.canvas-core-orbit {
+  --core-orbit-scale: 1;
+  --core-orbit-start: 20deg;
+  width: min(60%, 20rem);
+  aspect-ratio: 1;
+  border: 1px solid color-mix(in srgb, var(--canvas-core-blue) 38%, transparent);
+  border-right-color: transparent;
+  border-bottom-color: color-mix(in srgb, var(--canvas-core-violet) 22%, transparent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(20deg);
+  opacity: 0.52;
+  animation: canvas-core-orbit-spin 18s linear infinite;
+}
+.canvas-core-orbit--outer {
+  --core-orbit-scale: 0.48;
+  --core-orbit-start: 20deg;
+  width: min(76%, 25rem);
+  transform: translate(-50%, -50%) rotate(20deg) scaleY(0.48);
+  opacity: 0.42;
+}
+.canvas-core-orbit--middle {
+  --core-orbit-scale: 0.62;
+  --core-orbit-start: -34deg;
+  width: min(61%, 20rem);
+  transform: translate(-50%, -50%) rotate(-34deg) scaleY(0.62);
+  animation-duration: 14s;
+  animation-direction: reverse;
+  border-color: color-mix(in srgb, var(--canvas-core-violet) 34%, transparent);
+  border-left-color: transparent;
+}
+.canvas-core-orbit--inner {
+  --core-orbit-scale: 0.72;
+  --core-orbit-start: 58deg;
+  width: min(45%, 15rem);
+  transform: translate(-50%, -50%) rotate(58deg) scaleY(0.72);
+  animation-duration: 10s;
+  border-color: color-mix(in srgb, var(--canvas-core-gold) 40%, transparent);
+  border-top-color: transparent;
+}
+.canvas-core-orbit span {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--canvas-core-blue);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--canvas-core-blue) 70%, transparent);
+}
+.canvas-core-orbit--middle span { background: var(--canvas-core-violet); }
+.canvas-core-orbit--inner span { background: var(--canvas-core-gold); }
+.canvas-creation-core[data-core-state="awakening"] .canvas-core-orbit { animation-duration: 12s; }
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-orbit { animation-duration: 7s; }
+.canvas-creation-core[data-core-state="reveal"] .canvas-core-orbit {
+  animation: canvas-core-orbit-return var(--canvas-reveal-duration) ease-in both;
+}
+.canvas-core-logo-shell {
+  display: grid;
+  width: clamp(6rem, 20%, 8.5rem);
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #ffffff 34%, transparent);
+  border-radius: 50%;
+  background: radial-gradient(circle at 42% 35%, color-mix(in srgb, #ffffff 22%, transparent), color-mix(in srgb, var(--canvas-space-surface-mid) 88%, transparent) 54%, color-mix(in srgb, var(--canvas-space-surface) 96%, transparent));
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--canvas-core-blue) 5%, transparent), 0 0 34px color-mix(in srgb, var(--canvas-core-blue) 21%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 25%, transparent);
+  transform: translate(-50%, -50%);
+  animation: canvas-core-logo-breathe 5s ease-in-out infinite;
+  z-index: 2;
+}
+.canvas-core-logo-light {
+  position: absolute;
+  inset: 8%;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--canvas-core-blue) 28%, transparent), transparent 66%);
+  filter: blur(8px);
+}
+.canvas-core-logo {
+  position: relative;
+  z-index: 1;
+  width: 68%;
+  height: 68%;
+  overflow: hidden;
+  border-radius: 50% !important;
+  object-fit: cover;
+  filter: saturate(1.12) contrast(1.04);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+}
+.canvas-creation-core[data-core-state="awakening"] .canvas-core-logo-shell {
+  animation-duration: 3.4s;
+}
+.canvas-creation-core[data-core-state="accumulating"] .canvas-core-logo-shell {
+  animation: canvas-core-logo-accumulate 2.4s ease-in-out infinite;
+}
+.canvas-creation-core[data-core-state="reveal"] .canvas-core-logo-shell {
+  animation: canvas-core-logo-birth var(--canvas-reveal-duration) ease-in both;
+}
+
+.canvas-generating-content .canvas-status-card--below-core {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(1.75rem, 4%, 3.5rem);
+  width: min(calc(100% - 2rem), 28rem);
+  margin: 0;
+  transform: translateX(-50%);
+}
+.canvas-status-card--below-core .canvas-waiting-message {
+  max-width: min(100%, 24rem);
+}
+
+.canvas-blank-particles,
+.canvas-prompt-particle-field,
+.canvas-formation-field,
+.canvas-ai-scan,
 .canvas-reveal-light {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.canvas-energy-field {
-  animation: canvas-energy-orbit 14s linear infinite;
-}
-.canvas-energy-core {
-  background:
-    radial-gradient(ellipse at 44% 38%, color-mix(in srgb, var(--canvas-ai-ink) 18%, transparent), transparent 66%),
-    radial-gradient(ellipse at 60% 66%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 58%);
-  filter: blur(35px);
-  border-radius: 46% 54% 50% 50%;
-  animation: canvas-energy-breathe 3.8s ease-in-out infinite;
-}
-.canvas-neural-field {
-  overflow: visible;
-  fill: var(--canvas-ai-ink);
-}
-.canvas-neural-node {
-  opacity: 0;
-  animation: canvas-neural-converge 4.4s ease-in infinite;
-  animation-delay: var(--node-delay);
-}
-.canvas-neural-link {
-  fill: none;
-  stroke: var(--canvas-ai-ink);
-  stroke-width: 0.8;
-  animation: canvas-neural-connect 4.4s ease-in-out infinite;
-  animation-delay: var(--node-delay);
-}
-.canvas-data-stream {
-  fill: none;
-  stroke: var(--canvas-ai-ink);
-  stroke-width: 1;
-  opacity: 0;
-  animation: canvas-data-flow 3.6s ease-in infinite;
-  animation-delay: var(--stream-delay);
+  pointer-events: none;
 }
 
-/* Soft light sweep; the background stays free of grids in every state. */
+.canvas-blank-particles {
+  z-index: 1;
+}
+.canvas-blank-particle {
+  position: absolute;
+  left: var(--particle-x);
+  top: var(--particle-y);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--canvas-ai-ink);
+  opacity: 0.18;
+  animation: canvas-blank-drift 7s ease-in-out var(--particle-delay) infinite;
+}
+
+.canvas-prompt-particle-field {
+  z-index: 2;
+  overflow: hidden;
+}
+.canvas-prompt-particle-trail {
+  position: absolute;
+  left: 7%;
+  top: 12%;
+  width: 42%;
+  height: 74%;
+}
+.canvas-prompt-particle {
+  position: absolute;
+  left: 0;
+  top: calc(7% + var(--particle-index) * 7%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--canvas-ai-ink);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--canvas-ai-ink) 28%, transparent);
+  animation: canvas-prompt-particle-flow 2.4s cubic-bezier(.22, .68, .3, 1) calc(var(--particle-index) * 90ms) infinite;
+}
+.canvas-prompt-token {
+  position: absolute;
+  left: var(--token-start, 6%);
+  top: 20%;
+  max-width: 28%;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--canvas-ai-ink) 66%, var(--color-foreground));
+  font-size: 0.68rem;
+  line-height: 1.2;
+  opacity: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: canvas-token-enter 3.4s ease-out calc(var(--token-index) * 120ms) infinite;
+}
+.canvas-prompt-token:nth-child(2) { --token-start: 6%; top: 23%; }
+.canvas-prompt-token:nth-child(3) { --token-start: 16%; top: 39%; }
+.canvas-prompt-token:nth-child(4) { --token-start: 7%; top: 55%; }
+.canvas-prompt-token:nth-child(5) { --token-start: 17%; top: 70%; }
+.canvas-prompt-token:nth-child(6) { --token-start: 7%; top: 83%; }
+.canvas-backdrop[data-canvas-mode="busy"] .canvas-prompt-token {
+  animation-name: canvas-token-dissolve;
+}
+
+.canvas-formation-field {
+  z-index: 1;
+  left: 24%;
+  top: 13%;
+  width: 62%;
+  height: 74%;
+  border-radius: 1.25rem;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--canvas-ai-ink) 8%, transparent), transparent 70%);
+  filter: blur(2px);
+}
+.canvas-formation-block {
+  position: absolute;
+  left: var(--block-left);
+  top: var(--block-top);
+  width: var(--block-width);
+  height: var(--block-height);
+  border-radius: 28% 40% 34% 46%;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--canvas-ai-ink) 18%, transparent), color-mix(in srgb, var(--color-primary) 7%, transparent));
+  opacity: 0;
+  transform: scale(0.72) rotate(-6deg);
+  animation: canvas-formation-build 4.8s ease-out var(--block-delay) infinite;
+}
+.canvas-formation-block:nth-child(2n) {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-secondary) 15%, transparent), color-mix(in srgb, var(--canvas-ai-ink) 6%, transparent));
+}
+
+/* A single soft sweep communicates the last, photographic scanning pass. */
 .canvas-ai-scan,
 .canvas-reconstruction-scan {
-  position: absolute;
-  inset: 0;
+  z-index: 3;
   animation: canvas-scan-travel 3.2s linear infinite;
 }
 .canvas-ai-scan::before,
@@ -2139,10 +2694,10 @@ textarea {
   top: -60px;
   left: 0;
   right: 0;
-  height: 120px;
-  background: linear-gradient(transparent, color-mix(in srgb, var(--canvas-ai-ink) 20%, transparent), transparent);
+  height: 150px;
+  background: linear-gradient(transparent, color-mix(in srgb, var(--canvas-ai-ink) 13%, transparent), transparent);
   mask-image: linear-gradient(transparent, black 50%, transparent);
-  opacity: 0.16;
+  opacity: 0.2;
 }
 .canvas-ai-scan::after,
 .canvas-reconstruction-scan::after {
@@ -2151,21 +2706,17 @@ textarea {
   inset: 0 6% auto;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--canvas-ai-ink) 45%, var(--color-primary) 60%, transparent);
-  opacity: 0.38;
-  box-shadow: 0 0 9px color-mix(in srgb, var(--canvas-ai-ink) 16%, transparent);
+  opacity: 0.46;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--canvas-ai-ink) 22%, transparent);
 }
 
-.canvas-backdrop[data-canvas-mode="reveal"] .canvas-energy-field {
-  animation: canvas-energy-collapse var(--canvas-reveal-duration) ease-out both;
-}
-.canvas-backdrop[data-canvas-mode="reveal"] .canvas-energy-core { animation: none; }
 .canvas-backdrop[data-canvas-mode="reveal"] .canvas-ai-scan {
   animation: canvas-scan-travel var(--canvas-reveal-duration) ease-out both;
 }
 .canvas-reveal-light {
+  z-index: 2;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--canvas-ai-ink) 22%, transparent);
-  background: radial-gradient(ellipse at center, transparent 46%, color-mix(in srgb, var(--canvas-ai-ink) 9%, transparent) 60%, transparent 72%);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--canvas-ai-ink) 8%, transparent), transparent 62%);
   animation: canvas-reveal-expand var(--canvas-reveal-duration) ease-out both;
 }
 
@@ -2186,16 +2737,64 @@ textarea {
 .canvas-reconstruction-frost {
   position: absolute;
   inset: 0;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px) saturate(0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(0.82);
   mask-image: linear-gradient(to bottom, transparent var(--canvas-reconstruction-progress), black calc(var(--canvas-reconstruction-progress) + 100px));
-  animation: canvas-reconstruct var(--canvas-reveal-duration) linear both;
+  animation: canvas-reconstruct var(--canvas-reveal-duration) ease-out both;
 }
 .canvas-reconstruction-scan {
   animation: canvas-scan-travel var(--canvas-reveal-duration) linear both;
 }
 .canvas-reconstruction-scan::before { background-size: 100% 100%; background-image: linear-gradient(transparent, color-mix(in srgb, var(--canvas-ai-ink) 20%, transparent), transparent); }
 .canvas-result-actions { z-index: 2; }
+
+.canvas-empty-frame {
+  position: relative;
+  display: grid;
+  width: 8.5rem;
+  height: 7rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--canvas-ai-ink) 18%, var(--color-border));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--color-panel) 38%, transparent);
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--canvas-ai-ink) 5%, transparent), inset 0 1px 0 color-mix(in srgb, var(--color-panel) 55%, transparent);
+}
+.canvas-empty-frame::before,
+.canvas-empty-frame::after {
+  content: "";
+  position: absolute;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-color: color-mix(in srgb, var(--canvas-ai-ink) 30%, transparent);
+}
+.canvas-empty-frame::before {
+  left: -1px;
+  top: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+  border-radius: 0.9rem 0 0 0;
+}
+.canvas-empty-frame::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+  border-radius: 0 0 0.9rem 0;
+}
+.canvas-empty-aperture {
+  width: 2rem;
+  height: 2rem;
+  border: 1px dashed color-mix(in srgb, var(--canvas-ai-ink) 32%, var(--color-border));
+  border-radius: 50%;
+  opacity: 0.8;
+}
+.canvas-empty-sparkle {
+  position: absolute;
+  right: 1.2rem;
+  top: 0.8rem;
+  color: var(--canvas-ai-ink);
+  opacity: 0.48;
+}
 
 .canvas-backdrop[data-motion-paused="true"] .canvas-background-layers *,
 .canvas-backdrop[data-motion-paused="true"] .canvas-background-layers *::before,
@@ -2205,36 +2804,90 @@ textarea {
 
 @keyframes canvas-focus-breathe {
   0%, 100% { opacity: 0.08; }
-  50% { opacity: 0.1; }
+  50% { opacity: 0.14; }
 }
-@keyframes canvas-energy-orbit { to { transform: rotate(360deg); } }
-@keyframes canvas-energy-breathe {
-  0%, 100% { transform: scale(0.92); opacity: 0.72; }
-  50% { transform: scale(1.12); opacity: 1; }
+@keyframes canvas-core-aura-breathe {
+  0%, 100% { opacity: 0.28; transform: translate(-50%, -50%) scale(0.92); }
+  50% { opacity: 0.58; transform: translate(-50%, -50%) scale(1.08); }
 }
-@keyframes canvas-neural-converge {
-  0% { transform: translate(0, 0); opacity: 0; }
-  16% { opacity: 0.55; }
-  72% { opacity: 0.38; }
-  100% { transform: translate(var(--node-x), var(--node-y)); opacity: 0; }
+@keyframes canvas-core-energy-wave {
+  0%, 8% { opacity: 0; transform: translate(-50%, -50%) scale(0.56); }
+  20% { opacity: 0.5; }
+  66% { opacity: 0.16; transform: translate(-50%, -50%) scale(1.08); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.34); }
 }
-@keyframes canvas-neural-connect {
-  0%, 28%, 70%, 100% { opacity: 0; }
-  44%, 54% { opacity: 0.5; }
+@keyframes canvas-core-energy-return {
+  0% { opacity: 0.42; transform: translate(-50%, -50%) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.52); }
 }
-@keyframes canvas-data-flow {
-  0% { transform: translate(0, 0); opacity: 0; }
-  20%, 50% { opacity: 0.12; }
-  100% { transform: translate(var(--stream-x), var(--stream-y)); opacity: 0; }
+@keyframes canvas-core-particle-drift {
+  0%, 100% { opacity: 0.14; transform: translate(-50%, -50%) scale(0.68); }
+  50% { opacity: 0.46; transform: translate(calc(-50% + 5px), calc(-50% - 8px)) scale(1); }
+}
+@keyframes canvas-core-particle-converge {
+  0%, 8% { left: var(--core-particle-x); top: var(--core-particle-y); opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+  24% { left: var(--core-particle-bend-x); top: var(--core-particle-bend-y); opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+  84% { left: 50%; top: 50%; opacity: 0.16; transform: translate(-50%, -50%) scale(0.34); }
+  100% { left: 50%; top: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.08); }
+}
+@keyframes canvas-core-particle-resonate {
+  0%, 100% { left: var(--core-particle-x); top: var(--core-particle-y); opacity: 0.1; transform: translate(-50%, -50%) scale(0.54); }
+  40% { left: var(--core-particle-bend-x); top: var(--core-particle-bend-y); opacity: 0.62; transform: translate(-50%, -50%) scale(1); }
+  70% { left: 50%; top: 50%; opacity: 0.22; transform: translate(-50%, -50%) scale(0.42); }
+}
+@keyframes canvas-core-particle-collapse {
+  0% { left: var(--core-particle-x); top: var(--core-particle-y); opacity: 0.2; transform: translate(-50%, -50%) scale(0.6); }
+  72% { left: 50%; top: 50%; opacity: 0.62; transform: translate(-50%, -50%) scale(0.9); }
+  100% { left: 50%; top: 50%; opacity: 0; transform: translate(-50%, -50%) scale(0.04); }
+}
+@keyframes canvas-core-orbit-spin {
+  from { transform: translate(-50%, -50%) rotate(var(--core-orbit-start)) scaleY(var(--core-orbit-scale)); }
+  to { transform: translate(-50%, -50%) rotate(calc(var(--core-orbit-start) + 360deg)) scaleY(var(--core-orbit-scale)); }
+}
+@keyframes canvas-core-orbit-return {
+  from { opacity: 0.56; transform: translate(-50%, -50%) rotate(var(--core-orbit-start)) scaleY(var(--core-orbit-scale)); }
+  to { opacity: 0; transform: translate(-50%, -50%) rotate(calc(var(--core-orbit-start) + 120deg)) scaleY(var(--core-orbit-scale)) scale(0.4); }
+}
+@keyframes canvas-core-logo-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.96); filter: brightness(0.96); }
+  50% { transform: translate(-50%, -50%) scale(1.04); filter: brightness(1.08); }
+}
+@keyframes canvas-core-logo-accumulate {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 8px color-mix(in srgb, var(--canvas-core-blue) 5%, transparent), 0 0 34px color-mix(in srgb, var(--canvas-core-blue) 22%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 25%, transparent); }
+  50% { transform: translate(-50%, -50%) scale(1.08); box-shadow: 0 0 0 12px color-mix(in srgb, var(--canvas-core-gold) 9%, transparent), 0 0 58px color-mix(in srgb, var(--canvas-core-violet) 34%, transparent), inset 0 1px 0 color-mix(in srgb, #ffffff 38%, transparent); }
+}
+@keyframes canvas-core-logo-birth {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); filter: brightness(1.2); }
+  55% { opacity: 0.82; transform: translate(-50%, -50%) scale(1.22); filter: brightness(1.42); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.48); filter: brightness(1.8); }
+}
+@keyframes canvas-blank-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); opacity: 0.12; }
+  50% { transform: translate3d(5px, -8px, 0); opacity: 0.3; }
+}
+@keyframes canvas-prompt-particle-flow {
+  0% { transform: translate3d(0, 0, 0) scale(0.6); opacity: 0; }
+  18% { opacity: 0.58; }
+  80% { transform: translate3d(210px, 36px, 0) scale(1); opacity: 0.22; }
+  100% { transform: translate3d(250px, 42px, 0) scale(0.25); opacity: 0; }
+}
+@keyframes canvas-token-enter {
+  0%, 10% { left: var(--token-start); transform: translateX(-12px); opacity: 0; }
+  28%, 68% { left: calc(var(--token-start) + 4%); transform: translateX(0); opacity: 0.72; }
+  100% { left: 86%; transform: translateX(-100%); opacity: 0; }
+}
+@keyframes canvas-token-dissolve {
+  0%, 18% { left: var(--token-start); transform: translateX(0); opacity: 0.38; filter: blur(0); }
+  62%, 100% { left: 86%; transform: translateX(-100%); opacity: 0; filter: blur(4px); }
+}
+@keyframes canvas-formation-build {
+  0%, 12% { transform: scale(0.72) rotate(-6deg); opacity: 0; }
+  42%, 74% { transform: scale(1) rotate(0); opacity: 0.52; }
+  100% { transform: scale(1.04) rotate(2deg); opacity: 0.2; }
 }
 @keyframes canvas-scan-travel {
-  from { transform: translateY(-12%); }
-  to { transform: translateY(112%); }
-}
-@keyframes canvas-energy-collapse {
-  0% { transform: scale(1.08); opacity: 0.9; }
-  50% { transform: scale(0.45); opacity: 0.65; }
-  100% { transform: scale(0.25); opacity: 0; }
+  from { transform: translateY(-28%); }
+  to { transform: translateY(128%); }
 }
 @keyframes canvas-reveal-expand {
   0%, 15% { transform: scale(0.35); opacity: 0; }
@@ -2267,14 +2920,6 @@ textarea {
   transition-duration: 200ms;
 }
 
-.canvas-prompt-tag {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-panel) 50%, transparent);
-  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  color: var(--color-muted);
-  animation: canvas-prompt-tag-in 250ms ease-out both;
-}
-
 .canvas-artwork {
   /* Flex assigns the space left after the caption; media cannot inflate that space. */
   container-type: size;
@@ -2290,20 +2935,8 @@ textarea {
     0 8px 24px color-mix(in srgb, var(--color-foreground) 6%, transparent);
 }
 
-.canvas-progress-indeterminate {
-  width: 42%;
-  border-radius: 999px;
-  opacity: 0.65;
-  animation: status-toast-progress-indeterminate 2.8s ease-in-out infinite;
-}
-
 @media (hover: none) {
   .canvas-result-actions { opacity: 1; }
-}
-
-@keyframes canvas-prompt-tag-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 .sort-control-panel {
@@ -2395,21 +3028,40 @@ textarea {
   .startup-slide__img,
   .canvas-focus-halo,
   .canvas-status-card,
-  .canvas-prompt-tag,
-  .canvas-progress-indeterminate {
+  .canvas-creation-core,
+  .canvas-core-aura,
+  .canvas-core-energy-layer,
+  .canvas-core-particle,
+  .canvas-core-orbit,
+  .canvas-core-logo-shell,
+  .canvas-blank-particle,
+  .canvas-prompt-particle,
+  .canvas-prompt-token,
+  .canvas-formation-block {
     animation: none !important;
-  }
-
-  .canvas-compute-field,
-  .canvas-ai-scan,
-  .canvas-image-reconstruction {
-    display: none;
   }
 
   .canvas-background-layers *,
   .canvas-background-layers *::before,
   .canvas-background-layers *::after {
     animation: none !important;
+  }
+
+  .canvas-creation-core[data-core-state="accumulating"] .canvas-core-energy-layer,
+  .canvas-creation-core[data-core-state="reveal"] .canvas-core-energy-layer {
+    opacity: 0.28;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+
+  .canvas-creation-core[data-core-state="dormant"] .canvas-core-logo-shell,
+  .canvas-creation-core[data-core-state="awakening"] .canvas-core-logo-shell,
+  .canvas-creation-core[data-core-state="accumulating"] .canvas-core-logo-shell {
+    transform: translate(-50%, -50%);
+  }
+
+  .canvas-ai-scan,
+  .canvas-image-reconstruction {
+    display: none;
   }
 
   .canvas-waiting-message--leaving {
@@ -2740,6 +3392,17 @@ html[data-window-material="acrylic"] .library-atmosphere {
   background-attachment: scroll;
 }
 
+/* Keep the default canvas page atmosphere visible after the generic page
+ * background declaration above. This is the same soft mist family used by
+ * the creation and result panels, so the three columns read as one studio. */
+.library-background-layer[data-current-view="canvas"][data-background-mode="mist"] {
+  background-image:
+    radial-gradient(ellipse 68% 82% at 16% 16%, color-mix(in srgb, var(--color-chrome-start) 18%, transparent), transparent 68%),
+    radial-gradient(ellipse 62% 76% at 86% 78%, color-mix(in srgb, var(--color-chrome-end) 15%, transparent), transparent 70%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-chrome-underlay) 88%, transparent), color-mix(in srgb, var(--color-chrome-mid) 12%, transparent) 52%, color-mix(in srgb, var(--color-chrome-underlay) 84%, transparent));
+  background-color: var(--color-background);
+}
+
 .theme-accent-options {
   display: flex;
   flex-wrap: nowrap;
@@ -2781,6 +3444,85 @@ html[data-window-material="acrylic"] .library-atmosphere {
   background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, var(--color-primary) 10%, transparent) 48%, transparent 66%);
   background-size: 220% 100%;
   animation: media-image-shimmer 1.6s ease-in-out infinite;
+}
+
+.visual-life-media-frame {
+  isolation: isolate;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The artwork may receive one restrained moving highlight. All other visual
+   life is rendered by the fixed portal outside the card below. */
+.visual-life-internal-sheen {
+  position: absolute;
+  inset: -18% -65%;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(
+    112deg,
+    transparent 44%,
+    color-mix(in srgb, white 16%, transparent) 47%,
+    color-mix(in srgb, white 84%, transparent) 50%,
+    color-mix(in srgb, var(--color-primary) 24%, transparent) 53%,
+    transparent 57%
+  );
+  mix-blend-mode: screen;
+  opacity: 0.78;
+  transform: translateX(-58%) rotate(4deg);
+  animation: visual-life-internal-sheen 2.2s ease-out infinite;
+}
+
+.visual-life-internal-sheen[data-visual-life-reduced="true"] {
+  animation: none;
+  opacity: 0.42;
+}
+
+@keyframes visual-life-internal-sheen {
+  0% {
+    transform: translateX(-58%) rotate(4deg);
+    opacity: 0;
+  }
+
+  22% {
+    opacity: 0.78;
+  }
+
+  68%,
+  100% {
+    transform: translateX(58%) rotate(4deg);
+    opacity: 0;
+  }
+}
+
+.visual-life-effect-overlay {
+  /* Keep the outer aura soft at the canvas boundary so the effect never
+     reads as a rectangular cutout over the gallery. */
+  mix-blend-mode: normal;
+  opacity: 1;
+  overflow: visible;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 28%, rgb(0 0 0 / 0.98) 46%, rgb(0 0 0 / 0.82) 68%, rgb(0 0 0 / 0.42) 86%, transparent 100%);
+  mask-image: radial-gradient(ellipse at center, #000 28%, rgb(0 0 0 / 0.98) 46%, rgb(0 0 0 / 0.82) 68%, rgb(0 0 0 / 0.42) 86%, transparent 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  transition: opacity 180ms ease-out;
+  z-index: 2147483000;
+}
+
+[data-theme="dark"] .visual-life-effect-overlay,
+html:not([data-theme="light"]) .visual-life-effect-overlay {
+  opacity: 0.96;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .visual-life-internal-sheen {
+    animation: none;
+    opacity: 0.42;
+  }
+
+  .visual-life-effect-overlay {
+    transition: none;
+  }
 }
 
 @keyframes media-image-shimmer {
@@ -2876,6 +3618,109 @@ html[data-window-material="acrylic"] .library-atmosphere {
   background: linear-gradient(90deg, var(--color-primary), var(--color-progress));
   animation: app-loading-progress-slide 1.2s ease-in-out infinite;
 }
+
+/* Update preparation uses a real completed segment plus a separate activity
+   indicator. The moving segment must never be mistaken for completed work. */
+.upgrade-progress {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-border) 58%, transparent);
+}
+
+.upgrade-progress__complete {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--upgrade-complete, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-progress));
+  transition: width 260ms ease-out;
+}
+
+.upgrade-progress__activity {
+  position: absolute;
+  inset: 0 0 0 var(--upgrade-complete, 0%);
+  overflow: hidden;
+}
+
+.upgrade-progress__activity::before {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 0;
+  width: min(30%, 112px);
+  min-width: 56px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-primary) 82%, white), transparent);
+  animation: upgrade-progress-slide 1.35s ease-in-out infinite;
+}
+
+.upgrade-step {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--color-muted);
+}
+
+.upgrade-step__marker {
+  display: flex;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-background);
+  color: var(--color-muted);
+  font-size: 0.68rem;
+}
+
+.upgrade-step--complete {
+  color: var(--color-foreground);
+}
+
+.upgrade-step--complete .upgrade-step__marker {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border));
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong, var(--color-primary));
+}
+
+.upgrade-step--active {
+  color: var(--color-foreground);
+}
+
+.upgrade-step--active .upgrade-step__marker {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+
+@keyframes upgrade-progress-slide {
+  0% { transform: translateX(-120%); opacity: 0.3; }
+  45% { opacity: 0.95; }
+  100% { transform: translateX(340%); opacity: 0.3; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .upgrade-progress__complete {
+    transition: none;
+  }
+
+  .upgrade-progress__activity {
+    animation: none;
+  }
+
+  .upgrade-progress__activity::before {
+    animation: none;
+    opacity: 0.65;
+  }
+}
+
 .app-loading-skeleton {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);

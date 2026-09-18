@@ -1,7 +1,7 @@
 export const systemPreferenceSections = [
   "proxy",
-  "performance",
   "appearance",
+  "visualLife",
   "canvasBackground",
   "layout",
   "sidebar",
@@ -21,13 +21,13 @@ export const systemPreferenceSectionMeta: Record<
     label: "网络代理",
     description: "网页解析与远程下载",
   },
-  performance: {
-    label: "启动加速",
-    description: "GPU / 稳定渲染模式",
-  },
   appearance: {
     label: "主题",
     description: "选择应用的颜色与强调色",
+  },
+  visualLife: {
+    label: "视觉生命",
+    description: "素材卡片悬停时的轻量动态效果",
   },
   layout: {
     label: "界面布局",

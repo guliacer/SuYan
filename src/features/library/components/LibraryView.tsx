@@ -80,6 +80,7 @@ import {
   X,
 } from "lucide-react";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import { AppLogoMark } from "@/components/ui/AppLogoMark";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -102,6 +103,7 @@ import {
 } from "./recommendations/PromptSiteRecommendations";
 import { StartupLoadingScreen } from "./startup/StartupLoadingScreen";
 import { FeatureGuide } from "./FeatureGuide";
+import { ReleaseOnboardingDialog } from "./ReleaseOnboardingDialog";
 import { featureGuideDefinitions } from "./featureGuides";
 import startupArt1 from "../assets/startup-art-1.png?url";
 import startupArt2 from "../assets/startup-art-2.png?url";
@@ -122,8 +124,10 @@ import type {
 import type { AiAnalyzePromptPayload, AiImageGenerationPayload } from "../types/ai";
 import type { CanvasPromptOrigin, DoubaoWebCanvasStatus } from "../types/canvas";
 import { NsfwImage } from "./NsfwImage";
+import { VisualLifeMediaFrame } from "./VisualLifeEffectOverlay";
 import { MediaFullscreenOverlay } from "./MediaFullscreenOverlay";
 import { VideoPromptTile } from "./video/VideoPromptTile";
+import { RotatingLoadingTip } from "@/components/ui/RotatingLoadingTip";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { AccountSidebarEntry } from "@/features/account/components/AccountSidebarEntry";
 import { useAccountStore } from "@/features/account/store/useAccountStore";
@@ -157,7 +161,7 @@ import {
   resolvePhotographyCategory,
 } from "../utils/photographyCategories";
 import { normalizeImageTag } from "../utils/tagNormalization";
-import { sanitizePromptTags } from "../utils/promptAnalysis";
+import { sanitizePromptTags, splitNegativePromptFromPrompt } from "../utils/promptAnalysis";
 import { isVideoMediaFile } from "../utils/mediaFileTypes";
 import {
   createEmptyCategoryTaxonomy,
@@ -204,10 +208,10 @@ import {
 } from "../utils/systemPreferences";
 import { sidebarEntryGroups, sidebarFooterEntryIds } from "../utils/sidebarEntries";
 import { useLocale } from "@/components/LocaleProvider";
+import type { VisualLifeSettings } from "../utils/visualLife";
 
 const systemPreferenceGuideSections: readonly SystemPreferenceSection[] = [
   "proxy",
-  "performance",
   "canvasBackground",
   "layout",
   "sidebar",
@@ -381,6 +385,7 @@ export function LibraryView() {
   const workspaceWidthPercent = useLibraryStore((state) => state.workspaceWidthPercent);
   const sidebarEntryVisibility = useLibraryStore((state) => state.sidebarEntryVisibility);
   const featureGuideCompleted = useLibraryStore((state) => state.featureGuideCompleted);
+  const featureGuideVersion = useLibraryStore((state) => state.featureGuideVersion);
   const autoNsfwGrading = useLibraryStore((state) => state.autoNsfwGrading);
   const blurNsfwImages = useLibraryStore((state) => state.blurNsfwImages);
   const nsfwGradingSpeed = useLibraryStore((state) => state.nsfwGradingSpeed);
@@ -394,12 +399,15 @@ export function LibraryView() {
   const savedMaterialBrowserSortDirection = useLibraryStore((state) => state.materialBrowserSortDirection);
   const savedMaterialBrowserRandomSeed = useLibraryStore((state) => state.materialBrowserRandomSeed);
   const savedMaterialBrowserScrollTop = useLibraryStore((state) => state.materialBrowserScrollTop);
+  const visualLifeSettings = useLibraryStore((state) => state.visualLife);
   const recentImportPinIds = useLibraryStore((state) => state.recentImportPinIds);
   const clearRecentImportPins = useLibraryStore((state) => state.clearRecentImportPins);
   const aiSettings = useLibraryStore((state) => state.aiSettings);
   const canvasDraft = useLibraryStore((state) => state.canvasDraft);
+  const setCanvasPromptUndoSnapshot = useLibraryStore((state) => state.setCanvasPromptUndoSnapshot);
   const canvasGenerationResults = useLibraryStore((state) => state.canvasGenerationResults);
   const canvasLastModel = useLibraryStore((state) => state.canvasLastModel);
+  const canvasLastGenerationCount = useLibraryStore((state) => state.canvasLastGenerationCount);
   const proxySettings = useLibraryStore((state) => state.proxySettings);
   const moduleState = useLibraryStore((state) => state.moduleState);
   const isLoading = useLibraryStore((state) => state.isLoading);
@@ -475,9 +483,11 @@ export function LibraryView() {
   const setThemeWorkspaceOpacity = useLibraryStore((state) => state.setThemeWorkspaceOpacity);
   const setThemeAccentOpacity = useLibraryStore((state) => state.setThemeAccentOpacity);
   const setCustomTheme = useLibraryStore((state) => state.setCustomTheme);
+  const saveVisualLifeSettings = useLibraryStore((state) => state.saveVisualLifeSettings);
   const setWorkspaceWidthPercent = useLibraryStore((state) => state.setWorkspaceWidthPercent);
   const saveSidebarEntryVisibility = useLibraryStore((state) => state.saveSidebarEntryVisibility);
   const completeFeatureGuide = useLibraryStore((state) => state.completeFeatureGuide);
+  const completeFeatureOnboarding = useLibraryStore((state) => state.completeFeatureOnboarding);
   const resetFeatureGuides = useLibraryStore((state) => state.resetFeatureGuides);
   const saveMasonryTileWidth = useLibraryStore((state) => state.saveMasonryTileWidth);
   const saveMaterialBrowserSettings = useLibraryStore((state) => state.saveMaterialBrowserSettings);
@@ -1447,6 +1457,9 @@ export function LibraryView() {
       return "nsfwSettings";
     }
     if (isSystemPreferencesOpen) {
+      if (!featureGuideCompleted.includes("visualLife") && featureGuideCompleted.includes("home")) {
+        return "visualLife";
+      }
       return systemPreferencesSection === "appearance" ? "appearance" : "systemPreferences";
     }
     if (isLibraryRootsOpen) {
@@ -1466,6 +1479,9 @@ export function LibraryView() {
     }
     if (detailItemId && !featureGuideCompleted.includes("promptDetail")) {
       return "promptDetail";
+    }
+    if (featureGuideCompleted.includes("home") && !featureGuideCompleted.includes("visualLife")) {
+      return "visualLife";
     }
     if (
       mainView === "home" &&
@@ -1494,12 +1510,57 @@ export function LibraryView() {
     mainView,
     systemPreferencesSection,
   ]);
+  const shouldShowReleaseOnboarding =
+    hasInitialLoadFinished &&
+    startupOverlayPhase === "hidden" &&
+    !isLoading &&
+    !availableUpdate &&
+    !exportAuthorPrompt &&
+    !aiErrorDialog &&
+    !isAboutOpen &&
+    !isAiSettingsOpen &&
+    !isNsfwSettingsOpen &&
+    !isSystemPreferencesOpen &&
+    !isLibraryRootsOpen &&
+    !isLogExportOpen &&
+    !isDetailOverlayOpen &&
+    featureGuideVersion !== appVersion;
+  useEffect(() => {
+    if (
+      activeFeatureGuideId !== "visualLife" ||
+      !hasInitialLoadFinished ||
+      startupOverlayPhase !== "hidden" ||
+      isLoading ||
+      availableUpdate ||
+      exportAuthorPrompt ||
+      aiErrorDialog ||
+      (isSystemPreferencesOpen && systemPreferencesSection === "visualLife")
+    ) {
+      return;
+    }
+    openSystemPreferences("visualLife");
+  }, [
+    activeFeatureGuideId,
+    aiErrorDialog,
+    availableUpdate,
+    exportAuthorPrompt,
+    hasInitialLoadFinished,
+    isLoading,
+    isSystemPreferencesOpen,
+    startupOverlayPhase,
+    systemPreferencesSection,
+  ]);
   const handleFeatureGuideStepChange = useCallback((stepIndex: number) => {
     const nextSection = systemPreferenceGuideSections[stepIndex];
     if (nextSection) {
       setSystemPreferencesSection(nextSection);
     }
   }, []);
+  const handleVisualLifeGuideStepChange = useCallback(() => {
+    if (systemPreferencesSection !== "visualLife") {
+      setSystemPreferencesSection("visualLife");
+    }
+  }, [systemPreferencesSection]);
   const shouldShowFeatureGuide =
     hasInitialLoadFinished &&
     startupOverlayPhase === "hidden" &&
@@ -1507,6 +1568,7 @@ export function LibraryView() {
     !availableUpdate &&
     !exportAuthorPrompt &&
     !aiErrorDialog &&
+    !shouldShowReleaseOnboarding &&
     (!detailItemId || activeFeatureGuideId === "promptDetail") &&
     !fullscreenMedia &&
     !featureGuideCompleted.includes(activeFeatureGuideId) &&
@@ -1670,8 +1732,10 @@ export function LibraryView() {
     }
 
     const startedAt = performance.now();
+    const transferredPrompt = splitNegativePromptFromPrompt(prompt, negativePrompt);
+
     logRendererStartupEvent("canvas-transfer:click", {
-      hasNegativePrompt: Boolean(negativePrompt.trim()),
+      hasNegativePrompt: Boolean(transferredPrompt.negativePrompt.trim()),
       hasPrompt: Boolean(prompt.trim()),
     });
 
@@ -1706,10 +1770,14 @@ export function LibraryView() {
         title: item.title || t("参考图"),
       };
 
+      setCanvasPromptUndoSnapshot({
+        prompt: canvasDraft.prompt,
+        negativePrompt: canvasDraft.negativePrompt,
+      });
       updateCanvasDraft({
-        prompt,
-        negativePrompt,
-        negativePromptHidden: false,
+        prompt: transferredPrompt.prompt,
+        negativePrompt: transferredPrompt.negativePrompt,
+        negativePromptHidden: true,
         referenceImages: [...canvasDraft.referenceImages, newEntry],
         promptOrigin: buildCanvasPromptOrigin(item),
       });
@@ -1734,16 +1802,22 @@ export function LibraryView() {
   }
 
   function pushPromptToCanvas(item: PromptCardData, prompt: string, negativePrompt: string) {
+    const transferredPrompt = splitNegativePromptFromPrompt(prompt, negativePrompt);
     const patch: {
       prompt: string;
-      negativePrompt?: string;
-      negativePromptHidden?: boolean;
+      negativePrompt: string;
+      negativePromptHidden: boolean;
       promptOrigin: CanvasPromptOrigin;
-    } = { prompt, promptOrigin: buildCanvasPromptOrigin(item) };
-    if (negativePrompt.trim()) {
-      patch.negativePrompt = negativePrompt;
-      patch.negativePromptHidden = false;
-    }
+    } = {
+      prompt: transferredPrompt.prompt,
+      negativePrompt: transferredPrompt.negativePrompt,
+      negativePromptHidden: true,
+      promptOrigin: buildCanvasPromptOrigin(item),
+    };
+    setCanvasPromptUndoSnapshot({
+      prompt: canvasDraft.prompt,
+      negativePrompt: canvasDraft.negativePrompt,
+    });
     updateCanvasDraft(patch);
     setDetailItemId(null);
     openMainView("canvas");
@@ -2325,6 +2399,7 @@ export function LibraryView() {
                           columnCount={masonryLayoutColumnCount}
                           items={visibleMasonryItems}
                           likedImageIds={likedImageIds}
+                          visualLifeSettings={visualLifeSettings}
                           onViewDetail={openDetailItem}
                           onPreviewMedia={openFullscreenMedia}
                           shouldMeasureHeights={mainView === "home"}
@@ -2334,6 +2409,7 @@ export function LibraryView() {
                           blurNsfwImages={blurNsfwImages}
                           groups={visibleGridGroups}
                           likedImageIds={likedImageIds}
+                          visualLifeSettings={visualLifeSettings}
                           onCopyPrompt={handleCopyPromptItem}
                           onViewDetail={openDetailItem}
                           onPreviewMedia={openFullscreenMedia}
@@ -2360,6 +2436,7 @@ export function LibraryView() {
                 canvasDraft={canvasDraft}
                 generationResults={canvasGenerationResults}
                 lastGenerationModel={canvasLastModel}
+                lastGenerationCount={canvasLastGenerationCount}
                 isBusy={isBusy}
                 onDraftChange={updateCanvasDraft}
                 onGenerationResultsChange={setCanvasGenerationResults}
@@ -2447,6 +2524,7 @@ export function LibraryView() {
                     <PromptLexiconWorkspace
                       kind="categories"
                       blurNsfwImages={blurNsfwImages}
+                      visualLifeSettings={visualLifeSettings}
                       isBusy={isBusy}
                       hideScrollTopButton={isDetailOverlayOpen}
                       likedImageIds={likedImageIds}
@@ -2477,6 +2555,7 @@ export function LibraryView() {
                     <PromptLexiconWorkspace
                       kind="tags"
                       blurNsfwImages={blurNsfwImages}
+                      visualLifeSettings={visualLifeSettings}
                       isBusy={isBusy}
                       hideScrollTopButton={isDetailOverlayOpen}
                       likedImageIds={likedImageIds}
@@ -2556,6 +2635,7 @@ export function LibraryView() {
             onPushPromptToCanvas={(prompt, negativePrompt) => pushPromptToCanvas(detailItem, prompt, negativePrompt)}
             onNavigateNext={() => navigateDetail(1)}
             onNavigatePrevious={() => navigateDetail(-1)}
+            onUpsertCustomCategory={upsertCustomCategory}
             onShareGroup={() => {
               if (detailGroupItems.length === 0) {
                 return;
@@ -2563,7 +2643,6 @@ export function LibraryView() {
 
               void requestExportZip(detailGroupItems.map((groupItem) => groupItem.id));
             }}
-            onShareText={(text) => void copyText(text, t("已复制分享文案。"))}
             onSave={(patch, options) =>
               saveItem(detailItem.id, patch, {
                 background: true,
@@ -2640,6 +2719,7 @@ export function LibraryView() {
             themeAccentOpacity={themeAccentOpacity}
             themeCustomAccents={themeCustomAccents}
             customTheme={customTheme}
+            visualLife={visualLifeSettings}
             section={systemPreferencesSection}
             sidebarEntryVisibility={sidebarEntryVisibility}
             workspaceWidthPercent={workspaceWidthPercent}
@@ -2656,6 +2736,7 @@ export function LibraryView() {
             onThemeWorkspaceOpacityChange={setThemeWorkspaceOpacity}
             onThemeAccentOpacityChange={setThemeAccentOpacity}
             onCustomThemeChange={setCustomTheme}
+            onVisualLifeSettingsChange={saveVisualLifeSettings}
             onSidebarEntryVisibilityChange={saveSidebarEntryVisibility}
             onWorkspaceWidthChange={setWorkspaceWidthPercent}
             onSectionChange={setSystemPreferencesSection}
@@ -2717,7 +2798,21 @@ export function LibraryView() {
           key={activeFeatureGuideId}
           guideId={activeFeatureGuideId}
           onComplete={completeFeatureGuide}
-          onStepChange={activeFeatureGuideId === "systemPreferences" ? handleFeatureGuideStepChange : undefined}
+          onStepChange={
+            activeFeatureGuideId === "systemPreferences"
+              ? handleFeatureGuideStepChange
+              : activeFeatureGuideId === "visualLife"
+                ? handleVisualLifeGuideStepChange
+                : undefined
+          }
+        />
+      ) : null}
+
+      {shouldShowReleaseOnboarding ? (
+        <ReleaseOnboardingDialog
+          isUpgrade={featureGuideVersion !== null || items.length > 0 || featureGuideCompleted.length > 0}
+          version={appVersion}
+          onComplete={() => completeFeatureOnboarding(appVersion)}
         />
       ) : null}
 
@@ -2877,18 +2972,15 @@ function LibrarySidebar({
       }
 
       const rect = anchor.getBoundingClientRect();
-      const viewportPadding = 8;
+      const bounds = getAppOverlayBounds(8);
       const menuGap = 8;
       const menuWidth = 176;
       const menuHeight = 226;
-      const canOpenRight = rect.right + menuGap + menuWidth <= window.innerWidth - viewportPadding;
+      const canOpenRight = rect.right + menuGap + menuWidth <= bounds.right;
       const left = canOpenRight
         ? rect.right + menuGap
-        : Math.max(viewportPadding, rect.left - menuGap - menuWidth);
-      const top = Math.min(
-        Math.max(viewportPadding, rect.top),
-        Math.max(viewportPadding, window.innerHeight - menuHeight - viewportPadding),
-      );
+        : clampOverlayPosition(rect.left - menuGap - menuWidth, menuWidth, bounds.left, bounds.right);
+      const top = clampOverlayPosition(rect.top, menuHeight, bounds.top, bounds.bottom);
 
       setImportMenuStyle({
         left,
@@ -3346,6 +3438,7 @@ function loadPromptCardImageSize(card: PromptCardData): Promise<{ id: string; si
 type PromptLexiconWorkspaceProps = {
   kind: PromptLexiconKind;
   blurNsfwImages: boolean;
+  visualLifeSettings: VisualLifeSettings;
   hideScrollTopButton?: boolean;
   isBusy: boolean;
   likedImageIds: string[];
@@ -3452,6 +3545,7 @@ async function persistPromptGroupPatches(
 const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
   kind,
   blurNsfwImages,
+  visualLifeSettings,
   hideScrollTopButton = false,
   isBusy,
   likedImageIds,
@@ -4563,6 +4657,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
             analysisProgress={categoryAnalysisProgress}
             isBusy={isBusy}
             likedImageIds={likedImageIds}
+            visualLifeSettings={visualLifeSettings}
             layout="page"
             promptGroups={categoryPromptGroups}
             query={categoryQuery}
@@ -4676,6 +4771,7 @@ const PromptLexiconWorkspace = memo(function PromptLexiconWorkspace({
             entries={tagMenuEntries}
             isMenuReady={isTagLexiconMenuReady}
             likedImageIds={likedImageIds}
+            visualLifeSettings={visualLifeSettings}
             layout="page"
             promptGroups={tagPromptGroups}
             query={tagImageQuery}
@@ -5306,6 +5402,7 @@ const promptGroupDragMime = "application/x-suyan-prompt-group-ids";
 type CategoryPromptGroupExplorerProps = {
   analysisProgress: CategoryAnalysisProgress | null;
   blurNsfwImages: boolean;
+  visualLifeSettings: VisualLifeSettings;
   categoryLabelsCache: ReadonlyMap<string, string[]>;
   categoryTaxonomy?: CategoryTaxonomy | null;
   entries: PromptImageLexiconEntry[];
@@ -5348,6 +5445,7 @@ function CategoryPromptGroupExplorer({
   isBusy = false,
   likedImageIds,
   layout = "bounded",
+  visualLifeSettings,
   promptGroups,
   query,
   selectedMenuPath,
@@ -5715,6 +5813,7 @@ function CategoryPromptGroupExplorer({
               enableCategoryDnD
               groups={filteredPromptGroups}
               likedImageIds={likedImageIds}
+              visualLifeSettings={visualLifeSettings}
               selectedGroupIds={selectedPromptGroupIds}
               variant="compact"
               onCopyPrompt={onCopyPrompt}
@@ -5739,8 +5838,8 @@ function CategoryPromptGroupExplorer({
               className="fixed z-[80] max-h-[min(420px,70vh)] w-[min(280px,calc(100vw-24px))] overflow-hidden rounded-xl border border-border bg-panel shadow-elevated"
               data-category-move-menu="true"
               style={{
-                left: Math.min(moveMenu.anchorX, window.innerWidth - 296),
-                top: Math.min(moveMenu.anchorY, window.innerHeight - 280),
+                left: clampOverlayPosition(moveMenu.anchorX, 280, getAppOverlayBounds(12).left, getAppOverlayBounds(12).right),
+                top: clampOverlayPosition(moveMenu.anchorY, 280, getAppOverlayBounds(12).top, getAppOverlayBounds(12).bottom),
               }}
             >
               <div className="border-b border-border/70 px-3 py-2 text-xs font-medium text-muted">
@@ -5861,6 +5960,7 @@ type TagPromptGroupExplorerProps = {
   onOrganizeTag: (choice: { id: string; label: string }) => void;
   analysisProgress?: CategoryAnalysisProgress | null;
   blurNsfwImages: boolean;
+  visualLifeSettings: VisualLifeSettings;
   entries: PromptImageLexiconEntry[];
   isMenuReady: boolean;
   likedImageIds: string[];
@@ -5892,6 +5992,7 @@ function TagPromptGroupExplorer({
   isMenuReady,
   likedImageIds,
   layout = "bounded",
+  visualLifeSettings,
   promptGroups,
   query,
   selectedMenuPath,
@@ -6107,6 +6208,7 @@ function TagPromptGroupExplorer({
               blurNsfwImages={blurNsfwImages}
               groups={filteredPromptGroups}
               likedImageIds={likedImageIds}
+              visualLifeSettings={visualLifeSettings}
               selectedGroupIds={selectedPromptGroupIds}
               variant="compact"
               onCopyPrompt={onCopyPrompt}
@@ -6220,6 +6322,7 @@ function CategoryAnalysisProgressPanel({
               {progress.message}
               {progress.currentTitle ? ` ${t("当前：{title}", { title: progress.currentTitle })}` : ""}
             </p>
+            {isRunning ? <RotatingLoadingTip className="mt-2" kind="analysis" /> : null}
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted min-[760px]:grid-cols-4">
               <span>{t("进度")} {progress.processed}/{progress.total}</span>
               <span>{t("更新")} {progress.analyzed}</span>
@@ -9350,6 +9453,7 @@ type PromptGalleryProps = {
   items: MasonryPromptItem[];
   likedImageIds: string[];
   blurNsfwImages: boolean;
+  visualLifeSettings: VisualLifeSettings;
   columnCount: number;
   shouldMeasureHeights: boolean;
   onViewDetail: (itemId: string) => void;
@@ -9361,6 +9465,7 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
   columnCount,
   items,
   likedImageIds,
+  visualLifeSettings,
   onViewDetail,
   onPreviewMedia,
   shouldMeasureHeights,
@@ -9406,6 +9511,7 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
                   blurNsfwImages={blurNsfwImages}
                   isPriorityImage={isPriorityImage}
                   item={item.item}
+                  visualLifeSettings={visualLifeSettings}
                   key={item.item.id}
                   onViewDetail={onViewDetail}
                 />
@@ -9419,6 +9525,7 @@ const MasonryPromptGallery = memo(function MasonryPromptGallery({
                 isPriorityImage={isPriorityImage}
                 isLiked={likedImageIdSet.has(item.item.id)}
                 item={item.item}
+                visualLifeSettings={visualLifeSettings}
                 key={item.item.id}
                 onViewDetail={onViewDetail}
                 onPreviewMedia={onPreviewMedia}
@@ -9528,6 +9635,7 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
   isPriorityImage,
   isLiked,
   item,
+  visualLifeSettings,
   onViewDetail,
   onPreviewMedia,
 }: {
@@ -9536,6 +9644,7 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
   isPriorityImage: boolean;
   isLiked: boolean;
   item: PromptCardData;
+  visualLifeSettings: VisualLifeSettings;
   onViewDetail: (itemId: string) => void;
   onPreviewMedia?: (item: PromptCardData) => void;
 }) {
@@ -9558,21 +9667,23 @@ const MasonryPromptTile = memo(function MasonryPromptTile({
         data-feature-guide="prompt-card-masonry-media"
         className="group relative block w-full overflow-hidden text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/35"
       >
-        <NsfwImage
-          activateLabel={`${t("查看详情")}: ${item.title || t("未命名提示词")}`}
-          alt={item.title || t("提示词效果图")}
-          blurNsfwImages={blurNsfwImages}
-          className="w-full"
-          fetchPriority={isPriorityImage ? "high" : "auto"}
-          image={item}
-          imageClassName="block h-auto w-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
-          loading={isPriorityImage ? "eager" : "lazy"}
-          onActivate={handleViewDetail}
-          onPreview={handlePreviewMedia}
-          placeholderClassName="min-h-44"
-          showRevealControl={false}
-          source="thumbnail"
-        />
+        <VisualLifeMediaFrame item={item} settings={visualLifeSettings}>
+          <NsfwImage
+            activateLabel={`${t("查看详情")}: ${item.title || t("未命名提示词")}`}
+            alt={item.title || t("提示词效果图")}
+            blurNsfwImages={blurNsfwImages}
+            className="w-full"
+            fetchPriority={isPriorityImage ? "high" : "auto"}
+            image={item}
+            imageClassName="block h-auto w-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
+            loading={isPriorityImage ? "eager" : "lazy"}
+            onActivate={handleViewDetail}
+            onPreview={handlePreviewMedia}
+            placeholderClassName="min-h-44"
+            showRevealControl={false}
+            source="thumbnail"
+          />
+        </VisualLifeMediaFrame>
         {isLiked ? (
           <span data-feature-guide="prompt-card-masonry-status" className="absolute left-2 top-2 inline-flex size-8 items-center justify-center rounded-full bg-panel/85 text-danger opacity-90 shadow-elevated transition-opacity group-hover/tile:opacity-100">
             <Heart size={15} fill="currentColor" />
@@ -9642,6 +9753,7 @@ type PromptGroupGalleryProps = {
   groups: PromptImageGroup[];
   likedImageIds: string[];
   blurNsfwImages: boolean;
+  visualLifeSettings: VisualLifeSettings;
   enableCategoryDnD?: boolean;
   selectedGroupIds?: ReadonlySet<string>;
   variant?: "full" | "compact";
@@ -9661,6 +9773,7 @@ const GridPromptGallery = memo(function GridPromptGallery({
   enableCategoryDnD = false,
   groups,
   likedImageIds,
+  visualLifeSettings,
   selectedGroupIds,
   variant = "full",
   onCopyPrompt,
@@ -9753,6 +9866,7 @@ const GridPromptGallery = memo(function GridPromptGallery({
             isSelected={selectedGroupIds?.has(group.id) ?? false}
             key={group.id}
             likedImageIdSet={likedImageIdSet}
+            visualLifeSettings={visualLifeSettings}
             primaryItemIdByGroupId={primaryItemIdByGroupId}
             selectedGroupIds={selectedGroupIds}
             onCopyPrompt={onCopyPrompt}
@@ -9779,6 +9893,7 @@ const GridPromptTile = memo(function GridPromptTile({
   group,
   isSelected,
   likedImageIdSet,
+  visualLifeSettings,
   primaryItemIdByGroupId,
   selectedGroupIds,
   onCopyPrompt,
@@ -9797,6 +9912,7 @@ const GridPromptTile = memo(function GridPromptTile({
   group: PromptImageGroup;
   isSelected: boolean;
   likedImageIdSet: ReadonlySet<string>;
+  visualLifeSettings: VisualLifeSettings;
   primaryItemIdByGroupId?: ReadonlyMap<string, string>;
   selectedGroupIds?: ReadonlySet<string>;
   onCopyPrompt: (item: PromptCardData) => void;
@@ -9885,14 +10001,16 @@ const GridPromptTile = memo(function GridPromptTile({
         data-feature-guide="prompt-card-media"
         className="group relative block aspect-[4/3] w-full overflow-hidden bg-background outline-none focus-visible:ring-2 focus-visible:ring-primary/35 min-[1100px]:aspect-square"
       >
-        <GridPromptMosaic
-          blurNsfwImages={blurNsfwImages}
-          images={group.previewItems}
-          onActivate={handleViewDetail}
-          onPreview={handlePreviewMedia}
-          priorityImages={priorityImages}
-           title={item.title || t("提示词效果图")}
-        />
+        <VisualLifeMediaFrame className="h-full w-full" item={item} settings={visualLifeSettings}>
+          <GridPromptMosaic
+            blurNsfwImages={blurNsfwImages}
+            images={group.previewItems}
+            onActivate={handleViewDetail}
+            onPreview={handlePreviewMedia}
+            priorityImages={priorityImages}
+            title={item.title || t("提示词效果图")}
+          />
+        </VisualLifeMediaFrame>
         {handleToggleSelection ? (
           <button
              aria-label={isSelected ? t("取消选择提示词组") : t("选择提示词组")}

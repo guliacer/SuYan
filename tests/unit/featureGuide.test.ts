@@ -11,10 +11,22 @@ const promptDetailSource = readFileSync("src/features/library/components/PromptD
 const connectionSource = readFileSync("src/features/library/components/AiConnectionSection.tsx", "utf8");
 const rulesSource = readFileSync("src/features/library/components/AiRulesSection.tsx", "utf8");
 const systemPreferencesSource = readFileSync("src/features/library/components/SystemPreferencesDialog.tsx", "utf8");
+const releaseOnboardingSource = readFileSync("src/features/library/components/ReleaseOnboardingDialog.tsx", "utf8");
 
 describe("feature guides", () => {
   it("keeps legacy settings compatible and starts every guide as incomplete", () => {
     expect(normalizeLibraryViewSettings({}).featureGuideCompleted).toEqual([]);
+    expect(normalizeLibraryViewSettings({}).featureGuideVersion).toBeNull();
+    expect(normalizeLibraryViewSettings({ featureGuideVersion: " 0.3.23 " }).featureGuideVersion).toBe("0.3.23");
+    expect(normalizeLibraryViewSettings({ featureGuideVersion: 23 }).featureGuideVersion).toBeNull();
+  });
+
+  it("shows version onboarding for new installs and upgrades, then persists the acknowledged version", () => {
+    expect(releaseOnboardingSource).toContain("本次更新引导");
+    expect(releaseOnboardingSource).toContain("升级前提醒");
+    expect(libraryViewSource).toContain("featureGuideVersion !== appVersion");
+    expect(libraryViewSource).toContain("completeFeatureOnboarding(appVersion)");
+    expect(libraryViewSource).toContain("!shouldShowReleaseOnboarding");
   });
 
   it("normalizes completed guide ids without duplicates or invalid values", () => {
@@ -24,7 +36,7 @@ describe("feature guides", () => {
   });
 
   it("defines a complete guide with anchored steps for every sidebar feature", () => {
-    expect(Object.keys(featureGuideDefinitions)).toHaveLength(22);
+    expect(Object.keys(featureGuideDefinitions)).toHaveLength(23);
     for (const definition of Object.values(featureGuideDefinitions)) {
       expect(definition.steps.length).toBeGreaterThanOrEqual(3);
       expect(definition.steps.length).toBeLessThanOrEqual(10);
@@ -108,7 +120,6 @@ describe("feature guides", () => {
   it("opens each system settings section while explaining its actual controls", () => {
     expect(featureGuideDefinitions.systemPreferences.steps.map((step) => step.target)).toEqual([
       '[data-feature-guide="system-preferences-panel-proxy"]',
-      '[data-feature-guide="system-preferences-panel-performance"]',
       '[data-feature-guide="system-preferences-panel-canvasBackground"]',
       '[data-feature-guide="system-preferences-panel-layout"]',
       '[data-feature-guide="system-preferences-panel-sidebar"]',
@@ -118,6 +129,47 @@ describe("feature guides", () => {
     expect(systemPreferencesSource).toContain("data-feature-guide={`system-preferences-section-${entry}`} ".trim());
     expect(libraryViewSource).toContain("systemPreferenceGuideSections");
     expect(featureGuideSource).toContain("onStepChange?.(stepIndex)");
+  });
+
+  it("does not retain the removed startup acceleration entry", () => {
+    expect(systemPreferencesSource).not.toContain("PerformanceSettingsDialog");
+    expect(systemPreferencesSource).not.toContain('section === "performance"');
+    expect(systemPreferencesSource).not.toContain("system-preferences-panel-performance");
+    expect(featureGuideDefinitions.systemPreferences.steps.map((step) => step.title)).not.toContain("启动加速");
+  });
+
+  it("uses the home chrome treatment for the system settings shell", () => {
+    expect(systemPreferencesSource).toContain("app-chrome-surface");
+    expect(systemPreferencesSource).toContain("text-chrome-foreground");
+    expect(systemPreferencesSource).toContain("max-w-[min(1180px,calc(100vw-2rem))]");
+    expect(systemPreferencesSource).toContain('variant="chrome"');
+  });
+
+  it("keeps language and display mode in a responsive two-card row", () => {
+    expect(systemPreferencesSource).toContain('className="grid gap-3 min-[720px]:grid-cols-2"');
+    expect(systemPreferencesSource).toContain('<h4 className="text-sm font-semibold text-foreground">{t("界面语言")}</h4>');
+    expect(systemPreferencesSource).toContain('<h4 className="text-sm font-semibold text-foreground">{t("显示模式")}</h4>');
+    expect(systemPreferencesSource).toContain('{t("选择浅色或深色界面。")}');
+  });
+
+  it("keeps every system settings section on the same responsive height", () => {
+    expect(systemPreferencesSource).toContain(
+      'panelClassName="flex h-[min(820px,calc(100dvh-2rem))] min-h-0 w-full max-w-[min(1180px,calc(100vw-2rem))] flex-col"',
+    );
+  });
+
+  it("guides the split visual life controls for new and upgraded users", () => {
+    expect(featureGuideDefinitions.visualLife.steps.map((step) => step.target)).toEqual([
+      '[data-feature-guide="visual-life-sheen-toggle"]',
+      '[data-feature-guide="visual-life-outer-toggle"]',
+      '[data-feature-guide="visual-life-effect-pool"]',
+      '[data-feature-guide="visual-life-mode"], [data-feature-guide="visual-life-intensity"]',
+    ]);
+    for (const marker of ["visual-life-sheen-toggle", "visual-life-outer-toggle", "visual-life-effect-pool", "visual-life-intensity", "visual-life-mode"]) {
+      expect(systemPreferencesSource).toContain("data-feature-guide=\"" + marker + "\"");
+    }
+    expect(libraryViewSource).toContain('activeFeatureGuideId === "visualLife"');
+    expect(libraryViewSource).toContain('openSystemPreferences("visualLife")');
   });
 
   it("shows the guide overview only on the first step", () => {

@@ -65,10 +65,22 @@ export type CanvasReferenceImage = {
   dataUrl: string;
 };
 
+/** 从素材详情页推送到画布前保留的上一步提示词，仅用于当前运行时撤销。 */
+export type CanvasPromptUndoSnapshot = {
+  prompt: string;
+  negativePrompt: string;
+};
+
 export type CanvasDraftSettings = {
   generationProvider: CanvasGenerationProvider;
   /** Hide the complete creation panel without changing its individual controls. */
   creationPanelCollapsed: boolean;
+  /** Hide the generated-work gallery without removing the results from the canvas session. */
+  resultsPanelHidden: boolean;
+  /** Width of the creation panel on desktop layouts. */
+  creationPanelWidth: number;
+  /** Width of the generated-work gallery on desktop layouts. */
+  resultsPanelWidth: number;
   prompt: string;
   positivePromptHeight: number;
   /** Multiple reference images for image-to-image generation. */
@@ -115,6 +127,8 @@ export type CanvasDraftSettings = {
 /** Session-only preview data. Kept in Zustand so it survives CanvasView unmounts. */
 export type CanvasGenerationResult = AiGeneratedImage & {
   saved: boolean;
+  /** 当前应用会话内的生成批次号，仅用于作品展示排序，不会写入素材库。 */
+  generationBatchId?: number;
   /** 入库完成后用于导出和复制的正式素材文件名。 */
   imageFileName?: string;
   /**

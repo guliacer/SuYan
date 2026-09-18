@@ -13,6 +13,8 @@ const targetLabels: Record<string, string> = {
   "image-category": "\u56fe\u7247\u5206\u7c7b",
   "image-tags": "\u56fe\u7247\u6807\u7b7e",
   "image-safety": "\u56fe\u7247\u5b89\u5168\u5ba1\u6838",
+  "image-reverse": "\u56fe\u50cf\u53cd\u63a8",
+  "image-generation": "\u56fe\u50cf\u751f\u6210",
   "prompt-category": "\u63d0\u793a\u8bcd\u5206\u7c7b",
   "prompt-tags": "\u63d0\u793a\u8bcd\u6807\u7b7e",
   prompt: "\u63d0\u793a\u8bcd\u5206\u6790",
@@ -47,6 +49,100 @@ export function buildAiErrorPresentation(
       actions: ["\u5148\u786e\u8ba4\u7d20\u6750\u8be6\u60c5\u9875\u80fd\u6b63\u5e38\u663e\u793a\u539f\u56fe", "\u91cd\u65b0\u5bfc\u5165\u6216\u91cd\u65b0\u751f\u6210\u7f29\u7565\u56fe", "\u4f18\u5148\u4f7f\u7528 PNG \u6216 JPEG \u683c\u5f0f\u7684\u56fe\u7247"],
       targetLabel,
       retryable: false,
+      shouldStopBackground: false,
+    };
+  }
+
+  if (code === "AI_MODEL_CAPABILITY_MISMATCH") {
+    const isVisionTask = /图像|image|vision|反推/i.test(targetLabel);
+    return {
+      code,
+      title: `${targetLabel}模型能力不匹配`,
+      summary: isVisionTask
+        ? "当前选择的是文本模型，无法读取参考图；请选择 Ollama 视觉模型或带视觉输入能力的 API 模型。"
+        : "当前选择的模型不支持这项文本分析，请切换到文本模型后重试。",
+      cause: "本地模型的文本生成与图像理解能力是分开的。Ollama 只有带视觉模块的模型才能处理图片，普通文本模型不能替代它。",
+      actions: ["打开 AI 设置，查询当前 Ollama 已安装的模型", "选择能力标记为“图像”的视觉模型用于图像分析", "文本分析请选择能力标记为“文本”的模型；画布生图仍需配置生图 API"],
+      targetLabel,
+      retryable: false,
+      shouldStopBackground: false,
+    };
+  }
+
+  if (code === "AI_PROVIDER_UNSUPPORTED") {
+    return {
+      code,
+      title: `${targetLabel}暂不支持当前服务商`,
+      summary: "Ollama 当前用于本地文本分析和图像理解，不能直接生成图片或视频。",
+      cause: "画布生图需要服务商提供图像生成接口；Ollama 的本地聊天接口不提供本项目所需的生图协议。",
+      actions: ["打开 AI 设置，为画布生图配置 OpenAI 兼容的生图 API", "保留 Ollama 用于提示词分析、标签整理和图像反推", "保存后重新选择画布中的生图模型"],
+      targetLabel,
+      retryable: false,
+      shouldStopBackground: false,
+    };
+  }
+
+  if (code === "AI_OLLAMA_UNAVAILABLE") {
+    return {
+      code,
+      title: `${targetLabel}无法连接 Ollama`,
+      summary: "软件没有连到本机 Ollama 服务，本次操作没有发送到模型。",
+      cause: "Ollama 可能尚未启动，或服务地址、端口被修改；默认地址是 http://127.0.0.1:11434。",
+      actions: ["启动 Ollama 桌面程序或运行 ollama serve", "确认 AI 设置中的地址能访问本机 Ollama 服务", "启动后点击“测试连接”或“查询模型”确认服务恢复"],
+      targetLabel,
+      retryable: true,
+      shouldStopBackground: true,
+    };
+  }
+
+  if (code === "AI_OLLAMA_TIMEOUT") {
+    return {
+      code,
+      title: `${targetLabel}响应超时`,
+      summary: "Ollama 已收到请求，但本地模型没有在限定时间内返回结果。",
+      cause: "首次加载模型、模型参数较大或显存/内存不足时，本地推理可能需要更长时间。",
+      actions: ["稍后重试，首次运行请等待模型加载完成", "关闭占用内存或显存较高的程序", "改用更轻量的文本或视觉模型，并在 AI 设置中重新测试"],
+      targetLabel,
+      retryable: true,
+      shouldStopBackground: false,
+    };
+  }
+
+  if (code === "AI_OLLAMA_MODEL_NOT_FOUND") {
+    return {
+      code,
+      title: `${targetLabel}找不到本地模型`,
+      summary: "Ollama 中没有找到当前选择的模型，本次操作没有完成。",
+      cause: "模型可能尚未下载、模型名称已变更，或在软件查询模型后被 Ollama 删除。",
+      actions: ["在终端运行 ollama list 查看已安装模型", "使用 ollama pull 模型名称安装模型", "回到 AI 设置重新查询模型并选择有效模型"],
+      targetLabel,
+      retryable: false,
+      shouldStopBackground: true,
+    };
+  }
+
+  if (code === "AI_OLLAMA_RESPONSE_INVALID") {
+    return {
+      code,
+      title: `${targetLabel}返回格式异常`,
+      summary: "Ollama 返回了内容，但不是软件可以识别的 JSON 或消息结构。",
+      cause: "可能是 Ollama 版本过旧、服务被代理改写，或模型没有遵守结构化输出要求。",
+      actions: ["升级 Ollama 到较新的稳定版本", "确认地址直接指向 Ollama，不要填写 OpenAI 兼容代理地址", "切换到支持 JSON 输出的模型后重试"],
+      targetLabel,
+      retryable: true,
+      shouldStopBackground: false,
+    };
+  }
+
+  if (code === "AI_OLLAMA_REQUEST_FAILED") {
+    return {
+      code,
+      title: `${targetLabel}请求失败`,
+      summary: message || "Ollama 拒绝了本次请求。",
+      cause: "本地服务可能正在加载模型、模型名称不正确，或当前 Ollama 版本不支持请求参数。",
+      actions: ["检查 Ollama 服务窗口和终端日志", "回到 AI 设置重新查询模型，确认模型仍然存在", "升级 Ollama 后再次测试连接"],
+      targetLabel,
+      retryable: true,
       shouldStopBackground: false,
     };
   }

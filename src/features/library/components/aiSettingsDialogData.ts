@@ -3,6 +3,7 @@ import type {
   AiFeatureAction,
   AiProviderModelCapability,
   AiProviderModelSettings,
+  AiProviderKind,
   AiRecognitionKind,
   AiRecognitionSource,
   AiRecognitionSourcePreferences,
@@ -11,10 +12,10 @@ import type {
   SaveAiProviderProfilePayload,
   SaveAiProviderSettingsPayload,
 } from "../types/ai";
-import { normalizeAiRecognitionSourcePreferences } from "../types/ai";
+import { normalizeAiProviderModelCapabilities, normalizeAiRecognitionSourcePreferences } from "../types/ai";
 import { aiFeatureActionMeta } from "../types/ai";
 import { normalizeActionPreferencesDraft } from "../utils/aiSettingsDraft";
-import { normalizeAiBaseUrl } from "../utils/aiBaseUrl";
+import { normalizeAiBaseUrlForProvider } from "../utils/aiBaseUrl";
 import type { StatusFeedbackMessage } from "../utils/statusFeedback";
 
 export type AiSettingsDialogProps = {
@@ -37,6 +38,7 @@ export type AiProviderProfileDraft = {
   id: string;
   name: string;
   enabled: boolean;
+  provider: AiProviderKind;
   baseUrl: string;
   model: string;
   models: AiProviderModelSettings[];
@@ -237,7 +239,8 @@ export function toSaveProfilePayload(profile: AiProviderProfileDraft): SaveAiPro
     id: profile.id,
     name: profile.name,
     enabled: profile.enabled,
-    baseUrl: normalizeAiBaseUrl(profile.baseUrl),
+    provider: profile.provider,
+    baseUrl: normalizeAiBaseUrlForProvider(profile.baseUrl, profile.provider),
     model: profile.model,
     models: profile.models,
     ...(trimmedApiKey ? { apiKey: trimmedApiKey } : {}),
@@ -252,9 +255,13 @@ export function createProfileDrafts(settings: PublicAiProviderSettings): AiProvi
     id: profile.id,
     name: profile.name,
     enabled: profile.enabled,
+    provider: profile.provider ?? "openai-compatible",
     baseUrl: profile.baseUrl,
     model: profile.model,
-    models: normalizeProfileModels(profile.models, profile.model),
+    models: normalizeProfileModels(profile.models, profile.model, profile.provider === "ollama").map((model) => ({
+      ...model,
+      capabilities: normalizeAiProviderModelCapabilities(model.capabilities, profile.provider),
+    })),
     hasApiKey: profile.hasApiKey,
     apiKeyPreview: profile.apiKeyPreview,
     apiKey: "",
@@ -267,6 +274,7 @@ export function toFallbackProfile(settings: PublicAiProviderSettings): PublicAiP
     id: settings.activeProfileId || "default",
     name: "默认 API",
     enabled: settings.enabled,
+    provider: "openai-compatible",
     baseUrl: settings.baseUrl,
     hasApiKey: settings.hasApiKey,
     apiKeyPreview: settings.apiKeyPreview,
@@ -282,6 +290,7 @@ export function createNewProfileDraft(index: number): AiProviderProfileDraft {
     id,
     name: `API ${index + 1}`,
     enabled: false,
+    provider: "openai-compatible",
     baseUrl: "https://api.openai.com/v1",
     model: "gpt-4.1-mini",
     models: [
@@ -359,7 +368,7 @@ export function ensureProfileSelectedModel(profile: AiProviderProfileDraft): AiP
       {
         id: selectedModelId,
         label: selectedModelId,
-        capabilities: ["text", "vision"],
+        capabilities: profile.provider === "ollama" ? ["text"] : ["text", "vision"],
       },
       ...profile.models,
     ],
@@ -373,12 +382,12 @@ export function isProfileComplete(profile: AiProviderProfileDraft): boolean {
     normalized.baseUrl.trim() &&
       normalized.model.trim() &&
       normalized.models.some((model) => model.id === normalized.model) &&
-      resolveDraftApiKeyState(normalized).willHaveApiKey,
+      (normalized.provider === "ollama" || resolveDraftApiKeyState(normalized).willHaveApiKey),
   );
 }
 
 export function canTestProfile(profile: AiProviderProfileDraft): boolean {
-  return Boolean(profile.baseUrl.trim() && profile.model.trim() && resolveDraftApiKeyState(profile).willHaveApiKey);
+  return Boolean(profile.baseUrl.trim() && profile.model.trim() && (profile.provider === "ollama" || resolveDraftApiKeyState(profile).willHaveApiKey));
 }
 
 export function buildModelQueryPayload({
@@ -393,13 +402,13 @@ export function buildModelQueryPayload({
     profiles: profiles.map((profile) => ({
       ...toSaveProfilePayload(profile),
       enabled: profile.id === selectedProfileId,
-      model: profile.model || profile.models[0]?.id || "gpt-4.1-mini",
+      model: profile.model || profile.models[0]?.id || (profile.provider === "ollama" ? "" : "gpt-4.1-mini"),
     })),
   };
 }
 
 export function canQueryModels(profile: AiProviderProfileDraft): boolean {
-  return Boolean(profile.baseUrl.trim() && resolveDraftApiKeyState(profile).willHaveApiKey);
+  return Boolean(profile.baseUrl.trim() && (profile.provider === "ollama" || resolveDraftApiKeyState(profile).willHaveApiKey));
 }
 
 export function addUniqueModels(
@@ -421,18 +430,18 @@ export function addUniqueModels(
   return models.length > 0 ? models : normalizeProfileModels([], "gpt-4.1-mini");
 }
 
-export function normalizeProfileModels(input: unknown, fallbackModelId: string): AiProviderModelSettings[] {
+export function normalizeProfileModels(input: unknown, fallbackModelId: string, allowEmpty = false): AiProviderModelSettings[] {
   const values = Array.isArray(input) ? input : [];
   const models = values
     .map(normalizeModelDraft)
     .filter((model): model is AiProviderModelSettings => model !== null);
-  const fallbackModel = fallbackModelId.trim() || "gpt-4.1-mini";
+  const fallbackModel = fallbackModelId.trim() || (allowEmpty ? "" : "gpt-4.1-mini");
 
-  if (!models.some((model) => model.id === fallbackModel)) {
+  if (fallbackModel && !models.some((model) => model.id === fallbackModel)) {
     models.unshift({
       id: fallbackModel,
       label: fallbackModel,
-      capabilities: ["text", "vision"],
+      capabilities: allowEmpty ? ["text"] : ["text", "vision"],
     });
   }
 

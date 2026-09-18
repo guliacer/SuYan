@@ -1,4 +1,5 @@
 import { matchGenerationModelLabel } from "../../src/features/library/utils/generationModels";
+import { compactAutomaticPromptTitle } from "../../src/features/prompts/utils/promptTitle";
 
 export type PromptImportDraft = {
   title: string;
@@ -88,7 +89,7 @@ const maxTagLength = 24;
 
 const titleKeys = ["title", "name", "promptTitle", "prompt_title", "标题", "名称"];
 const promptKeys = ["prompt", "positivePrompt", "positive_prompt", "content", "text", "description", "正向提示词", "提示词"];
-const negativeKeys = ["negativePrompt", "negative_prompt", "negative", "反向提示词", "负向提示词"];
+const negativeKeys = ["negativePrompt", "negative_prompt", "negative", "反向提示词", "负向提示词", "负面提示词", "负面约束"];
 const tagKeys = ["tags", "tag", "category", "categories", "keywords", "标签", "分类"];
 const generationMethodKeys = ["generationMethod", "model", "engine", "generator", "生成方式", "模型"];
 const authorNameKeys = ["authorName", "author", "creator", "user", "username", "作者"];
@@ -3062,7 +3063,14 @@ export function extractPngTextChunks(input: Uint8Array): PngTextChunk[] {
 }
 
 function parseStableDiffusionText(text: string): PromptImportDraft {
-  const negativeMatch = matchLabelPosition(text, ["Negative prompt", "negative prompt", "反向提示词", "负向提示词"]);
+  const negativeMatch = matchLabelPosition(text, [
+    "Negative prompt",
+    "negative prompt",
+    "反向提示词",
+    "负向提示词",
+    "负面提示词",
+    "负面约束",
+  ]);
   const paramsMatch = matchParameterPosition(text);
 
   if (negativeMatch) {
@@ -3342,7 +3350,7 @@ function classifyLabelLine(line: string): { kind: "title" | "prompt" | "negative
     return { kind: "title", value };
   }
 
-  if (["反向提示词", "负向提示词", "negative prompt", "negative", "negative_prompt"].includes(label)) {
+  if (["反向提示词", "负向提示词", "负面提示词", "负面约束", "negative prompt", "negative", "negative_prompt"].includes(label)) {
     return { kind: "negativePrompt", value };
   }
 
@@ -5790,7 +5798,7 @@ function createTitleFromPrompt(prompt: string): string {
     return cleaned || "未命名提示词";
   }
 
-  return `${cleaned.slice(0, maxTitleLength - 1)}…`;
+  return compactAutomaticPromptTitle(cleaned);
 }
 
 function normalizeImportText(value: string): string {

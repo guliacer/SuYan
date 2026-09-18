@@ -391,7 +391,7 @@ function PromptMasonryGrid({
   return (
     <div
       ref={containerRef}
-      className="grid min-w-0 items-start justify-start gap-3"
+      className="grid min-w-0 items-start justify-between gap-3"
       style={{
         gridTemplateColumns: columns.map((column) => `${column.width}px`).join(" "),
       }}

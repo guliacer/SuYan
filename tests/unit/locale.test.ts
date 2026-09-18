@@ -17,6 +17,7 @@ describe("locale", () => {
     );
     expect(translateUiText("en-US", "已查询到 3 个模型。")).toBe("Found 3 models.");
     expect(translateUiText("en-US", "正在扫描：sample.png (2/5)")).toBe("Processing: sample.png (2/5)");
+    expect(translateUiText("en-US", "灵感汇集ing")).toBe("Gathering inspiration");
   });
 
   it("translates detailed feature-guide copy without changing user content", () => {

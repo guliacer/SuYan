@@ -15,8 +15,10 @@ import {
 import { Button } from "@/components/ui/Button";
 import { useLocale } from "@/components/LocaleProvider";
 import { ConfirmBubble } from "@/components/ui/ConfirmBubble";
+import { MarqueeText } from "@/components/ui/MarqueeText";
 import { TextField } from "@/components/ui/TextField";
 import { maskAiBaseUrl } from "../utils/aiBaseUrl";
+import type { AiProviderModelSettings } from "../types/ai";
 import { ModelPickerPanel, ModelRow } from "./AiSettingsModelControls";
 import {
   canQueryModels,
@@ -85,10 +87,47 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
     handleTestAllProfiles,
     handleToggleApiKeyVisibility,
     patchProfile,
+    queryModelsForProfile,
     removeModel,
     reorderProfiles,
     toggleModelCapability,
   } = api;
+
+  const isOllamaProfile = selectedProfile?.provider === "ollama";
+
+  function handleProviderChange(provider: "openai-compatible" | "ollama") {
+    if (!selectedProfile || selectedProfile.provider === provider) {
+      return;
+    }
+
+    if (provider === "ollama") {
+      const profilePatch = {
+        provider,
+        baseUrl: "http://127.0.0.1:11434",
+        model: "",
+        models: [] as AiProviderModelSettings[],
+        apiKey: "",
+        hasApiKey: false,
+        apiKeyPreview: "",
+        clearApiKey: true,
+      } as const;
+      patchProfile(selectedProfile.id, profilePatch);
+      setRevealedApiKeyProfileId(null);
+      void queryModelsForProfile(selectedProfile.id, profilePatch);
+      return;
+    }
+
+    patchProfile(selectedProfile.id, {
+      provider,
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini",
+      models: [{ id: "gpt-4.1-mini", label: "gpt-4.1-mini", capabilities: ["text", "vision"] }],
+      apiKey: "",
+      hasApiKey: false,
+      apiKeyPreview: "",
+      clearApiKey: false,
+    });
+  }
 
   return (
     <div data-feature-guide="ai-connections" className="overflow-hidden rounded-2xl border border-border bg-panel shadow-sm">
@@ -183,7 +222,14 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                         isReady ? "bg-progress" : profile.enabled ? "bg-warning" : "bg-border"
                       }`}
                     />
-                    <span className="truncate text-[11px] text-muted">{keyState.willHaveApiKey ? profile.model : t("未配置密钥")}</span>
+                    <MarqueeText
+                      className="flex-1 text-[11px] text-muted"
+                      text={profile.provider === "ollama"
+                        ? profile.model || t("未选择本地模型")
+                        : keyState.willHaveApiKey
+                          ? profile.model
+                          : t("未配置密钥")}
+                    />
                     {profile.id === activeProfileId ? <Star className="shrink-0 text-primary" size={12} /> : null}
                   </span>
                 </button>
@@ -232,8 +278,8 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                       </button>
                     )}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                      <span className="rounded-full border border-border bg-background px-2.5 py-1">
-                        {selectedProfile.model || t("未选择模型")}
+                      <span className="block min-w-0 max-w-[min(52vw,420px)] rounded-full border border-border bg-background px-2.5 py-1">
+                        <MarqueeText text={selectedProfile.model || t("未选择模型")} />
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1">
                         <span
@@ -357,11 +403,30 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
             <section data-feature-guide="ai-connection-credentials" className="grid gap-4 bg-panel px-6 py-5">
               <div className="grid gap-4 min-[820px]:grid-cols-2 min-[820px]:items-start">
                 <label className="grid gap-2 text-sm font-medium text-muted">
+                  {t("服务商类型")}
+                  <select
+                    aria-label={t("服务商类型")}
+                    className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                    disabled={isBusy}
+                    value={selectedProfile.provider}
+                    onChange={(event) => handleProviderChange(event.target.value as "openai-compatible" | "ollama")}
+                  >
+                    <option value="openai-compatible">{t("OpenAI 兼容 API")}</option>
+                    <option value="ollama">Ollama {t("本地模型")}</option>
+                  </select>
+                  <span className="text-[11px] font-normal leading-4 text-muted">
+                    {isOllamaProfile
+                      ? t("Ollama 在本机运行，不需要 API Key；切换后会自动读取本机已安装的模型。文本模型用于文字分析，视觉模型用于图像分析。")
+                      : t("使用兼容 OpenAI 接口格式的远程服务，需要接口地址、模型和 API Key。")}
+                  </span>
+                </label>
+
+                <label className="grid gap-2 text-sm font-medium text-muted">
                   {t("接口地址")}
                   <div className="grid gap-2 min-[680px]:grid-cols-[minmax(0,1fr)_auto]">
                     <TextField
                       aria-label={t("接口地址")}
-                      placeholder="https://api.openai.com/v1"
+                      placeholder={isOllamaProfile ? "http://127.0.0.1:11434" : "https://api.openai.com/v1"}
                       readOnly={!isBaseUrlRevealed}
                       value={isBaseUrlRevealed ? selectedProfile.baseUrl : maskAiBaseUrl(selectedProfile.baseUrl)}
                       onBlur={handleNormalizeBaseUrl}
@@ -400,7 +465,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                   </div>
                 </label>
 
-                <label className="grid gap-2 text-sm font-medium text-muted">
+                {!isOllamaProfile ? <label className="grid gap-2 text-sm font-medium text-muted">
                   API Key
                   <div className="grid gap-2 min-[680px]:grid-cols-[minmax(0,1fr)_auto]">
                     <TextField
@@ -447,7 +512,14 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                       />
                     </div>
                   </div>
-                </label>
+                </label> : (
+                  <div className="grid content-start gap-2 rounded-xl border border-primary/20 bg-primary-soft/40 px-4 py-3 text-sm">
+                    <span className="font-medium text-foreground">{t("无需 API Key")}</span>
+                    <span className="text-xs font-normal leading-5 text-muted">
+                      {t("Ollama 通过本机服务完成请求。请先启动 Ollama，再查询模型；图像分析请选择带视觉能力的模型。")}
+                    </span>
+                  </div>
+                )}
               </div>
             </section>
 
@@ -475,7 +547,7 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                       <span className="text-center">{t("状态")}</span>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
-                      {selectedProfile.models.map((model) => (
+                      {selectedProfile.models.length > 0 ? selectedProfile.models.map((model) => (
                         <ModelRow
                           active={model.id === selectedProfile.model}
                           canDelete={selectedProfile.models.length > 1}
@@ -483,11 +555,14 @@ export function AiConnectionSection({ api }: { api: AiSettingsApi }) {
                           model={model}
                           onDelete={() => removeModel(selectedProfile.id, model.id)}
                           onSelect={() => patchProfile(selectedProfile.id, { model: model.id })}
+                          provider={selectedProfile.provider}
                           onToggleCapability={(capability) =>
                             toggleModelCapability(selectedProfile.id, model.id, capability)
                           }
                         />
-                      ))}
+                      )) : (
+                        <p className="px-3 py-8 text-center text-xs text-muted">{t("还没有模型，请先查询模型")}</p>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -413,6 +413,33 @@ describe("promptAnalysis", () => {
     expect(result.negativePrompt).toBe("不要畸形手指，避免低清晰度");
   });
 
+  it("splits negative constraints pasted into the canvas prompt", () => {
+    const result = splitNegativePromptFromPrompt(
+      "人像摄影，柔和自然光\n负面约束：低质量，模糊，水印",
+      "",
+    );
+
+    expect(result.prompt).toBe("人像摄影，柔和自然光");
+    expect(result.negativePrompt).toBe("低质量，模糊，水印");
+  });
+
+  it("keeps real line breaks in the positive prompt after moving negative constraints", () => {
+    const result = splitNegativePromptFromPrompt(
+      "主体一\r\n主体二\r\n\r\n主体三\r\n负面约束：模糊，水印",
+      "",
+    );
+
+    expect(result.prompt).toBe("主体一\n主体二\n\n主体三");
+    expect(result.negativePrompt).toBe("模糊，水印");
+  });
+
+  it("does not carry an old negative prompt into a positive-only paste", () => {
+    const result = splitNegativePromptFromPrompt("主体一\n主体二", "");
+
+    expect(result.prompt).toBe("主体一\n主体二");
+    expect(result.negativePrompt).toBe("");
+  });
+
   it("builds grouped analysis result and applies the full template", () => {
     const prompt = "毕加索立体主义 Cubism，远景，横构图，俯视拍摄角度，对称构图，深景深全画面清晰";
     const analysis = analyzePromptText(prompt);

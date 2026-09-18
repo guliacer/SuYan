@@ -9,14 +9,99 @@ import type {
 } from "../types/canvas";
 
 export const defaultPositivePromptHeight = 340;
+export const maxCanvasPromptLength = 3000;
+export const defaultCanvasCreationPanelWidth = 380;
+export const minCanvasCreationPanelWidth = 300;
+export const maxCanvasCreationPanelWidth = 520;
+export const defaultCanvasResultsPanelWidth = 220;
+export const minCanvasResultsPanelWidth = 180;
+export const maxCanvasResultsPanelWidth = 420;
+
+export type CanvasAtmosphereTone = "neutral" | "forest" | "ocean" | "warm" | "violet";
+
+const canvasAtmosphereToneKeywords: ReadonlyArray<{
+  tone: Exclude<CanvasAtmosphereTone, "neutral">;
+  keywords: readonly string[];
+}> = [
+  {
+    tone: "forest",
+    keywords: ["森林", "树林", "丛林", "植物", "花园", "树木", "竹影", "草地", "forest", "woodland", "jungle", "foliage", "botanical", "garden"],
+  },
+  {
+    tone: "ocean",
+    keywords: ["海洋", "海边", "海滩", "湖泊", "水下", "河流", "瀑布", "ocean", "beach", "lake", "underwater", "river", "waterfall"],
+  },
+  {
+    tone: "warm",
+    keywords: ["食品", "美食", "咖啡", "蛋糕", "面包", "甜点", "料理", "food", "cuisine", "coffee", "cake", "dessert", "bakery"],
+  },
+  {
+    tone: "violet",
+    keywords: ["梦幻", "魔法", "紫色", "仙境", "奇幻", "fantasy", "magic", "dreamy", "violet", "purple"],
+  },
+];
+
+/** 根据已提交提示词选择生成阶段的环境色，只改变雾光和色彩块，不描绘具体主体。 */
+export function resolveCanvasAtmosphereTone(prompt: string): CanvasAtmosphereTone {
+  const normalized = prompt.trim().toLowerCase();
+  if (!normalized) {
+    return "neutral";
+  }
+
+  for (const entry of canvasAtmosphereToneKeywords) {
+    if (entry.keywords.some((keyword) => normalized.includes(keyword))) {
+      return entry.tone;
+    }
+  }
+
+  return "neutral";
+}
+
+/**
+ * 画布提示词统一按 UTF-16 code unit 限制长度，保持与 textarea 的 maxLength 行为一致。
+ * 截断时避免留下半个 surrogate，防止 emoji 等字符被切成乱码。
+ */
+function truncateCanvasPromptText(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
+  }
+
+  const limited = text.slice(0, limit);
+  return /[\uD800-\uDBFF]$/u.test(limited) ? limited.slice(0, -1) : limited;
+}
+
+export function limitCanvasPromptText(text: string): string {
+  return truncateCanvasPromptText(text, maxCanvasPromptLength);
+}
+
+/** Replace only the selected range, preserving the text before and after it. */
+export function replaceCanvasPromptSelection(
+  text: string,
+  replacement: string,
+  selectionStart: number,
+  selectionEnd: number,
+): { text: string; selectionStart: number; selectionEnd: number; truncated: boolean } {
+  const start = Math.max(0, Math.min(selectionStart, text.length));
+  const end = Math.max(start, Math.min(selectionEnd, text.length));
+  const prefix = text.slice(0, start);
+  const suffix = text.slice(end);
+  const available = Math.max(0, maxCanvasPromptLength - prefix.length - suffix.length);
+  const inserted = truncateCanvasPromptText(replacement, available);
+  const nextText = `${prefix}${inserted}${suffix}`;
+  const caret = prefix.length + inserted.length;
+  return { text: nextText, selectionStart: caret, selectionEnd: caret, truncated: inserted.length < replacement.length };
+}
 
 export const defaultCanvasDraftSettings: CanvasDraftSettings = {
   generationProvider: "api",
   creationPanelCollapsed: false,
+  resultsPanelHidden: false,
+  creationPanelWidth: defaultCanvasCreationPanelWidth,
+  resultsPanelWidth: defaultCanvasResultsPanelWidth,
   prompt: "一间临水而建的新中式茶室，午后阳光穿过竹影，室内摆放陶瓷茶具，安静、温暖、高级感，电影感构图",  positivePromptHeight: defaultPositivePromptHeight,
   referenceImages: [],
   negativePrompt: "低清晰度、模糊、文字水印、畸形手指、过度饱和",
-  negativePromptHidden: false,
+  negativePromptHidden: true,
   positivePromptHidden: false,
   sizePanelHidden: false,
   advancedSettingsOpen: false,
@@ -151,12 +236,17 @@ export function normalizeCanvasDraftSettings(input: unknown): CanvasDraftSetting
     // 防止旧草稿里残留的 "doubao-web" 仍触发豆包后台逻辑。
     generationProvider: "api",
     creationPanelCollapsed: input.creationPanelCollapsed === true,
-    prompt: typeof input.prompt === "string" ? input.prompt : defaultCanvasDraftSettings.prompt,
+    prompt: typeof input.prompt === "string" ? limitCanvasPromptText(input.prompt) : defaultCanvasDraftSettings.prompt,
     positivePromptHeight: normalizePositivePromptHeight(input.positivePromptHeight),
     referenceImages: normalizeReferenceImages(input.referenceImages),
-    negativePrompt: typeof input.negativePrompt === "string" ? input.negativePrompt : defaultCanvasDraftSettings.negativePrompt,
-    negativePromptHidden: input.negativePromptHidden === true,
-    positivePromptHidden: input.positivePromptHidden === true,
+    negativePrompt: typeof input.negativePrompt === "string" ? limitCanvasPromptText(input.negativePrompt) : defaultCanvasDraftSettings.negativePrompt,
+    // 负向提示词默认收起；显式保存的 false 仍保留用户主动展开的选择。
+    negativePromptHidden: input.negativePromptHidden !== false,
+    // 旧版本曾允许隐藏正向提示词；现在正向提示词始终展示，兼容旧草稿但不再读取该开关。
+    positivePromptHidden: false,
+    resultsPanelHidden: input.resultsPanelHidden === true,
+    creationPanelWidth: normalizeCanvasCreationPanelWidth(input.creationPanelWidth),
+    resultsPanelWidth: normalizeCanvasResultsPanelWidth(input.resultsPanelWidth),
     sizePanelHidden: input.sizePanelHidden === true,
     advancedSettingsOpen: input.advancedSettingsOpen === true,
     doubaoModelHidden: input.doubaoModelHidden !== false,
@@ -317,10 +407,10 @@ export function buildCanvasImageGenerationPayload(
     generationProvider: settings.generationProvider,
     ...(runtime.mediaType === "video" ? { mediaType: "video" as const } : {}),
     n: settings.count,
-    negativePrompt: (runtime.negativePrompt ?? settings.negativePrompt).trim(),
+    negativePrompt: limitCanvasPromptText((runtime.negativePrompt ?? settings.negativePrompt).trim()),
     notificationEnabled: settings.notificationEnabled,
     outputFormat,
-    prompt: (runtime.prompt ?? settings.prompt).trim(),
+    prompt: limitCanvasPromptText((runtime.prompt ?? settings.prompt).trim()),
     quality: settings.quality,
     referenceImageDataUrls: settings.referenceImages.map((r) => r.dataUrl).filter(Boolean) || undefined,
     referenceImageFileNames: settings.referenceImages.map((r) => r.fileName).filter(Boolean) || undefined,
@@ -373,6 +463,20 @@ function normalizePositivePromptHeight(input: unknown): number {
     return defaultCanvasDraftSettings.positivePromptHeight;
   }
   return Math.max(192, Math.min(720, Math.round(input)));
+}
+
+export function normalizeCanvasResultsPanelWidth(input: unknown): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return defaultCanvasResultsPanelWidth;
+  }
+  return Math.max(minCanvasResultsPanelWidth, Math.min(maxCanvasResultsPanelWidth, Math.round(input)));
+}
+
+export function normalizeCanvasCreationPanelWidth(input: unknown): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return defaultCanvasCreationPanelWidth;
+  }
+  return Math.max(minCanvasCreationPanelWidth, Math.min(maxCanvasCreationPanelWidth, Math.round(input)));
 }
 
 function normalizeDimension(input: unknown, fallback: number): number {

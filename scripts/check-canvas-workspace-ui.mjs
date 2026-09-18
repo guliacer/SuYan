@@ -7,6 +7,7 @@ const { chromium } = await import(pathToFileURL(process.argv[2]).href);
 const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root" class="h-screen bg-background p-4"></div><script type="module">
 import React from 'react';
 import {createRoot} from 'react-dom/client';
+import {LocaleProvider} from '/src/components/LocaleProvider.tsx';
 import {CreativeCanvas,CanvasView} from '/src/features/library/components/CanvasView.tsx';
 import {CanvasPageAtmosphere} from '/src/features/library/components/CanvasPageAtmosphere.tsx';
 import {CanvasPageBackground} from '/src/features/library/components/CanvasPageBackground.tsx';
@@ -20,7 +21,7 @@ window.samples=[{dataUrl:sample(768,1024),saved:false,requestPrompt:'春日山�
 window.fitSamples=[[320,320],[4096,1024],[768,3072]].map(([w,h])=>({dataUrl:sample(w,h),saved:false,requestPrompt:'尺寸适配测试'}));
 window.calls={open:[],download:[],copy:[],archive:[]};
 window.suyanApi={setDoubaoWebCanvasVisible:async()=>({ok:true}),hideDoubaoWebCanvas:async()=>({ok:true})};
-let props={webCanvasEnabled:false,webCanvasLoginVisible:false,webCanvasLoading:false,webCanvasHostRef:{current:null},phase:'empty',lastModel:'gpt-image-1',results:[],thinkingKeywords:['春日','山野','柔光','留白'],blurPreviewSrc:'',generationElapsedMs:42000,lockedHeight:null,archivingIndex:null,archivingBatch:false,onOpenPreview:i=>window.calls.open.push(i),onDownload:(_,i)=>window.calls.download.push(i),onCopyImage:async s=>window.calls.copy.push(s),onArchive:(_,i)=>window.calls.archive.push(i)};
+let props={webCanvasEnabled:false,webCanvasLoginVisible:false,webCanvasLoading:false,webCanvasHostRef:{current:null},phase:'empty',lastModel:'gpt-image-1',results:[],thinkingKeywords:['春日','山野','柔光','留白'],generationElapsedMs:42000,lockedHeight:null,archivingIndex:null,archivingBatch:false,onOpenPreview:i=>window.calls.open.push(i),onDownload:(_,i)=>window.calls.download.push(i),onCopyImage:async s=>window.calls.copy.push(s),onArchive:(_,i)=>window.calls.archive.push(i)};
 let full=false,pageView='canvas',draft={...defaultCanvasDraftSettings,prompt:'春日山野，让光影慢慢落下'};
 let showChrome=false;
 const root=createRoot(document.getElementById('root'));
@@ -30,7 +31,7 @@ window.setCanvasTheme=(mode,options)=>applyThemeModeToRoot(mode,document.documen
 window.canvasThemePresets=themePresetOptions.map(option=>option.value);
 window.mountBackgroundSettings=()=>{
  const host=document.createElement('div');host.id='background-settings-panel';host.className='fixed left-2 top-14 z-50 flex max-h-[90vh] w-96 flex-col overflow-hidden rounded-xl border border-border bg-panel p-4 shadow-xl';document.body.append(host);
- createRoot(host).render(React.createElement(CanvasBackgroundSettingsPanel));
+ createRoot(host).render(React.createElement(LocaleProvider,null,React.createElement(CanvasBackgroundSettingsPanel)));
  window.suyanApi.saveLibraryViewSettings=async settings=>{window.savedBackground=structuredClone(settings.canvasBackground);return window.failBackgroundSave?{ok:false,error:{code:'TEST_FAILURE',message:'保存失败'}}:{ok:true,data:settings};};
  window.suyanApi.chooseThemeBackgroundImage=async()=>window.backgroundImageSelection??{ok:true,data:{canceled:true,imageFileName:null}};
 };
@@ -38,18 +39,18 @@ window.setCanvasBackground=background=>useLibraryStore.setState({canvasBackgroun
 window.getCanvasDraft=()=>structuredClone(draft);
 window.showCanvasChrome=()=>{showChrome=true;document.getElementById('root').className='h-screen';document.getElementById('root').style.background='#6092c0';render();};
 function render(){
- if(!full){root.render(React.createElement(CreativeCanvas,props));return;}
+ if(!full){root.render(React.createElement(LocaleProvider,null,React.createElement(CreativeCanvas,props)));return;}
  useLibraryStore.setState({canvasPhase:props.phase,canvasThinkingKeywords:props.thinkingKeywords,canvasIsGenerating:['thinking','generating'].includes(props.phase)});
- const canvas=React.createElement(CanvasView,{aiSettings:useLibraryStore.getState().aiSettings,canvasDraft:draft,isBusy:false,generationResults:props.results,lastGenerationModel:props.lastModel,onDraftChange:p=>{draft={...draft,...p};render();},onGenerationResultsChange:r=>{props.results=r;render();},onLastGenerationModelChange:m=>{props.lastModel=m;render();},onCopyImage:props.onCopyImage,onGenerate:async()=>null,onPrepareDoubaoWebCanvas:async()=>null,onRefreshDoubaoWebCanvasAuth:async()=>null,onImportGeneratedImages:async()=>[],onOpenAiSettings:()=>{},onOptimizePrompt:async()=>null,onSaveAiActionModelPreference:async()=>true,onNotify:()=>{}});
+ const canvas=React.createElement(CanvasView,{aiSettings:useLibraryStore.getState().aiSettings,canvasDraft:draft,isBusy:false,generationResults:props.results,lastGenerationModel:props.lastModel,onDraftChange:p=>{draft={...draft,...p};render();},onGenerationResultsChange:r=>{props.results=r;render();},onLastGenerationModelChange:m=>{props.lastModel=m;render();},onCopyImage:props.onCopyImage,onGenerate:async()=>null,onPrepareDoubaoWebCanvas:async()=>null,onRefreshDoubaoWebCanvasAuth:async()=>null,onImportGeneratedImages:async()=>[],onOpenAiSettings:()=>{},onOptimizePrompt:async()=>null,onSaveAiActionModelPreference:async()=>true,onFullscreenPreviewChange:()=>{},onNotify:()=>{}});
  // Match LibraryView's real scroll/background/surface hierarchy, including wide margins.
  const content=React.createElement('div',{id:'canvas-page-scroll',className:'relative z-10 h-full min-h-0 flex-1 overflow-y-auto',style:{scrollbarGutter:'stable'}},
   React.createElement(CanvasPageBackground,{className:'library-background-layer min-h-full w-full bg-background',currentView:pageView},
    pageView==='canvas'?React.createElement(CanvasPageAtmosphere):null,
    React.createElement('div',{className:'library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm',style:{'--library-workspace-width':'100%'}},pageView==='canvas'?canvas:React.createElement('h2',null,'素材浏览（测试）'))));
- root.render(showChrome?React.createElement('div',{className:'relative flex h-full flex-col'},
+ root.render(React.createElement(LocaleProvider,null,showChrome?React.createElement('div',{className:'relative flex h-full flex-col'},
   React.createElement('header',{className:'app-chrome-surface flex h-11 shrink-0 items-center px-5'},'素言 · 创意画布'),
   React.createElement('div',{className:'library-content-frame relative flex min-h-0 flex-1'},
-   React.createElement('aside',{className:'app-chrome-surface w-48 shrink-0 p-5'},'素材浏览 · 创意画布'),content)):content);
+   React.createElement('aside',{className:'app-chrome-surface w-48 shrink-0 p-5'},'素材浏览 · 创意画布'),content)):content));
 }
 window.showCanvas();
 </script></body></html>`;
@@ -58,21 +59,22 @@ await server.listen();
 await mkdir('output/canvas-workspace',{recursive:true});
 const browser=await chromium.launch({channel:'msedge',headless:true});
 try {
- // Compare the actual glass layers over one simulated desktop, not just color tokens.
+ // Compare the actual chrome and canvas layers over one simulated desktop, not just color tokens.
  const materialPage=await browser.newPage({viewport:{width:1600,height:1000}});
  await materialPage.goto('http://127.0.0.1:5198/__canvas-qa',{waitUntil:'domcontentloaded'});
  await materialPage.evaluate(()=>{window.showCanvas({},'light',true);window.showCanvasChrome();});
- await materialPage.getByText('留一片空白，给你的想象').waitFor();
+ await materialPage.getByText('等待灵感生成').waitFor();
  const assertGlass=async label=>{
   const materials=await materialPage.evaluate(()=>{
    const properties=['backgroundColor','backgroundImage','backdropFilter'];
    const read=selector=>{const el=document.querySelector(selector),s=getComputedStyle(el);return [...properties.map(p=>s[p]),getComputedStyle(el,'::before').backgroundImage];};
-   return {header:read('header'),sidebar:read('aside'),page:read('.library-background-layer'),inner:['.library-workspace-surface','.canvas-workspace','.canvas-studio-surface'].map(selector=>getComputedStyle(document.querySelector(selector)).backgroundColor)};
+   return {header:read('header'),sidebar:read('aside'),page:read('.library-background-layer'),inner:['.library-workspace-surface','.canvas-workspace','.canvas-studio-surface'].map(selector=>{const style=getComputedStyle(document.querySelector(selector));return {backgroundColor:style.backgroundColor,backgroundImage:style.backgroundImage};})};
   });
-  assert.deepEqual(materials.page,materials.header,label+' canvas and titlebar use identical glass');
-  assert.deepEqual(materials.page,materials.sidebar,label+' canvas and sidebar use identical glass');
-  assert.equal(materials.inner[0],'rgba(0, 0, 0, 0)',label+' outer workspace keeps desktop color');
-  assert.ok(materials.inner.slice(1).every(color=>color!=='rgba(0, 0, 0, 0)'),label+' artwork card restores its separate studio surface');
+  assert.deepEqual(materials.header,materials.sidebar,label+' titlebar and sidebar use identical glass');
+  assert.notDeepEqual(materials.page,materials.header,label+' canvas keeps its dedicated mist atmosphere');
+  assert.match(materials.page[1],/radial-gradient/i,label+' canvas page keeps soft mist gradients');
+  assert.equal(materials.inner[0].backgroundColor,'rgba(0, 0, 0, 0)',label+' outer workspace keeps desktop color');
+  assert.ok(materials.inner.slice(1).every(({backgroundColor,backgroundImage})=>backgroundColor!=='rgba(0, 0, 0, 0)'||backgroundImage!=='none'),label+' artwork card restores its separate studio surface');
  };
  for(const mode of ['light','dark']) for(const preset of await materialPage.evaluate(()=>window.canvasThemePresets)) {
   await materialPage.evaluate(({mode,preset})=>window.setCanvasTheme(mode,{themePreset:preset}),{mode,preset});
@@ -156,23 +158,23 @@ try {
   };
   try {
    await page.goto('http://127.0.0.1:5198/__canvas-qa',{waitUntil:'domcontentloaded'});
-   await page.getByText('留一片空白，给你的想象').waitFor();await noOverflow();await shot('empty');
+   await page.getByText('等待灵感生成').waitFor();await noOverflow();await shot('empty');
    await page.evaluate(()=>window.showCanvas({phase:'thinking'}));
-   await page.getByRole('status').filter({hasText:'正在理解你的想法'}).waitFor();
-   assert.equal(await page.locator('.canvas-compute-field').count(),0,'thinking stays quiet');
+   await page.getByRole('status').filter({hasText:'灵感汇集ing'}).waitFor();
+   assert.equal(await page.locator('.canvas-prompt-particle-field').count(),1,'thinking shows prompt particles');
+   assert.equal(await page.locator('.canvas-backdrop[data-canvas-mode="thinking"]').count(),1,'thinking keeps the shared canvas');
    await page.evaluate(()=>window.showCanvas({phase:'generating'}));
-   await page.getByRole('status').filter({hasText:'正在创作'}).waitFor();
+   await page.getByRole('status').filter({hasText:'灵感汇集ing'}).waitFor();
    await page.locator('.canvas-background-layers').evaluate(el=>{for(const a of el.getAnimations({subtree:true})){a.pause();a.currentTime=1600;}});
    await shot('generating');
    assert.equal(await page.locator('.canvas-prism-sweep').count(),0);
-   assert.equal(await page.locator('.canvas-energy-field').evaluate(el=>getComputedStyle(el).animationDuration),'14s');
-   assert.equal(await page.locator('.canvas-ai-scan').evaluate(el=>getComputedStyle(el).animationDuration),'3.2s');
-   assert.equal(await page.locator('.canvas-neural-node').count(),8);
-   assert.equal(await page.locator('.canvas-data-stream').count(),6);
+   assert.equal(await page.locator('.canvas-formation-block').count(),9);
+   assert.equal(await page.locator('.canvas-prompt-particle').count(),12);
+   assert.equal(await page.locator('.canvas-ai-scan').count(),1);
    assert.equal(await page.locator('.canvas-background-layers').evaluate(el=>getComputedStyle(el).pointerEvents),'none');
    await page.evaluate(()=>window.showCanvas({phase:'created',results:window.samples}));
    await page.getByText('768 × 1024 · 3:4',{exact:false}).waitFor();await imageFits();await shot('portrait');
-   assert.equal(await page.locator('.canvas-compute-field,.canvas-ai-scan').count(),0,'results stop computation effects');
+   assert.equal(await page.locator('.canvas-formation-field,.canvas-ai-scan').count(),0,'results stop reveal effects');
    assert.equal(await page.locator('.canvas-focus-halo').evaluate(el=>getComputedStyle(el).animationDuration),'12s');
    await page.getByRole('button',{name:'复制',exact:true}).focus();
    await page.waitForFunction(()=>getComputedStyle(document.querySelector('.canvas-result-actions')).opacity==='1');
@@ -210,8 +212,8 @@ try {
    };
    await coversPage();
    assert.equal(await page.locator('.canvas-page-grid,.canvas-page-circuits,.canvas-grid').count(),0,'neither background uses the old grid or circuit motif');
-   assert.equal(await page.locator('.canvas-page-atmosphere .canvas-mist-node').count(),6);
-   assert.equal(await page.locator('.canvas-page-atmosphere .canvas-mist-node').evaluateAll(els=>els.every(el=>el.getAnimations().length===1)),true,'six independently positioned mist patches animate');
+   assert.equal(await page.locator('.canvas-page-atmosphere .canvas-mist-node').count(),12);
+   assert.equal(await page.locator('.canvas-page-atmosphere .canvas-mist-node').evaluateAll(els=>els.every(el=>el.getAnimations().length===1)),true,'twelve independently positioned mist patches animate');
    await page.getByPlaceholder('描述主体、场景、光线、镜头和风格…').click();
    await page.getByPlaceholder('描述主体、场景、光线、镜头和风格…').fill('玻璃杯里的清新果汁，柔和光影，商业摄影。');
    assert.equal(await page.getByPlaceholder('描述主体、场景、光线、镜头和风格…').inputValue(),'玻璃杯里的清新果汁，柔和光影，商业摄影。');
@@ -244,7 +246,10 @@ try {
    await page.waitForFunction(()=>document.querySelector('.canvas-workspace').getAnimations().every(a=>a.playState==='finished'));
    const collapsedCanvas=await page.locator('.canvas-workspace').boundingBox();
    const layout=await page.locator('.canvas-layout').boundingBox();
-   assert.ok(Math.abs(collapsedCanvas.width-layout.width)<2,'collapsed mode leaves no sidebar strip');
+   const resultsPanel=await page.locator('#canvas-results-panel').boundingBox();
+   const resultsPanelSharesRow = Boolean(resultsPanel && collapsedCanvas && Math.abs(resultsPanel.y-collapsedCanvas.y)<2);
+   const expectedCollapsedWidth = resultsPanelSharesRow ? resultsPanel.x-layout.x-16 : layout.width;
+   assert.ok(Math.abs(collapsedCanvas.width-expectedCollapsedWidth)<2,'collapsed mode leaves no creation sidebar strip while preserving the results panel');
    if(width>=1024) assert.ok(collapsedCanvas.width>expandedCanvas.width+350,'canvas uses the freed sidebar width');
    await noOverflow();await imageFits();await coversPage();await shot('sidebar-collapsed-light');
    if(width===2171) {
@@ -270,20 +275,20 @@ try {
    assert.equal(await page.locator('.canvas-page-atmosphere').count(),0,'other pages have no canvas decoration');
    assert.notEqual(await page.locator('.library-workspace-surface').evaluate(el=>getComputedStyle(el).backgroundColor),'rgba(0, 0, 0, 0)');
    await page.evaluate(()=>{window.showCanvasPage('canvas');window.showCanvas({phase:'empty',results:[]},'light',true);});
-   await page.getByText('留一片空白，给你的想象').waitFor();
+   await page.getByText('等待灵感生成').waitFor();
    await page.evaluate(()=>document.getElementById('canvas-page-scroll').scrollTop=0);await coversPage();await shot('page-empty-light');
-   await page.evaluate(()=>window.showCanvas({phase:'generating',results:[]},'dark',true));await page.getByRole('status').filter({hasText:'正在创作'}).waitFor();await noOverflow();await shot('full-generating-dark');
+   await page.evaluate(()=>window.showCanvas({phase:'generating',results:[]},'dark',true));await page.getByRole('status').filter({hasText:'灵感汇集ing'}).waitFor();await noOverflow();await shot('full-generating-dark');
    assert.equal(await page.locator('.canvas-page-atmosphere').getAttribute('data-generating'),'true');
    await page.getByRole('button',{name:'收起创作侧栏',exact:true}).click();
    await page.getByRole('button',{name:'展开创作侧栏',exact:true}).waitFor();
    await page.waitForFunction(()=>document.querySelector('.canvas-workspace').getAnimations().every(a=>a.playState==='finished'));
-   assert.equal(await page.getByRole('status').filter({hasText:'正在创作'}).isVisible(),true,'collapsing leaves generation running');
+   assert.equal(await page.getByRole('status').filter({hasText:'灵感汇集ing'}).isVisible(),true,'collapsing leaves generation running');
    await noOverflow();await shot('sidebar-collapsed-generating-dark');
    await page.emulateMedia({reducedMotion:'reduce'});
    assert.equal(await page.locator('.canvas-focus-halo').evaluate(el=>getComputedStyle(el).animationName),'none');
-   assert.equal(await page.locator('.canvas-compute-field').evaluate(el=>getComputedStyle(el).display),'none');
+   assert.equal(await page.locator('.canvas-formation-block').evaluateAll(els=>els.every(el=>getComputedStyle(el).animationName==='none')),true);
    assert.equal(await page.locator('.canvas-ai-scan').evaluate(el=>getComputedStyle(el).display),'none');
-   assert.equal(await page.locator('.canvas-progress-indeterminate').evaluate(el=>getComputedStyle(el).animationName),'none');
+   assert.equal(await page.locator('.canvas-prompt-particle').evaluateAll(els=>els.every(el=>getComputedStyle(el).animationName==='none')),true);
    assert.equal(await page.locator('.canvas-mist-node').evaluateAll(els=>els.every(el=>el.getAnimations().every(a=>a.playState==='paused'))),true);
    assert.deepEqual(errors,[]);
   } catch(error) {await shot('failure');throw error;}
@@ -317,7 +322,7 @@ try {
  try {
   await pointerPage.goto('http://127.0.0.1:5198/__canvas-qa',{waitUntil:'domcontentloaded'});
   await pointerPage.evaluate(()=>window.showCanvas({},'light',true));
-  await pointerPage.getByText('留一片空白，给你的想象').waitFor();
+  await pointerPage.getByText('等待灵感生成').waitFor();
   await pointerPage.clock.install();await pointerPage.clock.pauseAt(new Date());
   await pointerPage.evaluate(()=>{let seed=19;Math.random=()=>{seed=(seed*16807)%2147483647;return (seed-1)/2147483646;};});
   const enter=async(x=.68,y=.42)=>{
@@ -361,7 +366,7 @@ try {
   const destinations=()=>pointerPage.locator('.canvas-page-atmosphere .canvas-mist-node').evaluateAll(els=>els.map(el=>el.getAnimations()[0].effect.getKeyframes().at(-1).transform));
   const firstDestinations=await destinations();
   const regions=firstDestinations.map(transform=>{const [,x,y]=transform.match(/translate3d\(([-\d.]+)%, ([-\d.]+)%/);return Math.floor((Number(x)+50)*.48/33.333)+3*Math.floor((Number(y)+50)*.52/50);});
-  assert.equal(new Set(regions).size,6,'destinations occupy six different regions');
+  assert.ok(new Set(regions).size >= 8,'destinations occupy at least eight different regions');
   await pointerPage.clock.runFor(19000);
   assert.notDeepEqual(await destinations(),firstDestinations,'each cycle generates new destinations instead of replaying a fixed path');
   for(const mode of ['light','dark']) for(const preset of await pointerPage.evaluate(()=>window.canvasThemePresets)) {
@@ -427,10 +432,10 @@ try {
  // Virtual time verifies cadence and phase cleanup without slow sleeps.
  const page=await browser.newPage({viewport:{width:1000,height:800}});
  await page.goto('http://127.0.0.1:5198/__canvas-qa',{waitUntil:'domcontentloaded'});
- await page.getByText('留一片空白，给你的想象').waitFor();
+ await page.getByText('等待灵感生成').waitFor();
  await page.clock.install();
  await page.evaluate(()=>{Math.random=()=>0.5;window.showCanvas({phase:'generating'});});
- await page.getByRole('status').filter({hasText:'正在创作'}).waitFor();
+ await page.getByRole('status').filter({hasText:'灵感汇集ing'}).waitFor();
  let previous=await page.locator('.canvas-waiting-message').textContent();
  for(let i=0;i<4;i++){
   await page.clock.runFor(4799);assert.equal(await page.locator('.canvas-waiting-message').textContent(),previous);
@@ -442,10 +447,10 @@ try {
  assert.equal(await page.locator('.canvas-waiting-message').count(),0);
  await page.close();
  // Decode can finish after the provider's reveal phase. The work must still get
- // its single 600ms reveal, and remain immediately usable under reduced motion.
+ // its single 1500ms reveal, and remain immediately usable under reduced motion.
  const revealPage=await browser.newPage({viewport:{width:1100,height:800}});
  await revealPage.goto('http://127.0.0.1:5198/__canvas-qa',{waitUntil:'domcontentloaded'});
- await revealPage.getByText('留一片空白，给你的想象').waitFor();
+ await revealPage.getByText('等待灵感生成').waitFor();
  await revealPage.clock.install();
  await revealPage.clock.pauseAt(new Date());
  let releaseImage;
@@ -464,19 +469,19 @@ try {
  await revealPage.locator('[data-canvas-mode="reveal"]').waitFor();
  await revealPage.locator('.canvas-reconstruction-frost').evaluate(el=>{const a=el.getAnimations()[0];a.pause();a.currentTime=300;});
  await revealPage.screenshot({path:'output/canvas-workspace/reconstruction.png'});
- await revealPage.clock.runFor(600);
+ await revealPage.clock.runFor(1500);
  await revealPage.locator('[data-canvas-mode="result"]').waitFor();
- assert.equal(await revealPage.locator('.canvas-image-reconstruction,.canvas-ai-scan,.canvas-compute-field').count(),0);
+ assert.equal(await revealPage.locator('.canvas-image-reconstruction,.canvas-ai-scan,.canvas-formation-field').count(),0);
  await revealPage.evaluate(()=>window.showCanvas({phase:'generating',results:[]}));
- await revealPage.getByRole('status').filter({hasText:'正在创作'}).waitFor();
+ await revealPage.getByRole('status').filter({hasText:'灵感汇集ing'}).waitFor();
  await revealPage.evaluate(()=>{Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));});
  await revealPage.waitForFunction(()=>getComputedStyle(document.querySelector('.canvas-ai-scan')).animationPlayState==='paused');
  await revealPage.emulateMedia({reducedMotion:'reduce'});
  await revealPage.evaluate(()=>window.showCanvas({phase:'reveal',results:window.samples}));
  await revealPage.getByText('768 × 1024 · 3:4',{exact:false}).waitFor();
  assert.equal(await revealPage.locator('.canvas-image-reconstruction').count(),0);
- assert.equal(await revealPage.locator('.canvas-compute-field').count(),0);
+ assert.equal(await revealPage.locator('.canvas-formation-field').count(),0);
  await revealPage.close();
- process.stdout.write('Canvas pointer UI passed: all light/dark theme presets, Solarized warm surface, six dispersed random destinations renewed each cycle, shared inner/outer colors, cursor refraction waves, bounded bitmaps/particles, scrolled orb position, cleanup and reduced-motion timer pause; delayed reveal and timer cadence passed.\n');
+ process.stdout.write('Canvas pointer UI passed: all light/dark theme presets, Solarized warm surface, twelve dispersed random destinations renewed each cycle, shared inner/outer colors, cursor refraction waves, bounded bitmaps/particles, scrolled orb position, cleanup and reduced-motion timer pause; delayed reveal and timer cadence passed.\n');
  if(!process.argv.includes('--pointer-only')) process.stdout.write('Canvas workspace UI passed: five phases, light/dark, 2171/1400/1100/390px, maximum uncropped image fit (portrait/landscape/small/square/panorama/tall), live window resizing, sidebar collapse/restore, preserved drafts and focus, full-page atmosphere and bottom scroll coverage, input/menu interactions, dimensions/actions/carousel.\n');
 } finally {await browser.close();await server.close();}

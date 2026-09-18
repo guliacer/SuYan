@@ -46,7 +46,12 @@ import {
   normalizeAiRecognitionSourcePreferences,
 } from "../types/ai";
 import { buildPublicAiSettingsPayload, updateAiActionModelPreference } from "../utils/aiSettingsDraft";
-import type { CanvasDraftSettings, CanvasGenerationResult, CanvasPhase } from "../types/canvas";
+import type {
+  CanvasDraftSettings,
+  CanvasGenerationResult,
+  CanvasPhase,
+  CanvasPromptUndoSnapshot,
+} from "../types/canvas";
 import type {
   LibraryFile,
   LibraryItem,
@@ -104,7 +109,11 @@ import { normalizeCategoryLabelKey } from "../utils/categoryId";
 import type { ProxyDetectionData, ProxySettings } from "../types/proxy";
 import { defaultProxySettings } from "../types/proxy";
 import { buildLibraryFile, uniqueTags } from "../utils/buildLibraryFile";
-import { defaultCanvasDraftSettings, normalizeCanvasDraftSettings } from "../utils/canvasGeneration";
+import {
+  defaultCanvasDraftSettings,
+  normalizeCanvasDraftSettings,
+  type CanvasAtmosphereTone,
+} from "../utils/canvasGeneration";
 import {
   defaultNsfwGradingSpeed,
   getNsfwGradingConcurrency,
@@ -168,6 +177,7 @@ import {
 import type { PromptViewSettings } from "../../prompts/types";
 import type { AppLanguage } from "../../../types/locale";
 import { defaultAppLanguage } from "../../../types/locale";
+import { defaultVisualLifeSettings, normalizeVisualLifeSettings, type VisualLifeSettings } from "../utils/visualLife";
 
 // Settings writes share one JSON file. Serialize them so an autosave from the
 // tag/category workspace cannot finish after a newer custom-entry save and
@@ -284,14 +294,22 @@ type LibraryState = {
   recentImportPinIds: string[];
   searchQuery: string;
   canvasDraft: CanvasDraftSettings;
+  /** 素材详情页推送到画布前的提示词快照，仅用于当前运行时撤销，不持久化。 */
+  canvasPromptUndoSnapshot: CanvasPromptUndoSnapshot | null;
   canvasGenerationResults: CanvasGenerationResult[];
   canvasLastModel: string;
+  /** 最近一次成功生成的作品数量；与累计作品列表分开，用于画布顶部批次统计。 */
+  canvasLastGenerationCount: number;
   /** 画布是否正在生成（按钮置灰/转圈，跨视图保留）。 */
   canvasIsGenerating: boolean;
   /** 画布状态机阶段，跨视图保留。 */
   canvasPhase: CanvasPhase;
   /** 「理解中」阶段展示的关键词，跨视图保留。 */
   canvasThinkingKeywords: string[];
+  /** 当前生成批次的提示词氛围色，跨视图保留但不落盘。 */
+  canvasAtmosphereTone: CanvasAtmosphereTone;
+  /** 递增的生成批次编号，阻止旧请求回写新一轮画布状态。 */
+  canvasGenerationRunId: number;
   tagOrder: string[];
   likedImageIds: string[];
   starredRecommendations: string[];
@@ -314,9 +332,11 @@ type LibraryState = {
   themeCustomAccents: [string, string, string];
   themeAccentMemory: ThemeAccentMemoryByPreset;
   customTheme: ThemeCustomTheme;
+  visualLife: VisualLifeSettings;
   workspaceWidthPercent: number;
   sidebarEntryVisibility: SidebarEntryVisibility;
   featureGuideCompleted: string[];
+  featureGuideVersion: string | null;
   autoNsfwGrading: boolean;
   blurNsfwImages: boolean;
   nsfwGradingSpeed: NsfwGradingSpeed;
@@ -346,13 +366,17 @@ type LibraryState = {
   showStatusMessage: (message: StatusFeedbackMessage) => void;
   setSearchQuery: (searchQuery: string) => void;
   updateCanvasDraft: (patch: Partial<CanvasDraftSettings>) => void;
+  setCanvasPromptUndoSnapshot: (snapshot: CanvasPromptUndoSnapshot | null) => void;
   setCanvasGenerationResults: (results: CanvasGenerationResult[]) => void;
   setCanvasLastModel: (model: string) => void;
+  setCanvasLastGenerationCount: (count: number) => void;
   /** 画布生成态机：thinking/generating/reveal/created/empty。
    *  提到 store 是因为 CanvasView 切到素材库会被卸载，局部 state 全丢，
    *  再切回时即使主进程后台还在生图也看不到「创作中」。store 让生成态跨视图保留。 */
   setCanvasPhase: (phase: CanvasPhase) => void;
   setCanvasThinkingKeywords: (keywords: string[]) => void;
+  setCanvasAtmosphereTone: (tone: CanvasAtmosphereTone) => void;
+  setCanvasGenerationRunId: (runId: number) => void;
   setCanvasGenerating: (generating: boolean) => void;
   setSelectedItemId: (selectedItemId: string | null) => void;
   clearRecentImportPins: () => void;
@@ -365,9 +389,11 @@ type LibraryState = {
   setThemeWorkspaceOpacity: (themeOpacity: number) => Promise<void>;
   setThemeAccentOpacity: (themeAccentOpacity: number) => Promise<void>;
   setCustomTheme: (patch: Partial<ThemeCustomTheme>) => Promise<void>;
+  saveVisualLifeSettings: (patch: Partial<VisualLifeSettings>) => Promise<boolean>;
   setWorkspaceWidthPercent: (workspaceWidthPercent: number) => void;
   saveSidebarEntryVisibility: (entryId: SidebarEntryId, visible: boolean) => Promise<boolean>;
   completeFeatureGuide: (guideId: string) => Promise<boolean>;
+  completeFeatureOnboarding: (version: string) => Promise<boolean>;
   resetFeatureGuides: () => Promise<boolean>;
   saveGenerationModelPreferences: (patch: {
     generationModelOrder?: string[];
@@ -599,11 +625,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   recentImportPinIds: [],
   searchQuery: "",
   canvasDraft: { ...defaultCanvasDraftSettings },
+  canvasPromptUndoSnapshot: null,
   canvasGenerationResults: [],
   canvasLastModel: "",
+  canvasLastGenerationCount: 0,
   canvasIsGenerating: false,
   canvasPhase: "empty",
   canvasThinkingKeywords: [],
+  canvasAtmosphereTone: "neutral",
+  canvasGenerationRunId: 0,
   tagOrder: [],
   likedImageIds: [],
   starredRecommendations: [],
@@ -624,10 +654,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   themeCustomAccents: [...DEFAULT_THEME_CUSTOM_ACCENTS] as [string, string, string],
   themeAccentMemory: createDefaultThemeAccentMemory(),
   customTheme: normalizeThemeCustomTheme(undefined),
+  visualLife: { ...defaultVisualLifeSettings, effectPool: [...defaultVisualLifeSettings.effectPool] },
   canvasBackground: normalizeCanvasBackground(undefined),
   workspaceWidthPercent: defaultWorkspaceWidthPercent,
   sidebarEntryVisibility: { ...defaultSidebarEntryVisibility },
   featureGuideCompleted: [],
+  featureGuideVersion: null,
   autoNsfwGrading: false,
   blurNsfwImages: false,
   nsfwGradingSpeed: defaultNsfwGradingSpeed,
@@ -829,6 +861,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   setSearchQuery: (searchQuery) => set({ searchQuery }),
+  setCanvasPromptUndoSnapshot: (snapshot) => set({ canvasPromptUndoSnapshot: snapshot }),
   updateCanvasDraft: (patch) => {
     const nextCanvasDraft = normalizeCanvasDraftSettings({ ...get().canvasDraft, ...patch });
     set({ canvasDraft: nextCanvasDraft });
@@ -854,9 +887,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   setCanvasLastModel: (model) => set({ canvasLastModel: model }),
 
+  setCanvasLastGenerationCount: (count) => set({ canvasLastGenerationCount: Math.max(0, Math.floor(count)) }),
+
   setCanvasPhase: (phase) => set({ canvasPhase: phase }),
 
   setCanvasThinkingKeywords: (keywords) => set({ canvasThinkingKeywords: keywords }),
+
+  setCanvasAtmosphereTone: (tone) => set({ canvasAtmosphereTone: tone }),
+
+  setCanvasGenerationRunId: (runId) => set({ canvasGenerationRunId: runId }),
 
   setCanvasGenerating: (generating) => set({ canvasIsGenerating: generating }),
 
@@ -1276,6 +1315,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     await themePersistenceQueue;
   },
 
+  saveVisualLifeSettings: async (patch) => {
+    const previous = get().visualLife;
+    const next = normalizeVisualLifeSettings({ ...previous, ...patch });
+    if (JSON.stringify(previous) === JSON.stringify(next)) return true;
+
+    set({ visualLife: next, statusMessage: null });
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { visualLife: next }),
+    );
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({ visualLife: previous, statusMessage: errorStatus(result.error.code, result.error.message) });
+    return false;
+  },
+
   setLanguage: async (language) => {
     const currentLanguage = get().language;
     if (currentLanguage === language) {
@@ -1384,6 +1441,30 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     set({
       featureGuideCompleted: currentCompleted,
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+    return false;
+  },
+
+  completeFeatureOnboarding: async (version) => {
+    const normalizedVersion = version.trim();
+    if (!normalizedVersion || get().featureGuideVersion === normalizedVersion) {
+      return true;
+    }
+
+    const previousVersion = get().featureGuideVersion;
+    set({ featureGuideVersion: normalizedVersion });
+    const result = await saveLibraryViewSettingsSerialized(
+      buildLibraryViewSettings(get(), { featureGuideVersion: normalizedVersion }),
+    );
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+
+    set({
+      featureGuideVersion: previousVersion,
       statusMessage: errorStatus(result.error.code, result.error.message),
     });
     return false;
@@ -1842,11 +1923,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   testAiSettings: async (settings) => {
-    set({ isBusy: true, statusMessage: progressStatus("正在测试远程 AI 连接...") });
+    const testedProfile = settings.profiles.find((profile) => profile.id === settings.activeProfileId) ?? settings.profiles[0];
+    const serviceName = testedProfile?.provider === "ollama" ? "Ollama" : "远程 AI";
+    set({ isBusy: true, statusMessage: progressStatus(`正在测试 ${serviceName} 连接...`) });
 
     const result = await window.suyanApi.testAiSettings(settings);
     const statusMessage = result.ok
-      ? successStatus("远程 AI 连接成功。")
+      ? successStatus(`${serviceName} 连接成功。`)
       : errorStatus(result.error.code, result.error.message);
     const presentation = result.ok
       ? null
@@ -1872,6 +1955,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     set({
       isBusy: false,
+      aiErrorDialog: result.ok ? null : buildAiErrorPresentation(result.error.code, result.error.message, "ai-connection"),
       statusMessage: result.ok
         ? successStatus(`已查询到 ${result.data.models.length} 个模型。`)
         : errorStatus(result.error.code, result.error.message),
@@ -2340,7 +2424,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
 
     logRendererStartupEvent("ai-reverse:start");
-    set({ statusMessage: progressStatus("正在进行图像反推...") });
+    set({ statusMessage: progressStatus("正在反推图像…") });
 
     const result = await window.suyanApi.reverseImagePromptWithAi(resolvedPayload);
 
@@ -4659,10 +4743,12 @@ function buildLibraryViewSettings(
     themeCustomAccents: state.themeCustomAccents,
     themeAccentMemory: state.themeAccentMemory,
     customTheme: state.customTheme,
+    visualLife: normalizeVisualLifeSettings(state.visualLife),
     canvasBackground: state.canvasBackground,
     workspaceWidthPercent: normalizeWorkspaceWidthPercent(state.workspaceWidthPercent),
     sidebarEntryVisibility: normalizeSidebarEntryVisibility(state.sidebarEntryVisibility),
     featureGuideCompleted: state.featureGuideCompleted,
+    featureGuideVersion: state.featureGuideVersion,
     autoNsfwGrading: state.autoNsfwGrading,
     blurNsfwImages: state.blurNsfwImages,
     nsfwGradingSpeed: state.nsfwGradingSpeed,
@@ -4730,9 +4816,11 @@ function syncLibraryViewSettings(
     themeCustomAccents: settings.themeCustomAccents,
     themeAccentMemory: settings.themeAccentMemory,
     customTheme: settings.customTheme,
+    visualLife: normalizeVisualLifeSettings(settings.visualLife),
     workspaceWidthPercent: settings.workspaceWidthPercent,
     sidebarEntryVisibility: normalizeSidebarEntryVisibility(settings.sidebarEntryVisibility),
     featureGuideCompleted: settings.featureGuideCompleted ?? [],
+    featureGuideVersion: settings.featureGuideVersion ?? null,
     autoNsfwGrading: settings.autoNsfwGrading,
     blurNsfwImages: settings.blurNsfwImages,
     nsfwGradingSpeed: settings.nsfwGradingSpeed,
@@ -5613,7 +5701,7 @@ function resolveRemoteAiReadiness(
   if (!profile) {
     return {
       ready: false,
-      statusMessage: failureStatus(`${actionLabel}失败：还没有 API 配置，请先在模型配置中添加接口地址、模型和 API Key。`),
+      statusMessage: failureStatus(`${actionLabel}失败：还没有可用的 AI 配置，请先在模型配置中添加服务。`),
     };
   }
 
@@ -5631,7 +5719,7 @@ function resolveRemoteAiReadiness(
     };
   }
 
-  if (!profile.hasApiKey) {
+  if (profile.provider !== "ollama" && !profile.hasApiKey) {
     return {
       ready: false,
       statusMessage: failureStatus(`${actionLabel}失败：当前 API 缺少 API Key，请在模型配置中填写后重试。`),

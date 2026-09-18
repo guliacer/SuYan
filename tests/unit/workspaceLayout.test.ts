@@ -26,14 +26,14 @@ describe("workspace layout settings", () => {
     expect(normalizeLibraryViewSettings({ language: "fr-FR" }).language).toBe("zh-CN");
   });
 
-  it("keeps a valid theme preset and defaults legacy settings to Raycast", () => {
+  it("keeps a valid theme preset and defaults legacy settings to Proof", () => {
     expect(normalizeLibraryViewSettings({ themePreset: "xcode" }).themePreset).toBe("xcode");
-    expect(normalizeLibraryViewSettings({}).themePreset).toBe("raycast");
-    expect(normalizeLibraryViewSettings({ themePreset: "not-a-theme" }).themePreset).toBe("raycast");
+    expect(normalizeLibraryViewSettings({}).themePreset).toBe("proof");
+    expect(normalizeLibraryViewSettings({ themePreset: "not-a-theme" }).themePreset).toBe("proof");
   });
 
   it("keeps button accent settings compatible with legacy view settings", () => {
-    expect(normalizeLibraryViewSettings({}).themeAccent).toBe("coral");
+    expect(normalizeLibraryViewSettings({}).themeAccent).toBe("sage");
     expect(normalizeLibraryViewSettings({}).themeCustomAccent).toBe("#ff6363");
     expect(normalizeLibraryViewSettings({ themeAccent: "sage" }).themeAccent).toBe("sage");
     expect(normalizeLibraryViewSettings({ themeAccent: "custom", themeCustomAccent: "#A1B2C3" })).toMatchObject({
@@ -41,7 +41,7 @@ describe("workspace layout settings", () => {
       themeCustomAccent: "#a1b2c3",
     });
     expect(normalizeLibraryViewSettings({ themeAccent: "unknown", themeCustomAccent: "not-hex" })).toMatchObject({
-      themeAccent: "coral",
+      themeAccent: "sage",
       themeCustomAccent: "#ff6363",
     });
     expect(normalizeLibraryViewSettings({

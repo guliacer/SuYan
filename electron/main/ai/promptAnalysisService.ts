@@ -17,11 +17,13 @@ import type {
   AiSummarizePromptTitlePayload,
   AiTranslatePromptData,
   AiTranslatePromptPayload,
+  AiProviderModelCapability,
   SaveAiProviderSettingsPayload,
 } from "../../../src/features/library/types/ai";
 import type { PromptType } from "../../../src/features/prompts/types";
 import { extractPromptVariables } from "../../../src/features/prompts/utils/promptVariables";
 import { derivePromptTitle } from "../../../src/features/prompts/utils/promptClipboardParser";
+import { compactAutomaticPromptTitle } from "../../../src/features/prompts/utils/promptTitle";
 import { detectAccountType } from "../../../src/features/prompts/utils/promptAccount";
 import { classifyPromptContent } from "../../../src/features/prompts/utils/promptClassification";
 import { isCommandPrompt } from "../../../src/features/prompts/utils/promptRichText";
@@ -48,6 +50,15 @@ import {
   testRemoteConnection,
   translatePromptRemotely,
 } from "./remoteAiClient";
+import {
+  analyzePromptWithOllama,
+  listOllamaModels,
+  optimizePromptWithOllama,
+  reverseImagePromptWithOllama,
+  summarizeTitleWithOllama,
+  testOllamaConnection,
+  translatePromptWithOllama,
+} from "./ollamaAiClient";
 
 export async function analyzePromptWithRemoteAi(
   payload: AiAnalyzePromptPayload,
@@ -66,10 +77,17 @@ export async function analyzePromptWithRemoteAi(
     payload.apiModelId,
     payload.customInstructions,
   );
-  const analysis = await analyzePromptRemotely(runtime.settings, {
-    ...payload,
-    customInstructions: runtime.customInstructions,
-  });
+  const requiredCapability: AiProviderModelCapability = isImageAnalysisTarget(payload.target) ? "vision" : "text";
+  assertOllamaModelCapability(runtime.settings, requiredCapability);
+  const analysis = runtime.settings.provider === "ollama"
+    ? await analyzePromptWithOllama(runtime.settings, {
+        ...payload,
+        customInstructions: runtime.customInstructions,
+      })
+    : await analyzePromptRemotely(runtime.settings, {
+        ...payload,
+        customInstructions: runtime.customInstructions,
+      });
 
   return { analysis };
 }
@@ -88,13 +106,16 @@ export async function optimizePromptWithRemoteAi(
     payload.customInstructions,
   );
 
+  assertOllamaModelCapability(runtime.settings, "text");
   return {
-    prompt: await optimizePromptRemotely(
-      runtime.settings,
-      payload.prompt,
-      runtime.customInstructions,
-      payload.promptKind,
-    ),
+    prompt: runtime.settings.provider === "ollama"
+      ? await optimizePromptWithOllama(runtime.settings, payload.prompt, runtime.customInstructions, payload.promptKind)
+      : await optimizePromptRemotely(
+          runtime.settings,
+          payload.prompt,
+          runtime.customInstructions,
+          payload.promptKind,
+        ),
   };
 }
 
@@ -112,8 +133,11 @@ export async function summarizePromptTitleWithRemoteAi(
     payload.customInstructions,
   );
 
+  assertOllamaModelCapability(runtime.settings, "text");
   return {
-    title: await summarizeTitleRemotely(runtime.settings, payload.prompt, runtime.customInstructions),
+    title: runtime.settings.provider === "ollama"
+      ? await summarizeTitleWithOllama(runtime.settings, payload)
+      : await summarizeTitleRemotely(runtime.settings, payload.prompt, runtime.customInstructions),
   };
 }
 
@@ -227,7 +251,7 @@ const type: PromptType = /视频|video|镜头运动|时长|秒/.test(lower) ? "v
 }
 
 function clampTitle(input: string): string {
-  return input.replace(/[\r\n"“”「」。，、.!！?？:：]+/g, " ").trim().slice(0, 50) || "未命名提示词";
+  return compactAutomaticPromptTitle(input.replace(/[\r\n"“”「」。，、.!！?？:：]+/g, " "));
 }
 
 function normalizeTags(tags: string[]): string[] {
@@ -252,7 +276,10 @@ export async function translatePromptWithRemoteAi(
     payload.customInstructions,
   );
 
-  return translatePromptRemotely(runtime.settings, payload, runtime.customInstructions);
+  assertOllamaModelCapability(runtime.settings, "text");
+  return runtime.settings.provider === "ollama"
+    ? translatePromptWithOllama(runtime.settings, payload, runtime.customInstructions)
+    : translatePromptRemotely(runtime.settings, payload, runtime.customInstructions);
 }
 
 export async function reverseImagePromptWithRemoteAi(
@@ -268,9 +295,12 @@ export async function reverseImagePromptWithRemoteAi(
     payload.apiModelId,
     payload.customInstructions,
   );
+  assertOllamaModelCapability(runtime.settings, "vision");
 
   return {
-    prompt: await reverseImagePromptRemotely(runtime.settings, payload, runtime.customInstructions),
+    prompt: runtime.settings.provider === "ollama"
+      ? await reverseImagePromptWithOllama(runtime.settings, payload, runtime.customInstructions)
+      : await reverseImagePromptRemotely(runtime.settings, payload, runtime.customInstructions),
   };
 }
 
@@ -288,6 +318,13 @@ export async function generateImagesWithRemoteAi(
     payload.apiModelId,
     payload.customInstructions,
   );
+
+  if (runtime.settings.provider === "ollama") {
+    throw new AppError(
+      "AI_PROVIDER_UNSUPPORTED",
+      "Ollama 当前仅用于文本和图像分析，不支持图像生成，请为画布选择生图 API。",
+    );
+  }
 
   const startedAt = Date.now();
   const notifyEnabled = payload.notificationEnabled === true;
@@ -447,13 +484,15 @@ function sanitizeTapRelayLogContext(context: Record<string, unknown>): Record<st
 export async function testAiProviderSettings(
   payload: SaveAiProviderSettingsPayload,
 ): Promise<AiSettingsTestData> {
-  return testRemoteConnection(await resolveAiProviderSettingsForPayload(payload));
+  const settings = await resolveAiProviderSettingsForPayload(payload);
+  return settings.provider === "ollama" ? testOllamaConnection(settings) : testRemoteConnection(settings);
 }
 
 export async function listAiProviderModels(
   payload: SaveAiProviderSettingsPayload,
 ): Promise<AiListProviderModelsData> {
-  return { models: await listRemoteModels(await resolveAiProviderSettingsForPayload(payload)) };
+  const settings = await resolveAiProviderSettingsForPayload(payload);
+  return { models: await (settings.provider === "ollama" ? listOllamaModels(settings) : listRemoteModels(settings)) };
 }
 
 
@@ -626,6 +665,32 @@ async function resolveAiRuntimeSettings(
     customInstructions: resolveAiActionCustomInstructions(settings, action, customInstructions),
     settings: resolveAiProviderProfileForAction(settings, action, profileId, modelId),
   };
+}
+
+function isImageAnalysisTarget(target: AiAnalyzePromptPayload["target"]): boolean {
+  return target === "image-category" || target === "image-tags" || target === "image-safety";
+}
+
+function assertOllamaModelCapability(settings: Awaited<ReturnType<typeof resolveAiProviderSettingsForPayload>>, required: AiProviderModelCapability): void {
+  if (settings.provider !== "ollama") {
+    return;
+  }
+
+  const model = settings.models.find((candidate) => candidate.id === settings.model);
+  if (!model) {
+    throw new AppError("AI_MODEL_MISSING", "当前 Ollama 没有可用模型，请先查询或安装模型。 ".trim());
+  }
+
+  if (model.capabilities.includes(required)) {
+    return;
+  }
+
+  throw new AppError(
+    "AI_MODEL_CAPABILITY_MISMATCH",
+    required === "vision"
+      ? "当前 Ollama 模型不支持图像分析，请选择带视觉能力的模型。"
+      : "当前 Ollama 模型不支持文本分析，请选择文本模型。",
+  );
 }
 
 function isRecord(input: unknown): input is Record<string, unknown> {

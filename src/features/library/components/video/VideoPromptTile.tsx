@@ -4,16 +4,19 @@ import { useLocale } from "@/components/LocaleProvider";
 import { NsfwImage } from "../NsfwImage";
 import { getImageThumbnailSrc } from "../../utils/getImageSrc";
 import { formatVideoDuration } from "../../utils/videoDisplay";
+import { VisualLifeMediaFrame } from "../VisualLifeEffectOverlay";
 import type { PromptCardData } from "../../utils/promptFilters";
+import type { VisualLifeSettings } from "../../utils/visualLife";
 
 type VideoPromptTileProps = {
   blurNsfwImages: boolean;
   isPriorityImage: boolean;
   item: PromptCardData;
+  visualLifeSettings: VisualLifeSettings;
   onViewDetail: (itemId: string) => void;
 };
 
-function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onViewDetail }: VideoPromptTileProps) {
+function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, visualLifeSettings, onViewDetail }: VideoPromptTileProps) {
   const { t } = useLocale();
   const [isHovered, setIsHovered] = useState(false);
   const handleViewDetail = useCallback(() => onViewDetail(item.id), [onViewDetail, item.id]);
@@ -31,6 +34,7 @@ function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onVie
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="group relative block w-full overflow-hidden text-left outline-none focus-visible:ring-2 focus-visible:ring-primary/35">
+        <VisualLifeMediaFrame item={{ id: item.id, category: item.category, tags: item.tags }} settings={visualLifeSettings}>
         <NsfwImage
           activateLabel={t("查看 {title} 的详情", { title: item.title || t("未命名视频提示词") })}
           alt={item.title || t("视频提示词封面")}
@@ -45,6 +49,7 @@ function VideoPromptTileComponent({ blurNsfwImages, isPriorityImage, item, onVie
           showRevealControl={false}
           source="thumbnail"
         />
+        </VisualLifeMediaFrame>
 
         <span className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center">
           <span className="flex size-12 items-center justify-center rounded-full bg-overlay/45 text-primary-foreground backdrop-blur-sm transition-transform duration-200 group-hover/tile:scale-110">

@@ -61,7 +61,7 @@ describe("themeMode", () => {
     expect(getThemeModeLabel("dark")).toBe("深色");
   });
 
-  it("provides Codex-style presets and falls back to Raycast", () => {
+  it("provides Codex-style presets and falls back to Proof", () => {
     expect(themePresetOptions.map((option) => option.value)).toEqual([
       "custom",
       "raycast",
@@ -74,9 +74,9 @@ describe("themeMode", () => {
       "vs-code-plus",
       "xcode",
     ]);
-    expect(resolveThemePreset(undefined)).toBe("raycast");
+    expect(resolveThemePreset(undefined)).toBe("proof");
     expect(resolveThemePreset("solarized")).toBe("solarized");
-    expect(resolveThemePreset("unknown")).toBe("raycast");
+    expect(resolveThemePreset("unknown")).toBe("proof");
     expect(getThemePresetLabel("raycast")).toBe("Raycast");
   });
 
@@ -86,7 +86,7 @@ describe("themeMode", () => {
     expect(isThemeAccent("custom1")).toBe(true);
     expect(isThemeCustomAccentSlot("custom3")).toBe(true);
     expect(isThemeAccent("unknown")).toBe(false);
-    expect(resolveThemeAccent(undefined)).toBe("coral");
+    expect(resolveThemeAccent(undefined)).toBe("sage");
     expect(resolveThemeAccent("mist")).toBe("mist");
     expect(normalizeThemeCustomAccent("#A1B2C3")).toBe("#a1b2c3");
     expect(normalizeThemeCustomAccent("red")).toBe("#ff6363");
@@ -111,8 +111,8 @@ describe("themeMode", () => {
     expect(root.dataset).toEqual({
       theme: "dark",
       themeMode: "dark",
-      themePreset: "raycast",
-      themeAccent: "coral",
+      themePreset: "proof",
+      themeAccent: "sage",
       themeCustomAccent: "#ff6363",
       themeCustomAccent1: "#ff6363",
       themeCustomAccent2: "#7357e8",

@@ -46,6 +46,7 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 ### AI assistant
 
 - Configure providers, models, and rules independently for category recognition, tag recognition, prompt optimization, translation, image reverse prompting, and generation.
+- Added Ollama local-model support for AI analysis, allowing compatible models to run without an API key; model capabilities and connection status are shown in Model Settings.
 - Analyze categories and tags from either the prompt or artwork. Model selectors use the provider's actual model IDs and remember each action's preferred model and analysis source.
 - Organize prompts by subject, scene, composition, lighting, and style. Local rules constrain AI results so visual attributes are not treated as categories and unsupported tags are not invented.
 - Use **Organize** beside AI tags to merge synonyms, group unorganized tags, classify entities, and correct wrong groups with preview, confirmation, and undo.
@@ -53,17 +54,22 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 <img src="./photo/readme/ai-settings.png" alt="AI model and rule settings" width="100%" />
 
+<img src="./docs/assets/v0.4.0-ollama.png" alt="Ollama local-model support" width="100%" />
+
 > AI endpoints and API keys are user-provided. Browsing, editing, local lexicons, import, and export remain available without an AI configuration.
 
 ### Creative canvas
 
 - Edit prompts and call configured image / video models inside the app.
 - Fit generated artwork to the available canvas area; copy, favorite, export, regenerate, or add results to the local library.
+- The generated-artwork panel keeps every image from every prompt batch, places the newest result first, and provides an internal scroll area for older works.
 - Collapse and restore the parameter panel. Canvas backgrounds can follow the theme, use the classic white style, or use a custom color or image.
 - Generation mode adds scanning, energy-field, particle, and completion effects while the idle canvas stays restrained.
 - Use reference images, clipboard paste, quick model switching, and structured generation errors.
 
 <img src="./photo/readme/canvas.png" alt="Creative canvas" width="100%" />
+
+<img src="./docs/assets/v0.4.0-canvas.png" alt="Creative canvas with generated-artwork panel" width="100%" />
 
 ### Ideas and tasks
 
@@ -128,6 +134,7 @@ When the generation task finishes, SuYan sends a completion notification through
 - Canvas backgrounds, sidebar entries, layout, and always-on-top state persist locally.
 - Simplified Chinese is the default UI language; switch to English in System Settings. User prompts, tags, categories, and material content are not automatically translated.
 - First-use guidance covers each page's real controls, including import methods, prompt cards, canvas parameters, AI connections, system settings, and window controls.
+- Image viewing includes a restrained particle effect; dialog feedback, negative-prompt extraction, newline-aware document import, and system-settings layout were also refined.
 - Check official GitHub releases and choose update now, remind later, ignore this version, or never remind.
 
 <img src="./photo/readme/system-settings.png" alt="System settings" width="100%" />
@@ -136,7 +143,7 @@ When the generation task finishes, SuYan sends a completion notification through
 
 ### Use a release build
 
-Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). The current release is `v0.3.8`; the latest version is always shown on the Releases page.
+Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). GitHub's current release is `v0.3.8`; the local workspace version prepared for push is fixed at `v0.4.0` and the public download text will be updated after the push and Release are complete.
 
 `v0.3.8` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
 
@@ -192,6 +199,25 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 - Before upgrading or uninstalling, exit the app and copy the entire `data\` folder outside the app directory. A share ZIP contains selected works, not a complete backup.
 
 ## Changelog
+
+### v0.4.0 (prepared for push)
+
+This workspace is fixed at `0.4.0`; the version will not be incremented automatically before the push succeeds.
+
+**New features**
+
+- **Ollama local-model AI analysis**: Added Ollama support for local image and prompt analysis, with model capabilities and connection status in Model Settings.
+- **Particle effect for image viewing**: Added a restrained particle visual treatment when viewing artwork to add spatial depth without distracting from the image.
+- **Generated-artwork panel**: Added a right-side gallery to the creative canvas that keeps every result from every prompt batch, puts the newest result first, and supports internal scrolling, hiding, and width adjustment.
+- **Release onboarding**: New installations and upgrades show a one-time version guide with the main changes and the data-backup reminder.
+
+**Improvements**
+
+- Refined dialog feedback so messages feel lighter and more natural while remaining clear.
+- Improved automatic negative-prompt extraction for more reliable handling of complex prompts.
+- Improved document-import recognition so text split across lines is parsed correctly.
+- Refined the creative-canvas background, creation core, and reveal animation so the canvas and gallery share the same misty theme.
+- Refined System Settings layout by reducing unused space and aligning theme, language, proxy, and other controls.
 
 ### v0.3.8 (current release)
 

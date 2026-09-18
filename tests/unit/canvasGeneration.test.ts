@@ -1,19 +1,50 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
+  defaultCanvasCreationPanelWidth,
+  defaultCanvasResultsPanelWidth,
   defaultCanvasDraftSettings,
   defaultPositivePromptHeight,
   buildCanvasImageGenerationPayload,
   extractPromptKeywords,
   getCanvasGenerationSizeLabel,
+  limitCanvasPromptText,
+  maxCanvasPromptLength,
+  maxCanvasCreationPanelWidth,
+  maxCanvasResultsPanelWidth,
+  minCanvasCreationPanelWidth,
+  minCanvasResultsPanelWidth,
+  normalizeCanvasCreationPanelWidth,
   normalizeCanvasDraftSettings,
+  normalizeCanvasResultsPanelWidth,
+  replaceCanvasPromptSelection,
+  resolveCanvasAtmosphereTone,
   resolveCanvasGenerationSize,
   shouldInheritCanvasPromptOrigin,
 } from "../../src/features/library/utils/canvasGeneration";
 
 describe("canvasGeneration", () => {
+  it("replaces only the selected prompt range for keyboard paste", () => {
+    expect(replaceCanvasPromptSelection("前缀旧选区后缀", "新内容", 2, 5)).toEqual({
+      text: "前缀新内容后缀",
+      selectionStart: 5,
+      selectionEnd: 5,
+      truncated: false,
+    });
+    expect(replaceCanvasPromptSelection("前缀后缀", "插入", 2, 2).text).toBe("前缀插入后缀");
+  });
+
+  it("keeps prompt text around a long keyboard paste and truncates only the inserted part", () => {
+    const result = replaceCanvasPromptSelection("开头" + "尾部", "新".repeat(maxCanvasPromptLength), 2, 2);
+    expect(result.text.startsWith("开头")).toBe(true);
+    expect(result.text.endsWith("尾部")).toBe(true);
+    expect(result.text.length).toBe(maxCanvasPromptLength);
+    expect(result.truncated).toBe(true);
+  });
+
   it("uses safe defaults when a saved draft is missing", () => {
     expect(normalizeCanvasDraftSettings(undefined)).toEqual(defaultCanvasDraftSettings);
     expect(defaultCanvasDraftSettings.generationProvider).toBe("api");
+    expect(defaultCanvasDraftSettings.negativePromptHidden).toBe(true);
   });
 
   it("restores the sidebar preference without changing the saved creation settings", () => {
@@ -23,6 +54,33 @@ describe("canvasGeneration", () => {
     expect(collapsed).toEqual({ ...draft, creationPanelCollapsed: true });
     expect(normalizeCanvasDraftSettings({ ...collapsed, creationPanelCollapsed: false })).toEqual(draft);
     expect(normalizeCanvasDraftSettings({ creationPanelCollapsed: "true" }).creationPanelCollapsed).toBe(false);
+  });
+
+  it("persists the generated-work panel visibility preference", () => {
+    expect(defaultCanvasDraftSettings.resultsPanelHidden).toBe(false);
+    expect(normalizeCanvasDraftSettings({ resultsPanelHidden: true }).resultsPanelHidden).toBe(true);
+    expect(normalizeCanvasDraftSettings({ resultsPanelHidden: false }).resultsPanelHidden).toBe(false);
+    expect(normalizeCanvasDraftSettings({ resultsPanelHidden: "true" }).resultsPanelHidden).toBe(false);
+  });
+
+  it("normalizes the generated-work panel width within its desktop bounds", () => {
+    expect(defaultCanvasResultsPanelWidth).toBe(220);
+    expect(normalizeCanvasResultsPanelWidth(undefined)).toBe(defaultCanvasResultsPanelWidth);
+    expect(normalizeCanvasResultsPanelWidth(minCanvasResultsPanelWidth - 1)).toBe(minCanvasResultsPanelWidth);
+    expect(normalizeCanvasResultsPanelWidth(maxCanvasResultsPanelWidth + 1)).toBe(maxCanvasResultsPanelWidth);
+    expect(normalizeCanvasResultsPanelWidth(271.6)).toBe(272);
+    expect(normalizeCanvasDraftSettings({ resultsPanelWidth: 160 }).resultsPanelWidth).toBe(minCanvasResultsPanelWidth);
+    expect(normalizeCanvasDraftSettings({ resultsPanelWidth: 500 }).resultsPanelWidth).toBe(maxCanvasResultsPanelWidth);
+  });
+
+  it("normalizes and preserves the creation panel width", () => {
+    expect(defaultCanvasCreationPanelWidth).toBe(380);
+    expect(normalizeCanvasCreationPanelWidth(undefined)).toBe(defaultCanvasCreationPanelWidth);
+    expect(normalizeCanvasCreationPanelWidth(minCanvasCreationPanelWidth - 1)).toBe(minCanvasCreationPanelWidth);
+    expect(normalizeCanvasCreationPanelWidth(maxCanvasCreationPanelWidth + 1)).toBe(maxCanvasCreationPanelWidth);
+    expect(normalizeCanvasCreationPanelWidth(417.4)).toBe(417);
+    expect(normalizeCanvasDraftSettings({ creationPanelWidth: 280 }).creationPanelWidth).toBe(minCanvasCreationPanelWidth);
+    expect(normalizeCanvasDraftSettings({ creationPanelWidth: 500 }).creationPanelWidth).toBe(500);
   });
 
   it("migrates retired providers back to the default API provider", () => {
@@ -114,6 +172,18 @@ describe("canvasGeneration", () => {
 
   });
 
+  it("limits persisted prompt fields to 3000 characters without splitting surrogate pairs", () => {
+    const longPrompt = "字".repeat(maxCanvasPromptLength + 80);
+    const normalized = normalizeCanvasDraftSettings({
+      prompt: longPrompt,
+      negativePrompt: longPrompt,
+    });
+
+    expect(normalized.prompt).toBe("字".repeat(maxCanvasPromptLength));
+    expect(normalized.negativePrompt).toBe("字".repeat(maxCanvasPromptLength));
+    expect(limitCanvasPromptText(`${"a".repeat(maxCanvasPromptLength - 1)}🙂`)).toBe("a".repeat(maxCanvasPromptLength - 1));
+  });
+
   it("provides a user-facing label for the resolved size", () => {
     expect(getCanvasGenerationSizeLabel("1312x736")).toBe("横向 1312 × 736");
   });
@@ -156,6 +226,20 @@ describe("canvasGeneration", () => {
     });
   });
 
+  it("always keeps the positive prompt visible when loading an old hidden setting", () => {
+    expect(normalizeCanvasDraftSettings({ positivePromptHidden: true }).positivePromptHidden).toBe(false);
+  });
+
+  it("limits both prompt fields again at the generation boundary", () => {
+    const payload = buildCanvasImageGenerationPayload(defaultCanvasDraftSettings, {
+      prompt: "正".repeat(maxCanvasPromptLength + 10),
+      negativePrompt: "负".repeat(maxCanvasPromptLength + 10),
+    });
+
+    expect(payload.prompt).toBe("正".repeat(maxCanvasPromptLength));
+    expect(payload.negativePrompt).toBe("负".repeat(maxCanvasPromptLength));
+  });
+
   it("persists valid base resolutions and falls back for invalid saved values", () => {
     expect(normalizeCanvasDraftSettings({ baseResolution: "4k" }).baseResolution).toBe("4k");
     expect(normalizeCanvasDraftSettings({ baseResolution: "3k" }).baseResolution).toBe("3k");
@@ -165,6 +249,14 @@ describe("canvasGeneration", () => {
   it("extracts de-duplicated prompt keywords for the evolution display", () => {
     const keywords = extractPromptKeywords("赛博朋克城市，霓虹反射，雨夜，赛博朋克城市，电影感光线，超写实细节");
     expect(keywords).toEqual(["赛博朋克城市", "霓虹反射", "雨夜", "电影感光线", "超写实细节"]);
+  });
+
+  it("derives a restrained atmosphere tone from prompt semantics", () => {
+    expect(resolveCanvasAtmosphereTone("森林里的植物与竹影")).toBe("forest");
+    expect(resolveCanvasAtmosphereTone("海洋、湖泊和水下光影")).toBe("ocean");
+    expect(resolveCanvasAtmosphereTone("咖啡与蛋糕的美食摄影")).toBe("warm");
+    expect(resolveCanvasAtmosphereTone("梦幻魔法，紫色仙境")).toBe("violet");
+    expect(resolveCanvasAtmosphereTone("极简几何构图")).toBe("neutral");
   });
 
   it("caps prompt keywords at the requested limit", () => {

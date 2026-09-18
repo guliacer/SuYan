@@ -54,6 +54,8 @@ const knownAiProviderBaseUrls: Readonly<Record<string, string>> = {
   "apihub.agnes-ai.com": "https://apihub.agnes-ai.com/v1",
 };
 
+export type AiBaseUrlProvider = "openai-compatible" | "ollama";
+
 export function normalizeAiBaseUrl(input: string): string {
   const value = input.trim();
 
@@ -100,6 +102,30 @@ export function normalizeAiBaseUrl(input: string): string {
   parsed.hash = "";
 
   return parsed.toString().replace(/\/$/, "");
+}
+
+/** Normalize an endpoint without applying OpenAI-compatible `/v1` rules to Ollama. */
+export function normalizeAiBaseUrlForProvider(input: string, provider: AiBaseUrlProvider = "openai-compatible"): string {
+  if (provider !== "ollama") {
+    return normalizeAiBaseUrl(input);
+  }
+
+  const value = input.trim();
+  if (!value) {
+    return "";
+  }
+
+  const parsed = parseHttpUrl(value);
+  if (!parsed) {
+    return value.replace(/\/+$/, "");
+  }
+
+  parsed.username = "";
+  parsed.password = "";
+  parsed.search = "";
+  parsed.hash = "";
+  parsed.pathname = parsed.pathname.replace(/\/(?:api\/(?:tags|show|chat)|v1)(?:\/.*)?$/i, "") || "/";
+  return parsed.toString().replace(/\/+$/, "");
 }
 
 function parseHttpUrl(input: string): URL | null {

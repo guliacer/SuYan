@@ -57,6 +57,7 @@ import { attributeWork, hasWorkAuthor } from "../../../src/features/library/util
 import { snapshotWorkAuthor } from "./workAttribution";
 import { embedWorkInPng, readWorkFromImage, readWorkFromImageFile } from "./workImageExchange";
 import { getSharp } from "../runtime/imageRuntime";
+import { compactAutomaticPromptTitle } from "../../../src/features/prompts/utils/promptTitle";
 
 export type ImportProgress = {
   current: number;
@@ -796,7 +797,7 @@ export async function importGeneratedImages(
 
   const createdAt = new Date().toISOString();
   const draft: PromptImportDraft = {
-    title: metadata.title || "AI 生成图片",
+    title: compactAutomaticPromptTitle(metadata.title, "AI 生成图片"),
     prompt: metadata.prompt,
     negativePrompt: metadata.negativePrompt,
     tags: inherited.tags ?? [],

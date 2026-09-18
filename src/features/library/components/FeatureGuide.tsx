@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, CircleHelp, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/Button";
 import { useLocale } from "@/components/LocaleProvider";
+import { clampOverlayPosition, getAppOverlayBounds } from "@/components/ui/overlayPosition";
 import { featureGuideDefinitions } from "./featureGuides";
 
 type FeatureGuideProps = {
@@ -195,17 +196,22 @@ export function FeatureGuide({ guideId, onComplete, onStepChange }: FeatureGuide
   }
 
   const isLastStep = stepIndex === definition.steps.length - 1;
+  const overlayBounds = getAppOverlayBounds(viewportPadding);
   const cardWidth = Math.min(popoverWidth, Math.max(280, window.innerWidth - viewportPadding * 2));
-  const maxLeft = Math.max(viewportPadding, window.innerWidth - cardWidth - viewportPadding);
   const left = targetRect
-    ? Math.min(maxLeft, Math.max(viewportPadding, targetRect.left))
-    : Math.max(viewportPadding, (window.innerWidth - cardWidth) / 2);
-  const hasRoomBelow = targetRect ? targetRect.bottom + 12 + popoverHeight <= window.innerHeight - viewportPadding : false;
+    ? clampOverlayPosition(targetRect.left, cardWidth, overlayBounds.left, overlayBounds.right)
+    : Math.max(overlayBounds.left, (overlayBounds.left + overlayBounds.right - cardWidth) / 2);
+  const hasRoomBelow = targetRect ? targetRect.bottom + 12 + popoverHeight <= overlayBounds.bottom : false;
   const top = targetRect
     ? hasRoomBelow
       ? targetRect.bottom + 12
-      : Math.max(viewportPadding, targetRect.top - popoverHeight - 12)
-    : Math.max(viewportPadding, (window.innerHeight - popoverHeight) / 2);
+      : clampOverlayPosition(targetRect.top - popoverHeight - 12, popoverHeight, overlayBounds.top, overlayBounds.bottom)
+    : clampOverlayPosition(
+        (overlayBounds.top + overlayBounds.bottom - popoverHeight) / 2,
+        popoverHeight,
+        overlayBounds.top,
+        overlayBounds.bottom,
+      );
 
   const finish = () => {
     if (isSaving) {
@@ -228,7 +234,7 @@ export function FeatureGuide({ guideId, onComplete, onStepChange }: FeatureGuide
   return createPortal(
     <div
       aria-live="polite"
-      className="pointer-events-none fixed inset-0 z-[10010]"
+      className="app-window-overlay pointer-events-none z-[10010]"
       data-feature-guide-overlay="true"
     >
       {targetRect && targetRect.selector === step.target ? (
@@ -245,9 +251,15 @@ export function FeatureGuide({ guideId, onComplete, onStepChange }: FeatureGuide
       ) : null}
       <section
         aria-label={`${localizedTitle}${t("功能引导")}`}
-        className="pointer-events-auto fixed flex max-h-[calc(100vh-2rem)] flex-col gap-3 overflow-y-auto rounded-2xl border border-primary/30 bg-panel/95 p-4 text-foreground shadow-elevated backdrop-blur-xl"
+        className="pointer-events-auto fixed flex flex-col gap-3 overflow-y-auto rounded-2xl border border-primary/30 bg-panel/95 p-4 text-foreground shadow-elevated backdrop-blur-xl"
         role="dialog"
-        style={{ left, maxWidth: `calc(100vw - ${viewportPadding * 2}px)`, top, width: cardWidth }}
+        style={{
+          left,
+          maxHeight: Math.max(180, overlayBounds.bottom - top),
+          maxWidth: overlayBounds.right - overlayBounds.left,
+          top,
+          width: cardWidth,
+        }}
       >
         <header className="flex items-start gap-3">
           <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary">

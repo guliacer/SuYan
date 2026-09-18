@@ -61,16 +61,22 @@ export function AppDialog({
 
 type DialogCloseButtonProps = {
   ariaLabel?: string;
+  variant?: "default" | "chrome";
   onClick: () => void;
 };
 
-export function DialogCloseButton({ ariaLabel = "关闭", onClick }: DialogCloseButtonProps) {
+export function DialogCloseButton({ ariaLabel = "关闭", variant = "default", onClick }: DialogCloseButtonProps) {
   const { t } = useLocale();
   const resolvedAriaLabel = ariaLabel === "关闭" ? t("关闭") : ariaLabel;
+  const chrome = variant === "chrome";
   return (
     <button
       aria-label={resolvedAriaLabel}
-      className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-panel/80 text-muted outline-none transition-colors hover:bg-primary-soft hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/35"
+      className={`flex size-9 shrink-0 items-center justify-center rounded-xl border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/35 ${
+        chrome
+          ? "border-chrome-border bg-chrome-control/70 text-chrome-muted hover:bg-chrome-control hover:text-chrome-foreground"
+          : "border-border bg-panel/80 text-muted hover:bg-primary-soft hover:text-foreground"
+      }`}
       title={resolvedAriaLabel}
       type="button"
       onClick={onClick}

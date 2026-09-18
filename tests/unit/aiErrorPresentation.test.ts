@@ -43,4 +43,21 @@ describe("aiErrorPresentation", () => {
     expect(result.summary).not.toContain("secret-123");
     expect(result.summary).toContain("<redacted>");
   });
+
+  it("explains Ollama availability and model capability errors", () => {
+    const unavailable = buildAiErrorPresentation("AI_OLLAMA_UNAVAILABLE", "无法连接 Ollama", "image-tags");
+    expect(unavailable.title).toContain("Ollama");
+    expect(unavailable.actions.join(" ")).toContain("ollama serve");
+    expect(unavailable.shouldStopBackground).toBe(true);
+
+    const mismatch = buildAiErrorPresentation("AI_MODEL_CAPABILITY_MISMATCH", "模型能力不匹配", "image-reverse");
+    expect(mismatch.summary).toContain("视觉模型");
+    expect(mismatch.retryable).toBe(false);
+  });
+
+  it("explains that Ollama cannot be used for image generation", () => {
+    const presentation = buildAiErrorPresentation("AI_PROVIDER_UNSUPPORTED", "不支持", "image-generation");
+    expect(presentation.summary).toContain("不能直接生成图片或视频");
+    expect(presentation.actions.join(" ")).toContain("生图 API");
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Blocks, Check, Eye, EyeOff, Gauge, ImageIcon, LayoutDashboard, Moon, Palette, PanelLeft, Settings2, Sun, Wifi } from "lucide-react";
+import { Blocks, Check, Eye, EyeOff, ImageIcon, LayoutDashboard, Moon, Palette, PanelLeft, Settings2, Sparkles, Sun, Wifi } from "lucide-react";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { useLocale } from "@/components/LocaleProvider";
 import { ThemeRoleColors } from "./ThemeRoleColors";
@@ -21,9 +21,15 @@ import {
 } from "../utils/sidebarEntries";
 import { getDefaultThemeAccentForPreset, getThemeAccentColor, getThemeModeLabel, isThemeCustomAccentSlot, themeAccentOptions, themeCustomAccentOptions, themePresetOptions } from "../utils/themeMode";
 import { ModuleManagementDialog } from "./ModuleManagementDialog";
-import { PerformanceSettingsDialog } from "./PerformanceSettingsDialog";
 import { ProxySettingsDialog } from "./ProxySettingsDialog";
 import { StartupGallerySettingsDialog } from "./StartupGallerySettingsDialog";
+import {
+  visualLifeEffectIds,
+  type VisualLifeEffectId,
+  type VisualLifeIntensity,
+  type VisualLifeMode,
+  type VisualLifeSettings,
+} from "../utils/visualLife";
 
 type SystemPreferencesDialogProps = {
   isBusy: boolean;
@@ -41,6 +47,7 @@ type SystemPreferencesDialogProps = {
   themeAccentOpacity: number;
   themeCustomAccents: [string, string, string];
   customTheme: ThemeCustomTheme;
+  visualLife: VisualLifeSettings;
   sidebarEntryVisibility: SidebarEntryVisibility;
   workspaceWidthPercent: number;
   onSectionChange: (section: SystemPreferenceSection) => void;
@@ -57,6 +64,7 @@ type SystemPreferencesDialogProps = {
   onThemeWorkspaceOpacityChange: (themeOpacity: number) => Promise<void>;
   onThemeAccentOpacityChange: (themeAccentOpacity: number) => Promise<void>;
   onCustomThemeChange: (patch: Partial<ThemeCustomTheme>) => Promise<void>;
+  onVisualLifeSettingsChange: (patch: Partial<VisualLifeSettings>) => Promise<boolean>;
   onSidebarEntryVisibilityChange: (entryId: SidebarEntryId, visible: boolean) => Promise<boolean>;
   onTestProxy: (settings: ProxySettings) => Promise<boolean>;
   onWorkspaceWidthChange: (widthPercent: number) => void;
@@ -65,9 +73,9 @@ type SystemPreferencesDialogProps = {
 
 const sectionIcons: Record<SystemPreferenceSection, ReactNode> = {
   proxy: <Wifi size={16} />,
-  performance: <Gauge size={16} />,
   appearance: <Palette size={16} />,
   canvasBackground: <ImageIcon size={16} />,
+  visualLife: <Sparkles size={16} />,
   layout: <LayoutDashboard size={16} />,
   sidebar: <PanelLeft size={16} />,
   modules: <Blocks size={16} />,
@@ -75,7 +83,7 @@ const sectionIcons: Record<SystemPreferenceSection, ReactNode> = {
 };
 
 /**
- * 系统偏好统一壳：网络 / 启动加速 / 主题 / 布局 / 边栏 / 模块 / 启动图库。
+ * 系统偏好统一壳：网络 / 主题 / 视觉生命 / 布局 / 边栏 / 模块 / 启动图库。
  * 模型配置与内容分级因体量与作业属性保持独立弹窗。
  */
 export function SystemPreferencesDialog({
@@ -94,6 +102,7 @@ export function SystemPreferencesDialog({
   themeAccentOpacity,
   themeCustomAccents,
   customTheme,
+  visualLife,
   sidebarEntryVisibility,
   workspaceWidthPercent,
   onSectionChange,
@@ -110,6 +119,7 @@ export function SystemPreferencesDialog({
   onThemeWorkspaceOpacityChange,
   onThemeAccentOpacityChange,
   onCustomThemeChange,
+  onVisualLifeSettingsChange,
   onSidebarEntryVisibilityChange,
   onTestProxy,
   onWorkspaceWidthChange,
@@ -120,31 +130,31 @@ export function SystemPreferencesDialog({
 
   return (
     <AppDialog
-      panelClassName="flex max-h-full w-full max-w-5xl flex-col"
+      panelClassName="flex h-[min(820px,calc(100dvh-2rem))] min-h-0 w-full max-w-[min(1180px,calc(100vw-2rem))] flex-col"
       titleId="system-preferences-title"
       onClose={onClose}
     >
-      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+      <header className="app-chrome-surface flex min-h-14 items-center justify-between gap-3 border-b border-chrome-border/70 px-4 py-3 min-[640px]:px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary-soft text-foreground">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-chrome-border/70 bg-chrome-control/55 text-chrome-foreground">
             <Settings2 size={18} />
           </span>
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold" id="system-preferences-title">
+            <h2 className="text-lg font-semibold text-chrome-foreground" id="system-preferences-title">
               {t("系统设置")}
             </h2>
-            <p className="mt-1 text-sm text-muted">
+            <p className="mt-0.5 text-sm text-chrome-muted">
               {t(activeMeta.label)} · {t(activeMeta.description)}
             </p>
           </div>
         </div>
-        <DialogCloseButton onClick={onClose} />
+        <DialogCloseButton variant="chrome" onClick={onClose} />
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[12.5rem_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 bg-background/20 md:grid-cols-[220px_minmax(0,1fr)]">
         <nav
           aria-label={t("系统设置")}
-          className="flex gap-1 overflow-x-auto border-b border-border px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-3 md:py-4"
+          className="app-chrome-surface flex gap-1 overflow-x-auto border-b border-chrome-border/70 px-3 py-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-r md:px-3 md:py-4"
         >
           {systemPreferenceSections.map((entry) => {
             const meta = systemPreferenceSectionMeta[entry];
@@ -153,22 +163,22 @@ export function SystemPreferencesDialog({
             return (
               <button
                 aria-current={selected ? "page" : undefined}
-                className={`flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
+                className={`flex min-h-11 shrink-0 items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/25 ${
                   selected
-                    ? "bg-primary-soft font-semibold text-foreground"
-                    : "text-muted hover:bg-panel hover:text-foreground"
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-transparent text-chrome-muted hover:border-chrome-border hover:bg-chrome-control/55 hover:text-chrome-foreground"
                 }`}
                 data-feature-guide={`system-preferences-section-${entry}`}
                 key={entry}
                 type="button"
                 onClick={() => onSectionChange(entry)}
               >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-background">
+                <span className={`flex size-7 shrink-0 items-center justify-center rounded-xl border ${selected ? "border-primary-foreground/25 bg-primary-foreground/15" : "border-chrome-border/70 bg-chrome-control/55"}`}>
                   {sectionIcons[entry]}
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate">{t(meta.label)}</span>
-                  <span className="mt-0.5 hidden text-[11px] font-normal leading-4 text-muted md:block">
+                  <span className={`mt-0.5 hidden text-[11px] font-normal leading-4 md:block ${selected ? "text-primary-foreground/75" : "text-chrome-muted"}`}>
                     {t(meta.description)}
                   </span>
                 </span>
@@ -177,7 +187,7 @@ export function SystemPreferencesDialog({
           })}
         </nav>
 
-        <div data-feature-guide="system-preferences-content" className="flex min-h-0 min-w-0 flex-col overflow-hidden px-4 py-4 md:px-5">
+        <div data-feature-guide="system-preferences-content" className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/20 px-3 py-3 md:px-4 md:py-4">
           {section === "proxy" ? (
             <ProxySettingsDialog
               embedded
@@ -188,9 +198,6 @@ export function SystemPreferencesDialog({
               onTest={onTestProxy}
               onNotify={onNotify}
             />
-          ) : null}
-          {section === "performance" ? (
-            <PerformanceSettingsDialog embedded isBusy={isBusy} onNotify={onNotify} />
           ) : null}
           {section === "appearance" ? (
             <ThemeSettings
@@ -219,6 +226,9 @@ export function SystemPreferencesDialog({
               onNotify={onNotify}
               onLanguageChange={onLanguageChange}
             />
+          ) : null}
+          {section === "visualLife" ? (
+            <VisualLifeSettingsPanel settings={visualLife} onChange={onVisualLifeSettingsChange} />
           ) : null}
           {section === "layout" ? (
             <WorkspaceLayoutSettings
@@ -420,57 +430,62 @@ function ThemeSettings({
           </p>
         </div>
 
-        <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
-          <div>
-            <h4 className="text-sm font-semibold text-foreground">{t("界面语言")}</h4>
-            <p className="mt-1 text-xs leading-5 text-muted">{t("默认中文，可在这里切换为英文。")}</p>
+        <div className="grid gap-3 min-[720px]:grid-cols-2">
+          <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">{t("界面语言")}</h4>
+              <p className="mt-1 text-xs leading-5 text-muted">{t("默认中文，可在这里切换为英文。")}</p>
+            </div>
+            <div aria-label={t("界面语言")} className="grid grid-cols-2 gap-2" role="group">
+              {([
+                ["zh-CN", "中文"],
+                ["en-US", "英文"],
+              ] as const).map(([value, label]) => {
+                const selected = value === language;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`flex min-h-10 items-center justify-center rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${selected ? "border-primary bg-primary-soft font-semibold text-foreground" : "border-border bg-background text-muted hover:bg-panel hover:text-foreground"}`}
+                    disabled={isBusy || savingLanguage !== null}
+                    key={value}
+                    type="button"
+                    onClick={() => void handleLanguageChange(value)}
+                  >
+                    {t(label)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div aria-label={t("界面语言")} className="grid grid-cols-2 gap-2 min-[520px]:max-w-md" role="group">
-            {([
-              ["zh-CN", "中文"],
-              ["en-US", "英文"],
-            ] as const).map(([value, label]) => {
-              const selected = value === language;
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={`flex min-h-10 items-center justify-center rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${selected ? "border-primary bg-primary-soft font-semibold text-foreground" : "border-border bg-background text-muted hover:bg-panel hover:text-foreground"}`}
-                  disabled={isBusy || savingLanguage !== null}
-                  key={value}
-                  type="button"
-                  onClick={() => void handleLanguageChange(value)}
-                >
-                  {t(label)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
 
-          <div className="grid gap-2">
-          <span className="text-sm font-medium text-foreground">{t("显示模式")}</span>
-          <div aria-label={t("显示模式")} className="grid grid-cols-2 gap-2 min-[520px]:max-w-md" role="group">
-            {([
-              { value: "light" as const, icon: <Sun size={15} /> },
-              { value: "dark" as const, icon: <Moon size={15} /> },
-            ] satisfies Array<{ value: ThemeMode; icon: ReactNode }>).map((option) => {
-              const selected = option.value === themeMode;
-              const changing = savingThemeMode === option.value;
+          <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">{t("显示模式")}</h4>
+              <p className="mt-1 text-xs leading-5 text-muted">{t("选择浅色或深色界面。")}</p>
+            </div>
+            <div aria-label={t("显示模式")} className="grid grid-cols-2 gap-2" role="group">
+              {([
+                { value: "light" as const, icon: <Sun size={15} /> },
+                { value: "dark" as const, icon: <Moon size={15} /> },
+              ] satisfies Array<{ value: ThemeMode; icon: ReactNode }>).map((option) => {
+                const selected = option.value === themeMode;
+                const changing = savingThemeMode === option.value;
 
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={`flex min-h-10 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${selected ? "border-primary bg-primary-soft font-semibold text-foreground" : "border-border bg-background text-muted hover:bg-panel hover:text-foreground"}`}
-                  disabled={controlsDisabled}
-                  key={option.value}
-                  type="button"
-                  onClick={() => void handleThemeModeChange(option.value)}
-                >
-                  {changing ? <span aria-label={t("保存中")} className="size-3 animate-pulse rounded-full bg-current" /> : option.icon}
-                  <span>{t(getThemeModeLabel(option.value))}</span>
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={`flex min-h-10 items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${selected ? "border-primary bg-primary-soft font-semibold text-foreground" : "border-border bg-background text-muted hover:bg-panel hover:text-foreground"}`}
+                    disabled={controlsDisabled}
+                    key={option.value}
+                    type="button"
+                    onClick={() => void handleThemeModeChange(option.value)}
+                  >
+                    {changing ? <span aria-label={t("保存中")} className="size-3 animate-pulse rounded-full bg-current" /> : option.icon}
+                    <span>{t(getThemeModeLabel(option.value))}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -850,7 +865,7 @@ function WorkspaceLayoutSettings({
       <div className="grid gap-5">
         <div>
           <h3 className="text-base font-semibold text-foreground">{t("界面布局")}</h3>
-          <p className="mt-1 text-sm leading-6 text-muted">{t("调整主工作区在背景层中的占比。")}</p>
+          <p className="mt-1 text-sm leading-6 text-muted">{t("调整首页、创作画布和其他页面的工作区宽度。")}</p>
         </div>
 
         <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-3 min-[640px]:p-4">
@@ -903,6 +918,160 @@ function WorkspaceLayoutSettings({
             <span>{t("更宽背景")}</span>
             <span>{t("最大工作区")}</span>
           </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function VisualLifeSettingsPanel({
+  settings,
+  onChange,
+}: {
+  settings: VisualLifeSettings;
+  onChange: (patch: Partial<VisualLifeSettings>) => Promise<boolean>;
+}) {
+  const { t } = useLocale();
+  const effectLabels: Record<VisualLifeEffectId, string> = {
+    stardust: "星尘",
+    meteor: "流星",
+    rainbow: "自然彩虹",
+    fallingPetal: "飘落花瓣",
+    geese: "大雁飞过",
+    musicNote: "音符",
+    cosmicDust: "宇宙尘埃",
+    heart: "扩散爱心",
+  };
+  const modeOptions: Array<{ value: VisualLifeMode; label: string; description: string }> = [
+    { value: "smart", label: "智能匹配", description: "按已有分类和标签选择更合适的氛围。" },
+    { value: "custom", label: "自定义效果", description: "只从下方勾选的效果中选择。" },
+    { value: "random", label: "完全随机", description: "每张卡片稳定随机一种效果。" },
+    { value: "static", label: "静态彩虹", description: "保留静态外扩光带，不播放粒子动画。" },
+  ];
+  const intensityOptions: Array<{ value: VisualLifeIntensity; label: string }> = [
+    { value: "low", label: "低" },
+    { value: "standard", label: "标准" },
+    { value: "dreamy", label: "梦幻" },
+    { value: "immersive", label: "沉浸" },
+  ];
+
+  async function update(patch: Partial<VisualLifeSettings>) {
+    await onChange(patch);
+  }
+
+  function toggleEffect(effect: VisualLifeEffectId) {
+    const next = settings.effectPool.includes(effect)
+      ? settings.effectPool.filter((entry) => entry !== effect)
+      : [...settings.effectPool, effect];
+    if (next.length === 0) return;
+    void update({ effectPool: next, mode: "custom" });
+  }
+
+  return (
+    <div data-feature-guide="system-preferences-panel-visual-life" className="min-h-0 flex-1 overflow-y-auto">
+      <div className="grid gap-5">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">{t("视觉生命")}</h3>
+          <p className="mt-1 text-sm leading-6 text-muted">{t("鼠标经过素材卡片时，让图片用轻量光效回应；效果只在当前卡片附近运行。")}</p>
+        </div>
+
+        <div className="grid gap-3 min-[700px]:grid-cols-2">
+          <label data-feature-guide="visual-life-sheen-toggle" className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background/60 p-4">
+            <span>
+              <span className="block text-sm font-semibold text-foreground">{t("图像内扫光")}</span>
+              <span className="mt-1 block text-xs leading-5 text-muted">{t("只在图像内部显示扫光，不会遮挡图像内容。")}</span>
+            </span>
+            <input
+              aria-label={t("图像内扫光")}
+              checked={settings.sheenEnabled}
+              className="size-4 accent-primary"
+              type="checkbox"
+              onChange={(event) => void update({ sheenEnabled: event.target.checked })}
+            />
+          </label>
+          <label data-feature-guide="visual-life-outer-toggle" className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background/60 p-4">
+            <span>
+              <span className="block text-sm font-semibold text-foreground">{t("卡片外部光效")}</span>
+              <span className="mt-1 block text-xs leading-5 text-muted">{t("只在图像卡片外向四周扩散，不覆盖图像。")}</span>
+            </span>
+            <input
+              aria-label={t("卡片外部光效")}
+              checked={settings.outerEffectsEnabled}
+              className="size-4 accent-primary"
+              type="checkbox"
+              onChange={(event) => void update({ outerEffectsEnabled: event.target.checked })}
+            />
+          </label>
+        </div>
+
+        <section data-feature-guide="visual-life-mode" className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">{t("效果模式")}</h4>
+            <p className="mt-1 text-xs leading-5 text-muted">{t("默认使用自定义效果池，只启用星尘、宇宙尘埃和流星。")}</p>
+          </div>
+          <div className="grid gap-2 min-[700px]:grid-cols-2">
+            {modeOptions.map((option) => {
+              const selected = settings.mode === option.value;
+              return (
+                <button
+                  aria-pressed={selected}
+                  className={`grid gap-1 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${selected ? "border-primary bg-primary-soft" : "border-border bg-background hover:bg-panel"}`}
+                  key={option.value}
+                  type="button"
+                  onClick={() => void update({ mode: option.value })}
+                >
+                  <span className="flex items-center justify-between gap-2 text-sm font-medium text-foreground">
+                    {t(option.label)}
+                    {selected ? <Check size={14} className="text-primary" /> : null}
+                  </span>
+                  <span className="text-xs leading-5 text-muted">{t(option.description)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <section data-feature-guide="visual-life-intensity" className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">{t("效果强度")}</h4>
+            <p className="mt-1 text-xs leading-5 text-muted">{t("强度只改变粒子数量和透明度，不会改变卡片尺寸。")}</p>
+          </div>
+          <div className="grid grid-cols-4 gap-2" role="group" aria-label={t("效果强度")}>
+            {intensityOptions.map((option) => (
+              <button
+                aria-pressed={settings.intensity === option.value}
+                className={`min-h-9 rounded-md border px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 ${settings.intensity === option.value ? "border-primary bg-primary-soft text-foreground" : "border-border text-muted hover:bg-panel"}`}
+                key={option.value}
+                type="button"
+                onClick={() => void update({ intensity: option.value })}
+              >
+                {t(option.label)}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section data-feature-guide="visual-life-effect-pool" className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">{t("自定义效果池")}</h4>
+           <p className="mt-1 text-xs leading-5 text-muted">{t("点击勾选会立即切换到自定义模式；可同时保留多种效果，至少保留一种。")}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 min-[520px]:grid-cols-3">
+            {visualLifeEffectIds.map((effect) => (
+              <label className="flex min-h-10 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm" key={effect}>
+                <input checked={settings.effectPool.includes(effect)} className="size-4 accent-primary" type="checkbox" onChange={() => toggleEffect(effect)} />
+                <span>{t(effectLabels[effect])}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <label className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background/60 p-4">
+          <span>
+            <span className="block text-sm font-semibold text-foreground">{t("减少动态效果")}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted">{t("只保留静态彩虹，并优先遵循系统的减少动态效果偏好。")}</span>
+          </span>
+          <input aria-label={t("减少动态效果")} checked={settings.reduced} className="size-4 accent-primary" type="checkbox" onChange={(event) => void update({ reduced: event.target.checked })} />
         </label>
       </div>
     </div>

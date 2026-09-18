@@ -322,6 +322,26 @@ describe("category taxonomy", () => {
     expect(normalized.nodes.some((node) => node.id === created.categoryId && node.name === "新分类")).toBe(true);
   });
 
+  it("creates stable custom nodes for manually entered group labels", () => {
+    const taxonomy = buildSystemCategoryTaxonomy();
+    expect(resolveCategoryIdFromLegacyName(taxonomy, "饮品摄影")).toBeNull();
+
+    const first = upsertCustomCategoryNode(taxonomy, {
+      name: "饮品摄影",
+      group: "自定义分类",
+    });
+    const second = upsertCustomCategoryNode(first.taxonomy, {
+      name: "第二个手动分类",
+      group: "自定义分类",
+    });
+
+    expect(first.categoryId.startsWith("custom:")).toBe(true);
+    expect(second.categoryId.startsWith("custom:")).toBe(true);
+    expect(second.categoryId).not.toBe(first.categoryId);
+    expect(resolveCategoryIdFromLegacyName(second.taxonomy, "饮品摄影")).toBe(first.categoryId);
+    expect(resolveCategoryIdFromLegacyName(second.taxonomy, "第二个手动分类")).toBe(second.categoryId);
+  });
+
   it("deletes system categories without resurrecting them during taxonomy migration", () => {
     const taxonomy = buildSystemCategoryTaxonomy();
     const systemId = resolveCategoryIdFromLegacyName(taxonomy, "肖像摄影");

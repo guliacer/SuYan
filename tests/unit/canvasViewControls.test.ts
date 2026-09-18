@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const canvasSource = readFileSync("src/features/library/components/CanvasView.tsx", "utf8");
+const librarySource = readFileSync("src/features/library/components/LibraryView.tsx", "utf8");
+const canvasStylesSource = readFileSync("src/styles/tokens.css", "utf8");
 const storeSource = readFileSync("src/features/library/store/useLibraryStore.ts", "utf8");
 const canvasGenSource = readFileSync("src/features/library/utils/canvasGeneration.ts", "utf8");
 const canvasTypesSource = readFileSync("src/features/library/types/canvas.ts", "utf8");
@@ -22,10 +24,94 @@ describe("CanvasView controls", () => {
   it("remembers the resizable positive prompt height", () => {
     expect(canvasSource).toContain("positivePromptHeight");
     expect(canvasSource).toContain("height={canvasDraft.positivePromptHeight}");
-    expect(canvasSource).toContain("onPointerUp");
+    expect(canvasSource).toContain("new ResizeObserver(reportHeight)");
+    expect(canvasSource).toContain("observer.observe(textarea)");
+    expect(canvasSource).toContain("reportHeight();\n      observer.disconnect();");
+    expect(canvasSource).toContain("return () => {");
     expect(canvasSource).toContain("onHeightChange");
     expect(storeSource).toContain("...get().canvasDraft");
     expect(viewSettingsSource).toContain("normalizeCanvasDraftSettings(input.canvasDraft)");
+  });
+
+  it("renders a right-side generated-work panel with a persisted visibility toggle", () => {
+    expect(canvasSource).toContain("resultsPanelHidden");
+    expect(canvasSource).toContain("data-results-hidden={isResultsPanelHidden}");
+    expect(canvasSource).toContain('"--canvas-results-width"');
+    expect(canvasStylesSource).toContain("var(--canvas-results-width)");
+    expect(canvasStylesSource).toContain("--canvas-workspace-surface");
+    expect(canvasStylesSource).toContain(".canvas-workspace {\n  background: var(--canvas-surface);");
+    expect(canvasStylesSource).toContain("--canvas-stage-surface: var(--canvas-surface);");
+    expect(canvasStylesSource).toContain("border-radius: 50% !important;");
+    expect(canvasStylesSource).toContain("object-fit: cover;");
+    expect(canvasStylesSource).toContain("bottom: clamp(1.75rem, 4%, 3.5rem);");
+    expect(canvasStylesSource).toContain("filter: blur(var(--mist-blur, 54px)) saturate(0.82);");
+    expect(canvasStylesSource).toContain("will-change: transform, opacity;");
+    expect(canvasStylesSource).toContain('[data-background-mode="mist"]');
+    expect(canvasStylesSource).toContain("radial-gradient(ellipse 68% 82% at 16% 16%");
+    expect(canvasStylesSource).toContain(":is(#canvas-creation-panel, .canvas-results-panel)");
+    expect(canvasSource).not.toContain("lg:grid-cols-[380px_minmax(0,1fr)_220px]");
+    expect(canvasSource).toContain('id="canvas-results-panel"');
+    expect(canvasSource).toContain('data-feature-guide="canvas-results-panel"');
+    expect(canvasSource).toContain('t("生成作品")');
+    expect(canvasSource).toContain('t("点击查看大图")');
+    expect(canvasSource).toContain('t("显示作品展示区")');
+    expect(canvasSource).toContain('t("隐藏作品展示区")');
+    expect(canvasSource).toContain("canvas-results-panel__list");
+    expect(canvasSource).toContain("overflow-y-auto overscroll-contain");
+    expect(canvasSource).toContain("const orderedResults = orderCanvasResultsForDisplay(results);");
+    expect(canvasSource).toContain('t("已生成 {count} 张", { count: currentGenerationCount })');
+    expect(canvasSource).toContain("lastGenerationCount");
+    expect(canvasSource).toContain('role="separator"');
+    expect(canvasSource).toContain("aria-valuemin={minCanvasResultsPanelWidth}");
+    expect(canvasSource).toContain("aria-valuemax={maxCanvasResultsPanelWidth}");
+    expect(canvasSource).toContain("onPointerMove={(event) => updateWidthFromPointer(event.clientX)}");
+    expect(canvasSource).toContain("onWidthCommit(resizeWidthRef.current)");
+    expect(canvasSource).toContain("onOpenPreview={(index) => {");
+    expect(canvasSource).toContain("setPreviewIndex(index);");
+    expect(canvasSource).toContain("onFullscreenPreviewChange(true);");
+    expect(canvasGenSource).toContain("resultsPanelHidden: false");
+    expect(canvasGenSource).toContain("resultsPanelHidden: input.resultsPanelHidden === true");
+  });
+
+  it("lets the shared workspace-width setting control the full creative canvas", () => {
+    expect(librarySource).toContain('"--library-workspace-width"');
+    expect(librarySource).toContain('className="library-workspace-surface relative mx-auto min-h-0 min-w-0');
+    expect(canvasSource).toContain('className="mx-auto w-full max-w-none px-3');
+    expect(canvasSource).not.toContain("max-w-[min(100%,1400px)]");
+    expect(canvasStylesSource).toContain('.library-background-layer[data-current-view="canvas"] > .library-workspace-surface');
+    expect(canvasStylesSource).toContain('width: min(100%, var(--library-workspace-width, 88%));');
+  });
+
+  it("renders a persisted, keyboard-accessible creation-panel width handle", () => {
+    expect(canvasSource).toContain('"--canvas-creation-width"');
+    expect(canvasSource).toContain('aria-label={t("调整创作区宽度")}');
+    expect(canvasSource).toContain("aria-valuemin={minCanvasCreationPanelWidth}");
+    expect(canvasSource).toContain("aria-valuemax={maxCanvasCreationPanelWidth}");
+    expect(canvasSource).toContain("handleCreationResizeKeyDown");
+    expect(canvasSource).toContain("onDraftChange({ creationPanelWidth: nextWidth })");
+    expect(canvasStylesSource).toContain("var(--canvas-creation-width)");
+    expect(canvasStylesSource).toContain(".canvas-creation-resize-handle");
+    expect(canvasGenSource).toContain("creationPanelWidth: defaultCanvasCreationPanelWidth");
+    expect(canvasGenSource).toContain("creationPanelWidth: normalizeCanvasCreationPanelWidth(input.creationPanelWidth)");
+    expect(canvasTypesSource).toContain("creationPanelWidth: number;");
+  });
+
+  it("delays generated-work prompts and renders them through a body portal", () => {
+    expect(canvasSource).toContain("const canvasPromptTooltipDelayMs = 5000;");
+    expect(canvasSource).toContain("window.setTimeout");
+    expect(canvasSource).toContain("createPortal(");
+    expect(canvasSource).toContain('role="tooltip"');
+    expect(canvasSource).toContain("onPointerLeave={hideTooltip}");
+    expect(canvasSource).not.toContain("title={prompt}");
+    expect(canvasSource).not.toContain('className="truncate px-2.5 py-2 text-[11px] text-muted"');
+  });
+
+  it("always renders the positive prompt and removes its hide control", () => {
+    expect(canvasSource).toContain('field="positive"');
+    expect(canvasSource).toContain('data-feature-guide={field === "positive" ? "canvas-prompt-editor" : undefined}');
+    expect(canvasSource).not.toContain("positivePromptHidden");
+    expect(canvasSource).not.toContain("隐藏正向提示词");
+    expect(canvasSource).not.toContain("显示正向提示词");
   });
 
   it("keeps optimize, paste, and reference image as primary prompt actions", () => {
@@ -44,9 +130,30 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain("window.suyanApi.writeClipboardText");
     expect(canvasSource).toContain("window.suyanApi.readClipboardText");
     expect(canvasSource).not.toContain("navigator.clipboard");
-    // 点击粘贴时先清空再写入，不在原文本上追加。
-    expect(canvasSource).toContain("updateFieldText(field, pastedText, \"action\")");
-    expect(canvasSource).not.toContain("currentText.slice(0, selectionStart)");
+    // 工具栏粘贴替换整段；输入框快捷键只替换当前选区。
+    expect(canvasSource).toContain('splitNegativePromptFromPrompt(pastedText, "")');
+    expect(canvasSource).toContain("updateFieldText(field, nextText, \"action\")");
+    expect(canvasSource).toContain("updateFieldText(\"negative\", nextNegativeText, \"action\")");
+    expect(canvasSource).toContain("onDraftChange({ negativePromptHidden: true })");
+    expect(canvasSource).toContain("没有新的负向约束时也要清空旧内容");
+    expect(canvasSource).toContain('aria-label={label === t("返回") ? t("撤销最近一次更改") : label}');
+    expect(canvasSource).toContain("replaceCanvasPromptSelection(currentText, pastedText, selectionStart, selectionEnd)");
+    expect(canvasSource).toContain("onPaste={onKeyboardPaste}");
+    expect(canvasSource).toContain("onClick={() => void pasteAllFieldText(\"positive\")}");
+  });
+
+  it("limits both prompt fields and routes keyboard paste through selection-aware replacement", () => {
+    expect(canvasSource).toContain("maxLength={maxCanvasPromptLength}");
+    expect(canvasSource).toContain("limitCanvasPromptText(nextText)");
+    expect(canvasSource).toContain('t("提示词最多支持 3000 字，超出部分未粘贴。")');
+    expect(canvasSource).toContain("onPaste={onKeyboardPaste}");
+    expect(canvasSource).toContain("const selectionStart = textarea.selectionStart ?? 0;");
+    expect(canvasSource).toContain("const selectionEnd = textarea.selectionEnd ?? selectionStart;");
+    expect(canvasSource).toContain("replaceCanvasPromptSelection(currentText, pastedText, selectionStart, selectionEnd)");
+    expect(canvasSource).toContain('t("提示词字数：{count}/{max}", { count: value.length, max: maxCanvasPromptLength })');
+    expect(canvasGenSource).toContain("export const maxCanvasPromptLength = 3000;");
+    expect(canvasGenSource).toContain("limitCanvasPromptText((runtime.prompt ?? settings.prompt).trim())");
+    expect(canvasGenSource).toContain("limitCanvasPromptText((runtime.negativePrompt ?? settings.negativePrompt).trim())");
   });
 
   it("supports negative prompt visibility and transparent image generation", () => {
@@ -57,6 +164,15 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain("buildCanvasImageGenerationPayload(canvasDraft");
     expect(canvasSource).toContain('disabled: canvasDraft.transparentBackground && option.value === "jpeg"');
     expect(canvasSource).toContain('value={canvasDraft.outputFormat}');
+  });
+
+  it("hydrates prompt undo history after a detail-to-canvas transfer", () => {
+    expect(canvasSource).toContain("canvasPromptUndoSnapshot");
+    expect(canvasSource).toContain("setCanvasPromptUndoSnapshot(null)");
+    expect(canvasSource).toContain("positive: [canvasPromptUndoSnapshot.prompt]");
+    expect(canvasSource).toContain("negative: [canvasPromptUndoSnapshot.negativePrompt]");
+    expect(canvasGenSource).toContain("negativePromptHidden: true,");
+    expect(canvasGenSource).toContain("negativePromptHidden: input.negativePromptHidden !== false,");
   });
 
   it("exposes the reference-style size modes and ratios", () => {
@@ -100,7 +216,7 @@ describe("CanvasView controls", () => {
   });
 
   it("uses the generation prompt as the archived image title without an AI title request", () => {
-    expect(canvasSource).toContain("title: cleanPrompt");
+    expect(canvasSource).toContain("title: compactAutomaticPromptTitle(cleanPrompt)");
     expect(canvasSource).not.toContain("onSummarizeTitle");
     expect(canvasSource).not.toContain("buildFallbackTitle");
   });
@@ -123,6 +239,8 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain("self-start rounded-3xl border border-border bg-panel");
     expect(canvasSource).toContain("lockedHeight={isCreationPanelCollapsed ? null : creationPanelHeight}");
     expect(canvasSource).toContain("style={lockedHeight !== null ? { height: `${lockedHeight}px` } : undefined}");
+    expect(canvasSource).toContain("canvas-results-panel__list min-h-0 max-h-full flex-1");
+    expect(canvasSource).toContain("overflow-y-auto overscroll-contain");
   });
 
   it("keeps fullscreen details conditional and actions as circular icon buttons", () => {

@@ -41,6 +41,7 @@ type AiSettingsProfileFile = {
   id?: string;
   name?: string;
   enabled?: boolean;
+  provider?: "openai-compatible" | "ollama";
   baseUrl?: string;
   model?: string;
   models?: AiProviderModelSettings[];
@@ -265,6 +266,7 @@ function isSaveProfilePayload(input: unknown): input is SaveAiProviderProfilePay
     typeof input.id === "string" &&
     typeof input.name === "string" &&
     typeof input.enabled === "boolean" &&
+    (typeof input.provider === "undefined" || input.provider === "openai-compatible" || input.provider === "ollama") &&
     typeof input.baseUrl === "string" &&
     typeof input.model === "string" &&
     (typeof input.models === "undefined" || isModelList(input.models)) &&

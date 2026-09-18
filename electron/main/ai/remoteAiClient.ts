@@ -1,4 +1,5 @@
 import { tagRecognitionPolicy } from "../../../src/features/library/utils/tagKnowledge";
+import { compactAutomaticPromptTitle } from "../../../src/features/prompts/utils/promptTitle";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -249,8 +250,8 @@ export async function optimizePromptRemotely(
 
 const promptTitleSummarySystemContent = [
   "你是资深图库编辑，负责为 AI 绘画作品起标题。",
-  "根据用户给出的绘画提示词，用一个简短、贴切的中文标题概括画面主题。",
-  "要求：不超过 16 个汉字；突出画面主体与风格；只输出标题本身，不要引号、书名号、标点、序号或任何解释。",
+  "根据用户给出的绘画提示词，用一个简短、贴切的标题概括画面主题。",
+  "要求：中文或中日韩混合标题不超过 25 个字符，纯英文标题不超过 40 个字符；突出画面主体与风格；只输出标题本身，不要引号、书名号、标点、序号或任何解释。",
 ].join("\n");
 
 export async function summarizeTitleRemotely(
@@ -305,12 +306,11 @@ export function parseRemotePromptTitleContent(content: string): string {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find((line) => line.length > 0) ?? "";
-  const title = firstLine
+  const title = compactAutomaticPromptTitle(firstLine
     .replace(/^[「『"'“”《【\[]+/u, "")
     .replace(/[」』"'“”》】\]]+$/u, "")
     .replace(/^(标题|title)\s*[:：]\s*/iu, "")
-    .trim()
-    .slice(0, 40);
+    .trim(), "");
 
   if (!title) {
     throw new AppError("AI_REMOTE_RESPONSE_INVALID", "远程 AI 没有返回可用标题。");
@@ -1678,7 +1678,7 @@ function buildCompactCategoryCatalog(payload: AiAnalyzePromptPayload): string {
   return grouped.join("\n");
 }
 
-async function readPayloadImageDataUrl(
+export async function readPayloadImageDataUrl(
   imageFileName: string | undefined,
   options: { compact?: boolean; purpose?: VisionImagePurpose } = {},
 ): Promise<string | null> {

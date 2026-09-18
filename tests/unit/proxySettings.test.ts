@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   getProxySettingsValidationError,
@@ -8,6 +9,17 @@ import {
 } from "@/features/library/types/proxy";
 
 describe("proxy settings", () => {
+  it("keeps proxy content top-aligned and mode choices compact", () => {
+    const source = readFileSync("src/features/library/components/ProxySettingsDialog.tsx", "utf8");
+
+    expect(source).toContain("h-16 min-h-0 content-center gap-1.5 rounded-lg border px-2.5 py-2");
+    expect(source).toContain('className="text-[11px] leading-4 text-muted min-[900px]:text-xs"');
+    expect(source).toContain('className="grid gap-3 min-[720px]:grid-cols-2"');
+    expect(source).toContain('className={`grid min-h-0 flex-1 content-start gap-4');
+    expect(source).not.toContain('className={`grid min-h-0 flex-1 content-center gap-4');
+    expect(source).not.toContain("min-h-28 content-start gap-2 rounded-md border px-3 py-3");
+  });
+
   it("uses system proxy by default", () => {
     expect(normalizeProxySettings(null)).toEqual({
       mode: "system",

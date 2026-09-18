@@ -1,8 +1,8 @@
 import type { PromptClipboardCreateInput } from "../types";
+import { compactAutomaticPromptTitle } from "./promptTitle";
 
 export function derivePromptTitle(content: string): string {
-  const firstLine = content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "未命名提示词";
-  return firstLine.length > 50 ? `${firstLine.slice(0, 50)}…` : firstLine;
+  return compactAutomaticPromptTitle(content);
 }
 
 export function parseClipboardPromptText(text: string): PromptClipboardCreateInput[] {

@@ -3,11 +3,27 @@ import type { PromptType, PromptVariable } from "../../prompts/types";
 
 export type AiProviderModelCapability = "text" | "vision" | "image-generation" | "video-generation";
 
+/** AI 连接协议。未填写时按旧版 OpenAI 兼容 API 处理。 */
+export type AiProviderKind = "openai-compatible" | "ollama";
+
 export type AiProviderModelSettings = {
   id: string;
   label: string;
   capabilities: AiProviderModelCapability[];
 };
+
+/** Ollama is an analysis provider: it exposes text and vision understanding only. */
+export function normalizeAiProviderModelCapabilities(
+  capabilities: readonly AiProviderModelCapability[],
+  provider: AiProviderKind = "openai-compatible",
+): AiProviderModelCapability[] {
+  const normalized = [...new Set(capabilities)];
+  const supported = provider === "ollama"
+    ? normalized.filter((capability) => capability === "text" || capability === "vision")
+    : normalized;
+
+  return supported.length > 0 ? supported : ["text"];
+}
 
 export type AiFeatureAction =
   | "prompt-category"
@@ -2025,6 +2041,7 @@ export type AiProviderSettings = {
   id: string;
   name: string;
   enabled: boolean;
+  provider?: AiProviderKind;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -2035,6 +2052,7 @@ export type PublicAiProviderProfile = {
   id: string;
   name: string;
   enabled: boolean;
+  provider?: AiProviderKind;
   baseUrl: string;
   hasApiKey: boolean;
   apiKeyPreview: string;
@@ -2060,6 +2078,7 @@ export type SaveAiProviderProfilePayload = {
   id: string;
   name: string;
   enabled: boolean;
+  provider?: AiProviderKind;
   baseUrl: string;
   model: string;
   models?: AiProviderModelSettings[];

@@ -103,7 +103,7 @@ function extractWordBlockContent(blockXml: string): WordDocumentBlockContent[] {
   const content: WordDocumentBlockContent[] = [];
   let textBuffer = "";
   const tokenPattern =
-    /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|\br:(?:embed|link)=["']([^"']+)["']|<w:tab\b[^>]*\/>|<w:br\b(?![^>]*\bw:type=(?:"page"|'page'))[^>]*\/>/g;
+    /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|\br:(?:embed|link)=["']([^"']+)["']|<w:tab\b[^>]*\/>|<w:cr\b[^>]*\/>|<w:br\b(?![^>]*\bw:type=(?:"page"|'page'))[^>]*\/>/g;
 
   const flushText = () => {
     const text = normalizeWordPromptText(textBuffer);
@@ -147,8 +147,8 @@ function pairWordDocumentFlow(blocks: readonly WordDocumentBlock[]): WordDocumen
     }
 
     // The document's first content direction determines whether a prompt follows
-    // its images or precedes them. Either way, only one adjacent text block can be
-    // selected; a second prompt can never be concatenated into this group.
+    // its images or precedes them. A prompt may occupy several Word paragraphs or
+    // pages, so the text run is merged until the next image boundary.
     const adjacentRun = imageFirst ? runs[runIndex + 1] : runs[runIndex - 1];
     const promptRun = adjacentRun?.kind === "text" ? adjacentRun : null;
     const prompt = promptRun?.text.text ?? "";
@@ -263,12 +263,30 @@ function createWordDocumentFlowRuns(tokens: readonly WordDocumentFlowToken[]): W
       continue;
     }
 
-    // Keep adjacent paragraph text as separate prompt candidates. Combining them
-    // would recreate the bug where two prompts on one page are stored together.
+    if (previous?.kind === "text") {
+      previous.text.text = joinWordPromptParagraphs(previous.text.text, token.text);
+      continue;
+    }
+
     runs.push({ kind: "text", text: token });
   }
 
   return runs;
+}
+
+function joinWordPromptParagraphs(previous: string, next: string): string {
+  const left = previous.trim();
+  const right = next.trim();
+
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return `${left}\n\n${right}`;
 }
 
 function normalizeWordRelationshipTarget(target: string): string {

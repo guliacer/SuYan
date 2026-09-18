@@ -98,7 +98,8 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(source).toContain("https://invite.linuxdo.org");
     expect(source).toContain("https://kitty.fo/register?invite=hJmKTTDD");
     expect(source).toContain("https://github.com/guliacer/SuYan");
-    expect(source).toContain("https://github.com/guliacer/TapRelay-remote-adapter-test");
+    expect(source).toContain("https://github.com/guliacer/TapRelay");
+    expect(source).not.toContain("https://github.com/guliacer/TapRelay-remote-adapter-test");
     // 生图网站数组已抽到共享文件 recommendationSites.ts，最后一条在此断言。
     expect(sharedSitesSource).toContain("https://wisart.kuaileshifu.com/");
   });
