@@ -144,14 +144,14 @@
 
 ### 使用发布包
 
-从 [GitHub Releases](https://github.com/guliacer/SuYan/releases) 下载当前可用版本的安装包或便携版。GitHub 当前正式版为 `v0.3.8`；本地工作区待推送版本固定为 `v0.4.0`，推送和 Release 完成后再更新正式下载说明。
+从 [GitHub Releases](https://github.com/guliacer/SuYan/releases/tag/v0.4.0) 下载当前正式版 `v0.4.0` 的安装包或便携版。
 
-`v0.3.8` 提供四种 Windows 包：便携版或安装版，以及不含可选组件或含完整本地组件的版本。请按使用方式和是否需要离线媒体处理 / 内容分级选择，下载后使用随附的 `SHA256SUMS.txt` 校验文件完整性。
+`v0.4.0` 提供四种 Windows 包：便携版或安装版，以及无依赖或含完整本地组件的版本。请按使用方式和是否需要离线媒体处理 / 内容分级选择，下载后使用随附的 `SHA256SUMS.txt` 校验文件完整性。
 
 如果 GitHub 下载较慢，也可以使用网盘镜像：
 
-- [夸克网盘](https://pan.quark.cn/s/5d22e38ac71a)
-- [百度网盘](https://pan.baidu.com/s/1clGqo2sebMwzt3WhwESWQA)，提取码：`bf8y`
+- [夸克网盘](https://pan.quark.cn/s/5d22e38ac71a)：已同步 `v0.4.0` 四种 Windows 包
+- [百度网盘](https://pan.baidu.com/s/1clGqo2sebMwzt3WhwESWQA)：已同步 `v0.4.0` 四种 Windows 包，提取码：`bf8y`
 
 网盘中的文件请按文件名选择对应的安装版或便携版，并在下载后使用随附的 `SHA256SUMS.txt` 校验文件完整性。
 
@@ -201,9 +201,9 @@ pnpm package:win:release
 
 ## 更新日志
 
-### v0.4.0（待推送）
+### v0.4.0（当前正式版）
 
-本版本固定为 `0.4.0`，在推送成功前不会自动递增版本号。
+本版本已正式发布，当前版本号为 `0.4.0`。GitHub Release 与两个网盘镜像均提供本版本的四种 Windows 包。
 
 **新增功能**
 
@@ -220,7 +220,7 @@ pnpm package:win:release
 - 优化创作画布背景、AI 创作核心和显影过程动效，统一画布与作品区的柔雾主题。
 - 优化系统设置布局，压缩无效留白并让主题、语言、代理等设置保持一致的空间结构。
 
-### v0.3.8（当前正式版）
+### v0.3.8（历史正式版）
 
 相较 `v0.2.10`，本版本补齐了账户、灵感管理、网页辅助和本地内容分级等使用场景，并集中优化创作、整理与备份流程。
 

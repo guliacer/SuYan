@@ -143,14 +143,14 @@ When the generation task finishes, SuYan sends a completion notification through
 
 ### Use a release build
 
-Download the available installer or portable build from [GitHub Releases](https://github.com/guliacer/SuYan/releases). GitHub's current release is `v0.3.8`; the local workspace version prepared for push is fixed at `v0.4.0` and the public download text will be updated after the push and Release are complete.
+Download the installer or portable build for the current release, `v0.4.0`, from [GitHub Releases](https://github.com/guliacer/SuYan/releases/tag/v0.4.0).
 
-`v0.3.8` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
+`v0.4.0` provides four Windows packages: portable or installer, with either the standard runtime or the complete local optional components. Choose the edition that matches your workflow and offline media / content-rating needs, then verify the download with the included `SHA256SUMS.txt`.
 
 If GitHub downloads are slow, mirror downloads are also available:
 
-- [Quark Drive](https://pan.quark.cn/s/5d22e38ac71a)
-- [Baidu Netdisk](https://pan.baidu.com/s/1clGqo2sebMwzt3WhwESWQA), extraction code: `bf8y`
+- [Quark Drive](https://pan.quark.cn/s/5d22e38ac71a): mirrors all four `v0.4.0` Windows packages
+- [Baidu Netdisk](https://pan.baidu.com/s/1clGqo2sebMwzt3WhwESWQA): mirrors all four `v0.4.0` Windows packages, extraction code: `bf8y`
 
 Choose the installer or portable file matching the required edition, then use the included `SHA256SUMS.txt` to verify the download.
 
@@ -200,9 +200,9 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ## Changelog
 
-### v0.4.0 (prepared for push)
+### v0.4.0 (current release)
 
-This workspace is fixed at `0.4.0`; the version will not be incremented automatically before the push succeeds.
+This release is published as `v0.4.0`. GitHub Releases and both mirror drives provide the same four Windows packages.
 
 **New features**
 
@@ -219,7 +219,7 @@ This workspace is fixed at `0.4.0`; the version will not be incremented automati
 - Refined the creative-canvas background, creation core, and reveal animation so the canvas and gallery share the same misty theme.
 - Refined System Settings layout by reducing unused space and aligning theme, language, proxy, and other controls.
 
-### v0.3.8 (current release)
+### v0.3.8 (previous release)
 
 Compared with `v0.2.10`, this release adds accounts, idea management, web assistance, and local content rating while improving the creation, organization, and backup workflows.
 
