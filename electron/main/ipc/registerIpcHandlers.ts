@@ -239,6 +239,7 @@ import {
   pickUpscaleInputsService,
   pickUpscaleOutputDirectoryService,
   readUpscaleInputService,
+  readUpscaleModelService,
   readUpscaleResultService,
   registerUpscalePathsService,
   removeUpscaleComponentService,
@@ -904,6 +905,9 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.upscaleReadInput, (_event, token: unknown) =>
     handleResult("upscale:read-input", () => readUpscaleInputService(token)),
+  );
+  ipcMain.handle(ipcChannels.upscaleReadModel, (_event, modelId: unknown) =>
+    handleResult("upscale:read-model", () => readUpscaleModelService(modelId)),
   );
   ipcMain.handle(ipcChannels.upscaleRunNative, (event, request: unknown) =>
     handleResult("upscale:run-native", () => runRealEsrganService(request, (progress) => {

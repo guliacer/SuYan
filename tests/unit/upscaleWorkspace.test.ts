@@ -15,6 +15,7 @@ const channels = [
   ["UpscalePickInputs", "upscale:pick-inputs"],
   ["UpscaleRegisterPaths", "upscale:register-paths"],
   ["UpscaleReadInput", "upscale:read-input"],
+  ["UpscaleReadModel", "upscale:read-model"],
   ["UpscaleRunNative", "upscale:run-native"],
   ["UpscaleCancelNative", "upscale:cancel-native"],
   ["UpscaleStoreResult", "upscale:store-result"],
@@ -42,6 +43,7 @@ describe("image upscale desktop contract", () => {
       "pickUpscaleInputs",
       "registerUpscaleFiles",
       "readUpscaleInput",
+      "readUpscaleModel",
       "runRealEsrgan",
       "cancelRealEsrgan",
       "storeUpscaleResult",
@@ -77,10 +79,18 @@ describe("image upscale desktop contract", () => {
     const api = readSource("src/types/suyanApi.ts");
     expect(api).toContain("registerUpscaleFiles: (files: File[]");
     expect(api).toContain("readUpscaleInput: (token: string) => Promise<IpcResult<Uint8Array>>");
+    expect(api).toContain("readUpscaleModel: (modelId: UpscaleModelId) => Promise<IpcResult<Uint8Array>>");
     expect(api).toContain("readUpscaleResult: (token: string) => Promise<IpcResult<Uint8Array>>");
     expect(api).toContain("UpscaleOutputDirectoryDescriptor");
     expect(api).toContain("UpscaleExportResult");
     expect(api).not.toContain("registerUpscalePaths: (paths: string[]");
+  });
+
+  it("creates a WASM inference session when the worker is forced to WASM", () => {
+    const worker = readSource("src/features/upscale/worker/realCugan.worker.ts");
+    expect(worker).toMatch(
+      /if \(message\.forceWasm\) \{\s+await createSession\(modelBytes, "wasm"\);\s+selected = "wasm";/,
+    );
   });
 
   it("cleans orphan cache on startup and invalidates sessions on exit", () => {

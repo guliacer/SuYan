@@ -20,6 +20,7 @@ import {
   getUpscaleComponentStatus,
   installRealCuganModel,
   installRealEsrgan,
+  readRealCuganModel,
   removeUpscaleComponent,
 } from "./upscaleInstaller";
 import {
@@ -108,6 +109,13 @@ export function registerUpscalePathsService(value: unknown) {
 
 export function readUpscaleInputService(token: unknown) {
   return withUpscaleErrors(async () => new Uint8Array(await readUpscaleInput(normalizeToken(token))));
+}
+
+export function readUpscaleModelService(modelId: unknown) {
+  return withUpscaleErrors(async () => {
+    const normalizedModel = normalizeModel(modelId, "real-cugan");
+    return new Uint8Array(await readRealCuganModel(normalizedModel));
+  });
 }
 
 export function runRealEsrganService(

@@ -233,6 +233,7 @@ const suyanApi: SuyanApi = {
     files.map((file) => ({ filePath: webUtils.getPathForFile(file), sourceItemId })),
   ),
   readUpscaleInput: (token) => invoke(IpcChannelName.UpscaleReadInput, token),
+  readUpscaleModel: (modelId) => invoke(IpcChannelName.UpscaleReadModel, modelId),
   runRealEsrgan: (request) => invoke(IpcChannelName.UpscaleRunNative, request),
   cancelRealEsrgan: (jobId) => invoke(IpcChannelName.UpscaleCancelNative, jobId),
   storeUpscaleResult: (jobId, bytes, extension) =>

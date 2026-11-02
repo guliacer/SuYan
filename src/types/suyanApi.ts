@@ -666,6 +666,7 @@ export type SuyanApi = {
   pickUpscaleInputs: (kind: "files" | "directory") => Promise<IpcResult<UpscaleInputDescriptor[]>>;
   registerUpscaleFiles: (files: File[], sourceItemId?: string | null) => Promise<IpcResult<UpscaleInputDescriptor[]>>;
   readUpscaleInput: (token: string) => Promise<IpcResult<Uint8Array>>;
+  readUpscaleModel: (modelId: UpscaleModelId) => Promise<IpcResult<Uint8Array>>;
   runRealEsrgan: (request: RealEsrganRunRequest) => Promise<IpcResult<UpscaleResultDescriptor>>;
   cancelRealEsrgan: (jobId: string) => Promise<IpcResult<{ canceled: boolean }>>;
   storeUpscaleResult: (
