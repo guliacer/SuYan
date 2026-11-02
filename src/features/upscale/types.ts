@@ -56,6 +56,11 @@ export type UpscaleResultDescriptor = {
   mediaType: "image/png" | "image/jpeg" | "image/webp";
 };
 
+export type UpscaleOutputDirectoryDescriptor = {
+  token: string;
+  displayName: string;
+};
+
 export type UpscaleExportOptions = {
   saveToDirectory: boolean;
   addToLibrary: boolean;
@@ -132,7 +137,7 @@ export type UpscaleExportRequest = {
 };
 
 export type UpscaleExportResult = {
-  savedFilePath: string | null;
+  savedFileName: string | null;
   importedItemIds: string[];
   skipped: boolean;
 };

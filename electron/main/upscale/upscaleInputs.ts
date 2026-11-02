@@ -91,6 +91,14 @@ export async function readUpscaleInput(token: string): Promise<Buffer> {
   return readRegisteredFile(inputRecords, token, "UPSCALE_INPUT_MISSING");
 }
 
+export function getUpscaleInputDescriptor(token: string): UpscaleInputDescriptor {
+  const record = inputRecords.get(token);
+  if (!record) {
+    throw new Error("UPSCALE_INPUT_MISSING: 令牌无效或已过期");
+  }
+  return { ...record.descriptor };
+}
+
 export function resolveUpscaleInputPath(token: string): string {
   return resolveRegisteredPath(inputRecords, token, "UPSCALE_INPUT_MISSING");
 }
