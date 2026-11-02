@@ -172,9 +172,10 @@ type UpscaleInputDescriptor = {
 #### 真实照片
 
 - 默认引擎：Real-ESRGAN
-- 默认模型：`realesr-general-x4v3`
-- 可选模型：以官方 NCNN 组件实际附带模型为准，至少暴露通用模型和动漫模型
-- 倍率、tile 和 GPU 参数只提供组件真实支持的取值
+- 默认模型：`realesrgan-x4plus`
+- 可选模型：`realesrgan-x4plus`、`realesrgan-x4plus-anime`、`realesr-animevideov3`
+- `realesr-animevideov3` 支持 2x / 3x / 4x；两个 x4plus 模型固定 4x
+- tile 和 GPU 参数只提供官方 NCNN 组件真实支持的取值
 
 #### 手动选择
 
