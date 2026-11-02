@@ -54,6 +54,18 @@ describe("module registry", () => {
     expect(hasBuiltinModuleCapability("nsfw-local-classification", installed)).toBe(true);
   });
 
+  it("keeps the image upscale workspace available before either runtime is installed", () => {
+    const state = resolveBuiltinModuleState();
+
+    expect(isBuiltinModuleInstalled("real-cugan-runtime", state)).toBe(false);
+    expect(isBuiltinModuleInstalled("real-esrgan-runtime", state)).toBe(false);
+    expect(isBuiltinModuleEnabled("real-cugan-runtime", state)).toBe(false);
+    expect(isBuiltinModuleEnabled("real-esrgan-runtime", state)).toBe(false);
+    expect(hasBuiltinModuleCapability("image-upscale", state)).toBe(true);
+    expect(hasBuiltinModuleCapability("real-cugan-upscale-runtime", state)).toBe(false);
+    expect(hasBuiltinModuleCapability("real-esrgan-upscale-runtime", state)).toBe(false);
+  });
+
   it("enables ffmpeg-dependent capabilities after the runtime is installed and enabled", () => {
     const state = resolveBuiltinModuleState({
       "video-runtime": { installed: true, enabled: true },

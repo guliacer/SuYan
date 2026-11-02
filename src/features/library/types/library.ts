@@ -161,6 +161,7 @@ export type SidebarEntryId =
   | "importMaterial"
   | "libraryRoots"
   | "promptLibrary"
+  | "imageUpscale"
   | "textPrompts"
   | "todo"
   | "canvas"

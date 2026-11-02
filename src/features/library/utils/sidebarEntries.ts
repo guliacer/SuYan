@@ -7,6 +7,7 @@ export const sidebarEntryIds = [
   "importMaterial",
   "libraryRoots",
   "promptLibrary",
+  "imageUpscale",
   "textPrompts",
   "todo",
   "canvas",
@@ -30,6 +31,7 @@ export const defaultSidebarEntryVisibility: SidebarEntryVisibility = {
   importMaterial: true,
   libraryRoots: true,
   promptLibrary: true,
+  imageUpscale: true,
   textPrompts: true,
   todo: true,
   canvas: true,
@@ -54,7 +56,7 @@ export const sidebarEntryGroups: readonly SidebarEntryGroup[] = [
   {
     id: "materials",
     label: "素材",
-    entries: ["home", "categoryLexicon", "tagLexicon", "importMaterial", "libraryRoots", "promptLibrary"],
+    entries: ["home", "categoryLexicon", "tagLexicon", "importMaterial", "libraryRoots", "promptLibrary", "imageUpscale"],
   },
   {
     id: "inspiration",
@@ -82,6 +84,7 @@ export const sidebarEntryMeta: Record<SidebarEntryId, { label: string; descripti
   importMaterial: { label: "导入素材", description: "导入图片、目录、文档或分享包" },
   libraryRoots: { label: "素材目录", description: "管理外部素材目录" },
   promptLibrary: { label: "批量管理", description: "批量整理、导出和处理素材" },
+  imageUpscale: { label: "图片超分", description: "使用本地双引擎放大并修复图片" },
   textPrompts: { label: "灵感创作", description: "管理独立的提示词卡片" },
   todo: { label: "待办事项", description: "管理项目与任务进度" },
   canvas: { label: "创作画布", description: "编辑提示词并生成图像" },

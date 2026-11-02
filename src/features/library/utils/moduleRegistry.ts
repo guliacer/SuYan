@@ -5,9 +5,12 @@ export const builtinModuleIds = [
   "image-runtime",
   "video-runtime",
   "nsfw-runtime",
+  "real-cugan-runtime",
+  "real-esrgan-runtime",
   "image-compression",
   "video-compression",
   "deduplicate-scan",
+  "image-upscale",
 ] as const;
 
 export type BuiltinModuleId = (typeof builtinModuleIds)[number];
@@ -24,9 +27,12 @@ export const builtinModuleCapabilities = [
   "image-runtime",
   "video-runtime",
   "nsfw-local-classification",
+  "real-cugan-upscale-runtime",
+  "real-esrgan-upscale-runtime",
   "image-compression",
   "video-compression",
   "deduplicate-scan",
+  "image-upscale",
 ] as const;
 
 export type BuiltinModuleCapability = (typeof builtinModuleCapabilities)[number];
@@ -121,6 +127,28 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
     capabilities: ["nsfw-local-classification"],
   },
   {
+    id: "real-cugan-runtime",
+    label: "Real-CUGAN 运行依赖",
+    description: "动漫与插画超分模型，首次使用时按需下载并校验。",
+    category: "runtime",
+    required: false,
+    defaultInstalled: false,
+    defaultEnabled: false,
+    dependencies: ["core-library"],
+    capabilities: ["real-cugan-upscale-runtime"],
+  },
+  {
+    id: "real-esrgan-runtime",
+    label: "Real-ESRGAN 运行依赖",
+    description: "真实照片与通用图片超分组件，首次使用时按需下载并校验。",
+    category: "runtime",
+    required: false,
+    defaultInstalled: false,
+    defaultEnabled: false,
+    dependencies: ["core-library"],
+    capabilities: ["real-esrgan-upscale-runtime"],
+  },
+  {
     id: "image-compression",
     label: "图像压缩",
     description: "批量压缩本地图片素材，支持保留格式或转为 WebP。",
@@ -152,6 +180,17 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
     defaultEnabled: true,
     dependencies: ["core-library"],
     capabilities: ["deduplicate-scan"],
+  },
+  {
+    id: "image-upscale",
+    label: "图片超分",
+    description: "使用 Real-CUGAN 与 Real-ESRGAN 放大并修复本地图片。",
+    category: "batch",
+    required: false,
+    defaultInstalled: true,
+    defaultEnabled: true,
+    dependencies: ["core-library"],
+    capabilities: ["image-upscale"],
   },
 ];
 

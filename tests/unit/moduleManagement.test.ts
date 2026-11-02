@@ -44,6 +44,17 @@ describe("moduleManagement", () => {
     expect(compression?.blockedByDependencies).toBe(false);
   });
 
+  it("lists both upscale runtimes as installable dependencies", () => {
+    const rows = buildModuleManagementRows(resolveBuiltinModuleState());
+    const byId = Object.fromEntries(rows.map((row) => [row.definition.id, row]));
+
+    expect(byId["real-cugan-runtime"]?.installed).toBe(false);
+    expect(byId["real-cugan-runtime"]?.canRestore).toBe(false);
+    expect(byId["real-esrgan-runtime"]?.installed).toBe(false);
+    expect(byId["real-esrgan-runtime"]?.canRestore).toBe(false);
+    expect(byId["image-upscale"]?.effectivelyEnabled).toBe(true);
+  });
+
   it("groups rows by category order", () => {
     const groups = groupModuleManagementRows(buildModuleManagementRows(resolveBuiltinModuleState()));
 

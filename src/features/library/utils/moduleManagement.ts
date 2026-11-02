@@ -74,7 +74,9 @@ export function buildModuleManagementRows(state: BuiltinModuleState): ModuleMana
         canDelete &&
         !installed &&
         definition.id !== "video-runtime" &&
-        definition.id !== "nsfw-runtime",
+        definition.id !== "nsfw-runtime" &&
+        definition.id !== "real-cugan-runtime" &&
+        definition.id !== "real-esrgan-runtime",
       canToggleEnabled: canDisable && installed,
       blockedByDependencies: installed && rawEnabled && !effectivelyEnabled,
       dependencyLabels,
