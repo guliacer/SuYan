@@ -21,6 +21,7 @@
     "src/features/library/utils/generationModels.ts",
     "src/features/library/utils/moduleRegistry.ts",
     "src/features/library/utils/nsfwGradingSpeed.ts",
-    "src/features/library/utils/photographyCategories.ts"
+    "src/features/library/utils/photographyCategories.ts",
+    "src/features/upscale/types.ts"
   ]
 }
