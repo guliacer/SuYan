@@ -58,6 +58,10 @@ import {
   findCachedAccountAvatarPath,
   getAccountAvatarContentType,
 } from "./account/accountAvatarCache";
+import { cleanupUpscaleCache } from "./upscale/upscaleCache";
+import { clearUpscaleSession } from "./upscale/upscaleInputs";
+import { clearUpscaleOutputDirectories } from "./upscale/upscaleExport";
+import { cancelAllRealEsrganJobs } from "./upscale/realEsrganRunner";
 
 app.setName("素言");
 if (process.platform === "win32") {
@@ -847,6 +851,9 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers();
   logStartupEvent("ipc:registered");
+  void cleanupUpscaleCache()
+    .then(({ removed }) => logger.info("upscale", "cache:cleaned", { removed }))
+    .catch((error) => logger.warn("upscale", "cache:cleanup-failed", { message: String(error) }));
 
   // 恢复账号登录态（方案 §十一）：失败只回到未登录，不阻塞主流程。
   try {
@@ -909,6 +916,9 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   void shutdownExternalLibraryWatchers();
   stopImportReceiver();
+  void cancelAllRealEsrganJobs();
+  clearUpscaleSession();
+  clearUpscaleOutputDirectories();
   void rustCoreRuntime.stop();
 });
 

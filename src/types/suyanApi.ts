@@ -85,6 +85,19 @@ import type {
   EmailLoginInput,
   EmailRegisterInput,
 } from "../features/account/types/account";
+import type {
+  RealEsrganRunRequest,
+  UpscaleComponentStatus,
+  UpscaleEngine,
+  UpscaleExportRequest,
+  UpscaleExportResult,
+  UpscaleInputDescriptor,
+  UpscaleModelId,
+  UpscaleOutputDirectoryDescriptor,
+  UpscaleOutputFormat,
+  UpscaleProgressEvent,
+  UpscaleResultDescriptor,
+} from "../features/upscale/types";
 
 export type IpcResult<T> =
   | { ok: true; data: T }
@@ -644,6 +657,26 @@ export type SuyanApi = {
   saveProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxySettings>>;
   testProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxyTestData>>;
   detectProxySettings: () => Promise<IpcResult<ProxyDetectionData>>;
+  getUpscaleComponentStatus: (engine: UpscaleEngine) => Promise<IpcResult<UpscaleComponentStatus>>;
+  installUpscaleComponent: (
+    engine: UpscaleEngine,
+    modelId?: UpscaleModelId,
+  ) => Promise<IpcResult<UpscaleComponentStatus>>;
+  removeUpscaleComponent: (engine: UpscaleEngine) => Promise<IpcResult<{ removed: boolean }>>;
+  pickUpscaleInputs: (kind: "files" | "directory") => Promise<IpcResult<UpscaleInputDescriptor[]>>;
+  registerUpscaleFiles: (files: File[], sourceItemId?: string | null) => Promise<IpcResult<UpscaleInputDescriptor[]>>;
+  readUpscaleInput: (token: string) => Promise<IpcResult<Uint8Array>>;
+  runRealEsrgan: (request: RealEsrganRunRequest) => Promise<IpcResult<UpscaleResultDescriptor>>;
+  cancelRealEsrgan: (jobId: string) => Promise<IpcResult<{ canceled: boolean }>>;
+  storeUpscaleResult: (
+    jobId: string,
+    bytes: Uint8Array,
+    extension: UpscaleOutputFormat,
+  ) => Promise<IpcResult<UpscaleResultDescriptor>>;
+  readUpscaleResult: (token: string) => Promise<IpcResult<Uint8Array>>;
+  pickUpscaleOutputDirectory: () => Promise<IpcResult<UpscaleOutputDirectoryDescriptor | null>>;
+  exportUpscaleResult: (request: UpscaleExportRequest) => Promise<IpcResult<UpscaleExportResult>>;
+  onUpscaleProgress: (callback: (progress: UpscaleProgressEvent) => void) => () => void;
   deduplicateScan: () => Promise<IpcResult<DeduplicateResult>>;
   compressImages: (options: ImageCompressOptions) => Promise<IpcResult<CompressResult>>;
   onCompressImagesProgress: (callback: (progress: CompressProgress) => void) => () => void;

@@ -232,6 +232,20 @@ import {
   removeFfmpegComponent,
 } from "../modules/ffmpegComponentInstall";
 import {
+  cancelRealEsrganService,
+  exportUpscaleResultService,
+  getUpscaleStatusService,
+  installUpscaleComponentService,
+  pickUpscaleInputsService,
+  pickUpscaleOutputDirectoryService,
+  readUpscaleInputService,
+  readUpscaleResultService,
+  registerUpscalePathsService,
+  removeUpscaleComponentService,
+  runRealEsrganService,
+  storeUpscaleResultService,
+} from "../upscale/upscaleService";
+import {
   getAccountStatus,
   getCurrentUser,
   cancelOAuthLogin,
@@ -869,6 +883,49 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.proxySettingsDetect, () =>
     handleResult("proxy:settings-detect", () => detectProxySettings()),
+  );
+
+  ipcMain.handle(ipcChannels.upscaleStatus, (_event, engine: unknown) =>
+    handleResult("upscale:status", () => getUpscaleStatusService(engine)),
+  );
+  ipcMain.handle(ipcChannels.upscaleInstall, (event, engine: unknown, modelId: unknown) =>
+    handleResult("upscale:install", () => installUpscaleComponentService(engine, modelId, (progress) => {
+      event.sender.send(IpcChannelName.UpscaleProgress, progress);
+    })),
+  );
+  ipcMain.handle(ipcChannels.upscaleRemove, (_event, engine: unknown) =>
+    handleResult("upscale:remove", () => removeUpscaleComponentService(engine)),
+  );
+  ipcMain.handle(ipcChannels.upscalePickInputs, (_event, kind: unknown) =>
+    handleResult("upscale:pick-inputs", () => pickUpscaleInputsService(kind)),
+  );
+  ipcMain.handle(ipcChannels.upscaleRegisterPaths, (_event, entries: unknown) =>
+    handleResult("upscale:register-paths", () => registerUpscalePathsService(entries)),
+  );
+  ipcMain.handle(ipcChannels.upscaleReadInput, (_event, token: unknown) =>
+    handleResult("upscale:read-input", () => readUpscaleInputService(token)),
+  );
+  ipcMain.handle(ipcChannels.upscaleRunNative, (event, request: unknown) =>
+    handleResult("upscale:run-native", () => runRealEsrganService(request, (progress) => {
+      event.sender.send(IpcChannelName.UpscaleProgress, progress);
+    })),
+  );
+  ipcMain.handle(ipcChannels.upscaleCancelNative, (_event, jobId: unknown) =>
+    handleResult("upscale:cancel-native", () => cancelRealEsrganService(jobId)),
+  );
+  ipcMain.handle(
+    ipcChannels.upscaleStoreResult,
+    (_event, jobId: unknown, bytes: unknown, extension: unknown) =>
+      handleResult("upscale:store-result", () => storeUpscaleResultService(jobId, bytes, extension)),
+  );
+  ipcMain.handle(ipcChannels.upscaleReadResult, (_event, token: unknown) =>
+    handleResult("upscale:read-result", () => readUpscaleResultService(token)),
+  );
+  ipcMain.handle(ipcChannels.upscalePickOutputDirectory, () =>
+    handleResult("upscale:pick-output-directory", () => pickUpscaleOutputDirectoryService()),
+  );
+  ipcMain.handle(ipcChannels.upscaleExport, (_event, request: unknown) =>
+    handleResult("upscale:export", () => exportUpscaleResultService(request)),
   );
 
   ipcMain.handle(ipcChannels.batchDeduplicateScan, () =>

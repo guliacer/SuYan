@@ -1,5 +1,5 @@
 import type { TagOrganizationRequest } from "../../src/features/library/types/tagKnowledge";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AiAnalyzePromptPayload,
   AiImageGenerationPayload,
@@ -37,6 +37,7 @@ import type {
 } from "../../src/types/suyanApi";
 import { IpcChannelName } from "../shared/ipcChannels";
 import type { AccountPublicStatus } from "../../src/features/account/types/account";
+import type { UpscaleProgressEvent } from "../../src/features/upscale/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>;
@@ -223,6 +224,27 @@ const suyanApi: SuyanApi = {
   saveProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsSave, settings),
   testProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsTest, settings),
   detectProxySettings: () => invoke(IpcChannelName.ProxySettingsDetect),
+  getUpscaleComponentStatus: (engine) => invoke(IpcChannelName.UpscaleStatus, engine),
+  installUpscaleComponent: (engine, modelId) => invoke(IpcChannelName.UpscaleInstall, engine, modelId),
+  removeUpscaleComponent: (engine) => invoke(IpcChannelName.UpscaleRemove, engine),
+  pickUpscaleInputs: (kind) => invoke(IpcChannelName.UpscalePickInputs, kind),
+  registerUpscaleFiles: (files, sourceItemId = null) => invoke(
+    IpcChannelName.UpscaleRegisterPaths,
+    files.map((file) => ({ filePath: webUtils.getPathForFile(file), sourceItemId })),
+  ),
+  readUpscaleInput: (token) => invoke(IpcChannelName.UpscaleReadInput, token),
+  runRealEsrgan: (request) => invoke(IpcChannelName.UpscaleRunNative, request),
+  cancelRealEsrgan: (jobId) => invoke(IpcChannelName.UpscaleCancelNative, jobId),
+  storeUpscaleResult: (jobId, bytes, extension) =>
+    invoke(IpcChannelName.UpscaleStoreResult, jobId, bytes, extension),
+  readUpscaleResult: (token) => invoke(IpcChannelName.UpscaleReadResult, token),
+  pickUpscaleOutputDirectory: () => invoke(IpcChannelName.UpscalePickOutputDirectory),
+  exportUpscaleResult: (request) => invoke(IpcChannelName.UpscaleExport, request),
+  onUpscaleProgress: (callback) => {
+    const handler = (_event: unknown, progress: unknown) => callback(progress as UpscaleProgressEvent);
+    ipcRenderer.on(IpcChannelName.UpscaleProgress, handler);
+    return () => ipcRenderer.removeListener(IpcChannelName.UpscaleProgress, handler);
+  },
   deduplicateScan: () => invoke(IpcChannelName.BatchDeduplicateScan),
   compressImages: (options) => invoke(IpcChannelName.BatchCompressImages, options),
   onCompressImagesProgress: (callback) => {
