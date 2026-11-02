@@ -1,6 +1,6 @@
 {
   "name": "suyan",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": false,
   "author": {
     "name": "guliacer",
@@ -37,6 +37,7 @@
     "chokidar": "4.0.3",
     "jszip": "3.10.1",
     "lucide-react": "1.23.0",
+    "onnxruntime-web": "1.20.0",
     "openid-client": "5.7.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
