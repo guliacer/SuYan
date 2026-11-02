@@ -58,6 +58,7 @@ export function UpscaleQueue({
         const files = Array.from(event.dataTransfer.files);
         if (files.length === 0) return;
         event.preventDefault();
+        event.stopPropagation();
         onDropFiles(files);
       }}
     >

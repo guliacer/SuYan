@@ -69,7 +69,7 @@ export function UpscaleWorkspace() {
     setNotice(null);
     const result = await window.suyanApi.pickUpscaleInputs(kind);
     if (!result.ok) {
-      setNotice(result.error.message);
+      setNotice(t(result.error.message));
       return;
     }
     store.enqueue(result.data);
@@ -79,7 +79,7 @@ export function UpscaleWorkspace() {
   async function addDroppedFiles(files: File[]) {
     const result = await window.suyanApi.registerUpscaleFiles(files);
     if (!result.ok) {
-      setNotice(result.error.message);
+      setNotice(t(result.error.message));
       return;
     }
     store.enqueue(result.data);
@@ -89,7 +89,7 @@ export function UpscaleWorkspace() {
   async function chooseDirectory() {
     const result = await window.suyanApi.pickUpscaleOutputDirectory();
     if (!result.ok) {
-      setNotice(result.error.message);
+      setNotice(t(result.error.message));
       return;
     }
     if (!result.data) return;
@@ -104,7 +104,7 @@ export function UpscaleWorkspace() {
     try {
       const result = await window.suyanApi.installUpscaleComponent(store.engine, store.modelId);
       if (!result.ok) {
-        setNotice(result.error.message);
+        setNotice(t(result.error.message));
         return;
       }
       setStatuses((current) => ({ ...current, [store.engine]: result.data }));

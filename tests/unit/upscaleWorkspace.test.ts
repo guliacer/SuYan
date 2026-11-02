@@ -34,6 +34,46 @@ describe("image upscale desktop contract", () => {
     }
   });
 
+  it("lazy-loads the upscale workspace and exposes a dedicated sidebar route", () => {
+    const source = readSource("src/features/library/components/LibraryView.tsx");
+    expect(source).toContain('import("@/features/upscale")');
+    expect(source).toContain("const UpscaleWorkspace = lazy");
+    expect(source).toContain('openMainView("imageUpscale")');
+    expect(source).toContain('mainView === "imageUpscale"');
+    expect(source).toContain('isEntryVisible("imageUpscale")');
+  });
+
+  it("localizes workspace navigation, controls, statuses, and errors", () => {
+    const locale = readSource("src/components/LocaleProvider.tsx");
+    const status = readSource("src/components/uiStatusTranslations.ts");
+    const translations = [
+      ['"图片超分"', '"Image Upscale"'],
+      ['"任务队列"', '"Task Queue"'],
+      ['"前后对比"', '"Before / After"'],
+      ['"处理与导出"', '"Process & Export"'],
+      ['"开始处理"', '"Start Processing"'],
+      ['"导出结果"', '"Export Results"'],
+      ['"首次使用需下载组件"', '"Download required on first use"'],
+    ];
+    for (const [key, value] of translations) {
+      expect(locale).toContain(`${key}: ${value}`);
+    }
+    expect(status).toContain('"UPSCALE_MODEL_DOWNLOAD_FAILED"');
+    expect(status).toContain('"UPSCALE_WASM_FAILED"');
+    expect(status).toContain('"UPSCALE_EXPORT_FAILED"');
+  });
+
+  it("preserves development components and ships third-party notices", () => {
+    const packager = readSource("package-win.cjs");
+    const notices = readSource("THIRD_PARTY_NOTICES.md");
+    expect(packager).toContain('"upscale-cugan"');
+    expect(packager).toContain('"upscale-realesrgan"');
+    expect(notices).toContain("Real-CUGAN");
+    expect(notices).toContain("Real-ESRGAN");
+    expect(notices).toContain("ONNX Runtime");
+    expect(notices).toContain("ncnn");
+  });
+
   it("exposes named preload methods and converts dropped Files inside preload", () => {
     const source = readSource("electron/preload/index.ts");
     const methods = [

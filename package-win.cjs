@@ -43,7 +43,12 @@ const guliIdentityExpectedRedirectUri = "suyan://oauth/callback";
 // refresh_token 的前提，因此两者都纳入安装包配置的强制校验。
 const guliIdentityExpectedScopes = "openid email profile offline_access";
 const sensitiveConfigKeyPattern = /(?:^|_)(?:CLIENT_SECRET|SECRET|PASSWORD|TOKEN|API_KEY|PRIVATE_KEY|AUTHORIZATION|CREDENTIALS?)(?:_|$)/iu;
-const localBundledComponentIds = ["ffmpeg", "nsfw-runtime"];
+const localBundledComponentIds = [
+  "ffmpeg",
+  "nsfw-runtime",
+  "upscale-cugan",
+  "upscale-realesrgan",
+];
 const localBundledComponentSource = (componentId) => path.join(
   projectRoot,
   "release",

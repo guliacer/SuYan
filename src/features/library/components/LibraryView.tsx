@@ -66,6 +66,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ScanLine,
   ScrollText,
   Search,
   Settings,
@@ -245,6 +246,9 @@ const TextPromptLibrary = lazy(() =>
 const TodoWorkspace = lazy(() =>
   import("@/features/prompts").then((module) => ({ default: module.TodoWorkspace })),
 );
+const UpscaleWorkspace = lazy(() =>
+  import("@/features/upscale").then((module) => ({ default: module.UpscaleWorkspace })),
+);
 
 const pageSize = 16;
 const gridVisibleTagCount = 5;
@@ -282,7 +286,7 @@ const STARTUP_PREWARM_VIEWS: LibraryMainView[] = ["categoryLexicon", "tagLexicon
 
 type CollectionMode = "all" | "featured";
 type GalleryMode = "masonry" | "grid";
-type LibraryMainView = "home" | "canvas" | "webAssistant" | "textPrompts" | "todo" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
+type LibraryMainView = "home" | "canvas" | "webAssistant" | "imageUpscale" | "textPrompts" | "todo" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
 type LibrarySidebarActiveView =
   | LibraryMainView
   | "aiSettings"
@@ -2235,7 +2239,7 @@ export function LibraryView() {
     "--library-sidebar-width": isSidebarOpen ? `${liveSidebarWidth}px` : "0px",
   } as CSSProperties & Record<"--library-sidebar-width", string>;
   const workspaceSurfaceStyle = {
-    "--library-workspace-width": `${workspaceWidthPercent}%`,
+    "--library-workspace-width": mainView === "imageUpscale" ? "100%" : `${workspaceWidthPercent}%`,
   } as CSSProperties & Record<"--library-workspace-width", string>;
 
   return (
@@ -2320,6 +2324,7 @@ export function LibraryView() {
             onOpenHome={openHomeView}
             onOpenLibraryRoots={() => setIsLibraryRootsOpen(true)}
             onOpenManager={() => openMainView("promptLibrary")}
+            onOpenUpscale={() => openMainView("imageUpscale")}
             onOpenTextPrompts={() => openMainView("textPrompts")}
             onOpenTodo={() => openMainView("todo")}
             onOpenPromptSites={() => openMainView("promptSites")}
@@ -2339,7 +2344,7 @@ export function LibraryView() {
             {mainView === "canvas" ? <CanvasPageAtmosphere /> : null}
             <div
               data-feature-guide-page={mainView}
-              className="library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm"
+              className={`library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm ${mainView === "imageUpscale" ? "h-full" : ""}`}
               style={workspaceSurfaceStyle}
             >
               <div
@@ -2469,10 +2474,16 @@ export function LibraryView() {
             </section>
               ) : null}
 
-              {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0 ? (
+              {mainView === "imageUpscale" ? (
+                <Suspense fallback={<DeferredViewFallback />}>
+                  <UpscaleWorkspace />
+                </Suspense>
+              ) : null}
+
+              {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant" && mainView !== "imageUpscale") || mountedLexiconViews.size > 0 ? (
             <section
               className={`py-4 min-[1024px]:py-5 ${pageGutterClassName} ${mainView === "todo" ? "h-full min-h-0" : ""} ${
-                mainView === "home" || mainView === "canvas" || mainView === "webAssistant" ? "hidden" : ""
+                mainView === "home" || mainView === "canvas" || mainView === "webAssistant" || mainView === "imageUpscale" ? "hidden" : ""
               }`}
             >
               <div className={`${lexiconShellClassName} grid gap-4 ${mainView === "todo" ? "h-full min-h-0" : ""}`}>
@@ -2907,6 +2918,7 @@ type LibrarySidebarProps = {
   onOpenHome: () => void;
   onOpenLibraryRoots: () => void;
   onOpenManager: () => void;
+  onOpenUpscale: () => void;
   onOpenTextPrompts: () => void;
   onOpenTodo: () => void;
   onOpenPromptSites: () => void;
@@ -2942,6 +2954,7 @@ function LibrarySidebar({
   onOpenHome,
   onOpenLibraryRoots,
   onOpenManager,
+  onOpenUpscale,
   onOpenTextPrompts,
   onOpenTodo,
   onOpenPromptSites,
@@ -3091,6 +3104,15 @@ function LibrarySidebar({
               isCompact={isCompact}
               label={t("批量管理")}
               onClick={onOpenManager}
+            />
+          ) : null}
+          {isEntryVisible("imageUpscale") ? (
+            <SidebarActionButton
+              active={activeView === "imageUpscale"}
+              icon={<ScanLine size={17} />}
+              isCompact={isCompact}
+              label={t("图片超分")}
+              onClick={onOpenUpscale}
             />
           ) : null}
         </div>

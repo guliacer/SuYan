@@ -1,8 +1,8 @@
 /// <reference lib="webworker" />
 
 import * as ort from "onnxruntime-web/webgpu";
-import wasmJsepMjsUrl from "onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs?url";
-import wasmJsepUrl from "onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm?url";
+import wasmJsepMjsUrl from "../../../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs?url";
+import wasmJsepUrl from "../../../../node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm?url";
 import {
   buildTileRegions,
   REAL_CUGAN_TILE_SIZE,
