@@ -1,4 +1,4 @@
-import { FolderOpen, GripVertical, ImagePlus, RotateCcw, Trash2, X } from "lucide-react";
+import { Download, FolderOpen, GripVertical, ImagePlus, ListOrdered, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { IconTooltipButton } from "@/components/ui/IconTooltipButton";
 import { useLocale } from "@/components/LocaleProvider";
@@ -14,6 +14,8 @@ type UpscaleQueueProps = {
   onSelect(jobId: string): void;
   onRemove(jobId: string): void;
   onRetry(jobId: string): void;
+  onReprocess(jobId: string): void;
+  onSaveAs(jobId: string): void;
   onReorder(jobId: string, beforeJobId: string): void;
   onClearCompleted(): void;
 };
@@ -42,6 +44,8 @@ export function UpscaleQueue({
   onSelect,
   onRemove,
   onRetry,
+  onReprocess,
+  onSaveAs,
   onReorder,
   onClearCompleted,
 }: UpscaleQueueProps) {
@@ -49,7 +53,7 @@ export function UpscaleQueue({
 
   return (
     <section
-      className="flex min-h-0 flex-col border-r border-border/70 bg-panel/55"
+      className="flex h-full min-h-0 flex-col"
       aria-label={t("任务队列")}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes("Files")) event.preventDefault();
@@ -62,10 +66,15 @@ export function UpscaleQueue({
         onDropFiles(files);
       }}
     >
-      <header className="flex min-h-14 items-center justify-between gap-2 border-b border-border/70 px-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold text-foreground">{t("任务队列")}</h2>
-          <p className="text-xs text-muted">{t("{count} 张图片", { count: jobs.length })}</p>
+      <header className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary-soft text-primary" aria-hidden="true">
+            <ListOrdered className="size-4" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold tracking-tight text-foreground">{t("任务队列")}</h2>
+            <p className="truncate text-xs text-muted">{t("{count} 张图片", { count: jobs.length })}</p>
+          </div>
         </div>
         <IconTooltipButton
           disabled={!jobs.some((job) => job.status === "completed" || job.status === "canceled")}
@@ -77,25 +86,40 @@ export function UpscaleQueue({
         />
       </header>
 
-      <div className="grid grid-cols-2 gap-2 border-b border-border/70 p-3">
-        <Button icon={<ImagePlus className="size-4" />} maxWidth={false} size="sm" onClick={onAddFiles}>
+      <div className="grid shrink-0 grid-cols-2 gap-2 px-4 py-3">
+        <Button className="justify-center" icon={<ImagePlus className="size-4" />} maxWidth={false} size="sm" onClick={onAddFiles}>
           {t("添加图片")}
         </Button>
-        <Button icon={<FolderOpen className="size-4" />} maxWidth={false} size="sm" onClick={onAddDirectory}>
+        <Button className="justify-center" icon={<FolderOpen className="size-4" />} maxWidth={false} size="sm" onClick={onAddDirectory}>
           {t("添加目录")}
         </Button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-2" data-upscale-queue>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3" data-upscale-queue>
         {jobs.length === 0 ? (
           <button
             type="button"
-            className="grid min-h-48 w-full place-items-center rounded-md border border-dashed border-border bg-background/45 px-5 text-center text-sm text-muted transition-colors hover:border-primary/55 hover:text-foreground"
+            className="flex min-h-full w-full flex-col items-center justify-center gap-4 rounded-2xl border border-dashed border-border bg-background/60 px-4 py-8 text-center transition-colors hover:border-primary/45 hover:bg-primary-soft/40"
             onClick={onAddFiles}
           >
-            <span className="grid justify-items-center gap-3">
-              <ImagePlus className="size-8 text-primary/75" aria-hidden="true" />
-              <span>{t("添加或拖入图片")}</span>
+            <span className="flex size-12 items-center justify-center rounded-2xl bg-panel text-primary shadow-sm" aria-hidden="true">
+              <ImagePlus className="size-5" />
+            </span>
+            <span className="grid gap-1">
+              <span className="text-sm font-medium text-foreground">{t("添加或拖入图片")}</span>
+              <span className="text-xs leading-4 text-muted">
+                {t("拖到这里即可加入队列")}
+              </span>
+            </span>
+            <span className="flex flex-wrap items-center justify-center gap-1">
+              {["PNG", "JPG", "WEBP"].map((format) => (
+                <span
+                  key={format}
+                  className="rounded-full border border-border bg-panel px-1.5 py-0.5 text-[0.625rem] font-medium tracking-wide text-muted"
+                >
+                  {format}
+                </span>
+              ))}
             </span>
           </button>
         ) : (
@@ -108,10 +132,10 @@ export function UpscaleQueue({
                 <li
                   key={job.id}
                   draggable={!busy}
-                  className={`group grid grid-cols-[1.5rem_3.25rem_minmax(0,1fr)_2rem] items-center gap-2 rounded-md border px-1.5 py-2 transition-colors ${
+                  className={`group relative grid grid-cols-[1.25rem_2.75rem_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden rounded-xl border py-2 pl-1 pr-1.5 transition-colors ${
                     selected
-                      ? "border-primary/55 bg-primary-soft"
-                      : "border-transparent bg-background/55 hover:border-border hover:bg-panel"
+                      ? "border-primary/40 bg-primary-soft"
+                      : "border-border/70 bg-background/60 hover:border-border hover:bg-background"
                   }`}
                   onDragStart={(event) => event.dataTransfer.setData("application/x-suyan-upscale-job", job.id)}
                   onDragOver={(event) => {
@@ -125,23 +149,53 @@ export function UpscaleQueue({
                     }
                   }}
                 >
-                  <GripVertical className="size-4 cursor-grab text-muted/65" aria-hidden="true" />
+                  {selected ? (
+                    <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary" aria-hidden="true" />
+                  ) : null}
+                  <GripVertical className="size-4 cursor-grab text-muted/55 transition-colors group-hover:text-muted" aria-hidden="true" />
+                  {/* 缩略图单独成格：「另存为」浮在缩略图角上，不占布局宽度，
+                      移动端没有 hover，改用底栏的「另存为」按钮。 */}
+                  <div className="relative">
+                    <button type="button" className="block" onClick={() => onSelect(job.id)}>
+                      <img
+                        src={job.input.previewDataUrl}
+                        alt=""
+                        className={`size-11 rounded-lg border object-cover ${selected ? "border-primary/30" : "border-border"}`}
+                        draggable={false}
+                      />
+                    </button>
+                    {job.result ? (
+                      <button
+                        type="button"
+                        aria-label={t("另存为")}
+                        title={t("另存为")}
+                        className="absolute right-0.5 top-0.5 grid size-5 place-items-center rounded-md border border-border bg-panel/95 text-muted opacity-0 shadow-sm transition-opacity hover:text-primary focus-visible:opacity-100 group-hover:opacity-100 max-[639px]:hidden"
+                        onClick={() => onSaveAs(job.id)}
+                      >
+                        <Download className="size-3" aria-hidden="true" />
+                      </button>
+                    ) : null}
+                  </div>
                   <button type="button" className="contents" onClick={() => onSelect(job.id)}>
-                    <img
-                      src={job.input.previewDataUrl}
-                      alt=""
-                      className="size-13 rounded object-cover"
-                      draggable={false}
-                    />
                     <span className="grid min-w-0 gap-1 text-left">
-                      <span className="truncate text-xs font-medium text-foreground" title={job.input.displayName}>
+                      <span className="truncate text-[0.8125rem] font-medium text-foreground" title={job.input.displayName}>
                         {job.input.displayName}
                       </span>
-                      <span className="flex items-center justify-between gap-2 text-[0.6875rem] text-muted">
-                        <span>{job.input.width} x {job.input.height}</span>
-                        <span>{t(statusLabels[job.status])}</span>
+                      <span className="flex items-center justify-between gap-2 text-xs text-muted">
+                        <span className="tabular-nums whitespace-nowrap">{job.input.width} × {job.input.height}</span>
+                        <span
+                          className={`truncate ${
+                            job.status === "failed"
+                              ? "text-danger"
+                              : job.status === "completed" || job.status === "result-ready"
+                                ? "text-primary"
+                                : ""
+                          }`}
+                        >
+                          {t(statusLabels[job.status])}
+                        </span>
                       </span>
-                      <span className="h-1 overflow-hidden rounded-full bg-border/70" aria-hidden="true">
+                      <span className="h-1 overflow-hidden rounded-full bg-border/60" aria-hidden="true">
                         <span
                           className={`block h-full rounded-full transition-[width] ${job.status === "failed" ? "bg-danger" : "bg-progress"}`}
                           style={{ width: `${Math.round(job.progress * 100)}%` }}
@@ -149,24 +203,37 @@ export function UpscaleQueue({
                       </span>
                     </span>
                   </button>
-                  {canRetry ? (
-                    <IconTooltipButton
-                      icon={<RotateCcw className="size-3.5" />}
-                      label={t("重试")}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onRetry(job.id)}
-                    />
-                  ) : (
-                    <IconTooltipButton
-                      disabled={busy}
-                      icon={<X className="size-3.5" />}
-                      label={t("移除")}
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onRemove(job.id)}
-                    />
-                  )}
+                  <span className="flex items-center gap-0.5">
+                    {/* 有结果时给「重新处理」：换模型后对这张图再跑一遍。 */}
+                    {job.result ? (
+                      <IconTooltipButton
+                        disabled={busy}
+                        icon={<RefreshCw className="size-3.5" />}
+                        label={t("重新处理")}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onReprocess(job.id)}
+                      />
+                    ) : null}
+                    {canRetry ? (
+                      <IconTooltipButton
+                        icon={<RotateCcw className="size-3.5" />}
+                        label={t("重试")}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRetry(job.id)}
+                      />
+                    ) : (
+                      <IconTooltipButton
+                        disabled={busy}
+                        icon={<X className="size-3.5" />}
+                        label={t("移除")}
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onRemove(job.id)}
+                      />
+                    )}
+                  </span>
                 </li>
               );
             })}

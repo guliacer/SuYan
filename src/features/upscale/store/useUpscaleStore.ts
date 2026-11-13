@@ -57,9 +57,12 @@ export type UpscaleStoreState = UpscaleProcessingSettings & {
   remove(jobId: string): void;
   reorder(jobId: string, beforeJobId: string): void;
   select(jobId: string | null): void;
-  startQueue(): Promise<void>;
+  startQueue(jobIds?: string[]): Promise<void>;
   cancelActive(): Promise<boolean>;
   retry(jobId: string): void;
+  reprocessCanceled(): Promise<void>;
+  /** 用当前选中的模型重新入队（换模型后对已有结果再跑一遍）。 */
+  reprocess(jobId: string): void;
   setPreset(preset: UpscalePreset): void;
   setEngine(engine: UpscaleEngine): void;
   setModelId(modelId: UpscaleModelId): void;
@@ -67,7 +70,10 @@ export type UpscaleStoreState = UpscaleProcessingSettings & {
   setGpuId(gpuId: number): void;
   setForceWasm(forceWasm: boolean): void;
   setExportOptions(options: Partial<UpscaleExportOptions>): void;
-  commitResults(jobIds?: string[]): Promise<{ completed: number; failed: number }>;
+  commitResults(
+    jobIds?: string[],
+    overrides?: Partial<UpscaleExportOptions>,
+  ): Promise<{ completed: number; failed: number }>;
   clearCompleted(): void;
 };
 
@@ -147,12 +153,15 @@ export function createUpscaleStore(
       set({ selectedJobId });
     },
 
-    async startQueue() {
+    async startQueue(jobIds) {
       if (get().isRunning) return;
       set({ isRunning: true, cancelRequested: false });
       try {
-        const jobIds = get().jobs.filter((job) => job.status === "queued").map((job) => job.id);
-        for (const jobId of jobIds) {
+        const requestedJobIds = jobIds ? new Set(jobIds) : null;
+        const queuedJobIds = get().jobs
+          .filter((job) => job.status === "queued" && (!requestedJobIds || requestedJobIds.has(job.id)))
+          .map((job) => job.id);
+        for (const jobId of queuedJobIds) {
           if (get().cancelRequested) break;
           const job = get().jobs.find((entry) => entry.id === jobId);
           if (!job || job.status !== "queued") continue;
@@ -222,6 +231,50 @@ export function createUpscaleStore(
       });
     },
 
+    async reprocessCanceled() {
+      if (get().isRunning) return;
+      const canceledIds = get().jobs
+        .filter((job) => job.status === "canceled")
+        .map((job) => job.id);
+      if (canceledIds.length === 0) return;
+
+      const canceledIdSet = new Set(canceledIds);
+      const updatedAt = dependencies.now();
+      set((state) => ({
+        jobs: state.jobs.map((job) => canceledIdSet.has(job.id)
+          ? {
+              ...job,
+              status: "queued",
+              progress: 0,
+              message: "等待重试",
+              result: null,
+              errorCode: null,
+              updatedAt,
+            }
+          : job),
+      }));
+      await get().startQueue(canceledIds);
+    },
+
+    /**
+     * 用「当前选中的模型」重新处理这张图。
+     * 换模型后，旧结果对应的模型已经不是用户想要的了，
+     * 但旧逻辑里 job 一旦离开 queued 就再也回不来 —— 结果就是换完模型没得再跑。
+     * 这里直接改用当前 modelId 重新入队，清掉旧结果，等用户点「开始处理」。
+     */
+    reprocess(jobId) {
+      const job = get().jobs.find((entry) => entry.id === jobId);
+      if (!job || get().activeJobId === jobId) return;
+      updateJob(set, dependencies, jobId, {
+        status: "queued",
+        modelId: get().modelId,
+        progress: 0,
+        message: "等待处理",
+        result: null,
+        errorCode: null,
+      });
+    },
+
     setPreset(preset) {
       if (preset === "anime") {
         applyModelSettings(set, dependencies, "real-cugan", "cugan-2x-conservative", preset);
@@ -262,11 +315,16 @@ export function createUpscaleStore(
       }));
     },
 
-    async commitResults(jobIds) {
+    async commitResults(jobIds, overrides) {
       const allowedIds = jobIds ? new Set(jobIds) : null;
       const candidates = get().jobs.filter((job) =>
         job.status === "result-ready" && Boolean(job.result) && (!allowedIds || allowedIds.has(job.id))
       );
+      // 导出目标（收录素材库 / 写目录 / 另存为）是一次性动作，
+      // 通过 overrides 临时覆盖，不污染用户保存的导出设置。
+      const options = overrides
+        ? normalizeUpscaleExportOptions({ ...get().exportOptions, ...overrides })
+        : get().exportOptions;
       let completed = 0;
       let failed = 0;
       for (const candidate of candidates) {
@@ -278,7 +336,7 @@ export function createUpscaleStore(
           errorCode: null,
         });
         try {
-          await dependencies.exportResult(current, get().exportOptions);
+          await dependencies.exportResult(current, options);
           updateJob(set, dependencies, current.id, {
             status: "completed",
             progress: 1,

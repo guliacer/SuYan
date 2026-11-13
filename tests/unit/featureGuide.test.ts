@@ -36,7 +36,7 @@ describe("feature guides", () => {
   });
 
   it("defines a complete guide with anchored steps for every sidebar feature", () => {
-    expect(Object.keys(featureGuideDefinitions)).toHaveLength(23);
+    expect(Object.keys(featureGuideDefinitions)).toHaveLength(24);
     for (const definition of Object.values(featureGuideDefinitions)) {
       expect(definition.steps.length).toBeGreaterThanOrEqual(3);
       expect(definition.steps.length).toBeLessThanOrEqual(10);
@@ -194,7 +194,7 @@ describe("feature guides", () => {
   it("guides the completed-generation fullscreen preview with exact regions", () => {
     expect(featureGuideDefinitions.canvasResult.steps.map((step) => step.target)).toEqual([
       '[data-feature-guide="canvas-fullscreen-media"]',
-      '[data-feature-guide="canvas-fullscreen-navigation"], [data-feature-guide="canvas-fullscreen-media"]',
+      '[data-feature-guide="canvas-fullscreen-navigation"]',
       '[data-feature-guide="canvas-fullscreen-actions"]',
       '[data-feature-guide="canvas-fullscreen-prompt"]',
       '[data-feature-guide="canvas-fullscreen-close"]',

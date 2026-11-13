@@ -14,6 +14,7 @@ const channels = [
   ["UpscaleRemove", "upscale:remove"],
   ["UpscalePickInputs", "upscale:pick-inputs"],
   ["UpscaleRegisterPaths", "upscale:register-paths"],
+  ["UpscaleRegisterLibraryItem", "upscale:register-library-item"],
   ["UpscaleReadInput", "upscale:read-input"],
   ["UpscaleReadModel", "upscale:read-model"],
   ["UpscaleRunNative", "upscale:run-native"],
@@ -22,6 +23,7 @@ const channels = [
   ["UpscaleReadResult", "upscale:read-result"],
   ["UpscalePickOutputDirectory", "upscale:pick-output-directory"],
   ["UpscaleExport", "upscale:export"],
+  ["UpscaleReplaceSource", "upscale:replace-source"],
   ["UpscaleProgress", "upscale:progress"],
 ] as const;
 
@@ -82,6 +84,7 @@ describe("image upscale desktop contract", () => {
       "removeUpscaleComponent",
       "pickUpscaleInputs",
       "registerUpscaleFiles",
+      "registerUpscaleLibraryItem",
       "readUpscaleInput",
       "readUpscaleModel",
       "runRealEsrgan",
@@ -90,6 +93,7 @@ describe("image upscale desktop contract", () => {
       "readUpscaleResult",
       "pickUpscaleOutputDirectory",
       "exportUpscaleResult",
+      "replaceUpscaleSource",
       "onUpscaleProgress",
     ];
     for (const method of methods) {
@@ -100,6 +104,29 @@ describe("image upscale desktop contract", () => {
     expect(source).toContain("return () => ipcRenderer.removeListener(IpcChannelName.UpscaleProgress, handler)");
     expect(source).not.toContain('exposeInMainWorld("electron"');
     expect(source).not.toContain("invoke: (channel");
+  });
+
+  it("routes one detail image into upscale and only replaces it after explicit confirmation", () => {
+    const libraryView = readSource("src/features/library/components/LibraryView.tsx");
+    const detail = readSource("src/features/library/components/PromptDetailDialog.tsx");
+    const workspace = readSource("src/features/upscale/components/UpscaleWorkspace.tsx");
+
+    expect(detail).toContain("onSendToUpscale: () => void;");
+    expect(detail).toContain("isSendingToUpscale: boolean;");
+    expect(detail).toContain('ariaLabel={t("去超分")}');
+    expect(detail).toContain("onClick={onSendToUpscale}");
+    expect(libraryView).toContain("registerUpscaleLibraryItem(item.id)");
+    expect(libraryView).toContain("upscaleSendPendingRef.current");
+    expect(libraryView).toContain("originalImageFileName: item.imageFileName");
+    expect(libraryView).toContain("useLibraryStore.getState().items.find");
+    expect(libraryView).toContain('openMainView("imageUpscale")');
+    expect(libraryView).toContain("onSendToUpscale={() => void sendDetailImageToUpscale(detailItem)}");
+    expect(workspace).toContain('t("替换原图并返回详情")');
+    expect(workspace).toContain("replaceUpscaleSource({");
+    expect(workspace).toContain("setReplaceConfirmOpen(false)");
+    expect(workspace).toContain('t("原图已替换，但返回详情失败，请重新打开素材详情。")');
+    expect(workspace).toContain("<ConfirmDialog");
+    expect(workspace).toContain("onSourceReplaced(result.data.sourceItemId)");
   });
 
   it("registers every handler through handleResult and validates requests in the main service", () => {

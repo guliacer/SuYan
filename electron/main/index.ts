@@ -62,6 +62,15 @@ import { cleanupUpscaleCache } from "./upscale/upscaleCache";
 import { clearUpscaleSession } from "./upscale/upscaleInputs";
 import { clearUpscaleOutputDirectories } from "./upscale/upscaleExport";
 import { cancelAllRealEsrganJobs } from "./upscale/realEsrganRunner";
+import {
+  ensureUpscaleDropboxDir,
+  getUpscaleDropboxDir,
+  scanUpscaleDropboxInPaths,
+  watchUpscaleDropbox,
+  type UpscaleDropboxWatcher,
+} from "./upscale/upscaleDropbox";
+import { getUpscalePaths } from "./upscale/upscalePaths";
+import { IpcChannelName } from "../shared/ipcChannels";
 
 app.setName("素言");
 if (process.platform === "win32") {
@@ -897,6 +906,15 @@ app.whenReady().then(async () => {
     logger.warn("import-receiver", "start-failed", { message: String(error) });
   }
 
+  // 模型收件目录：用户把下载好的模型丢进去就自动装好。
+  // 启动时先扫一遍（用户可能上次退出前丢的），之后靠文件监听自动跟进。
+  try {
+    await startUpscaleDropboxWatcher();
+    logStartupEvent("upscale-dropbox:ready");
+  } catch (error) {
+    logger.warn("upscale-dropbox", "start-failed", { message: String(error) });
+  }
+
 app.on("activate", () => {
     const existing = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()) ?? null;
     if (existing) {
@@ -907,6 +925,48 @@ app.on("activate", () => {
   });
 });
 
+/** 收件目录监听句柄。 */
+let upscaleDropboxWatcher: UpscaleDropboxWatcher | null = null;
+
+function broadcastUpscaleDropboxResult(result: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send(IpcChannelName.UpscaleDropboxChanged, result);
+    }
+  }
+}
+
+/**
+ * 模型收件目录：用户把下载好的模型丢进 <userData>/model-dropbox，
+ * 这边自动识别 → 校验 → 落盘 → 登记，然后通知渲染端刷新。
+ * 启动时先扫一遍，兜住用户上次退出前丢进去但没来得及处理的文件。
+ */
+async function startUpscaleDropboxWatcher(): Promise<void> {
+  const dropboxDir = getUpscaleDropboxDir();
+  await ensureUpscaleDropboxDir(dropboxDir);
+  await stopUpscaleDropboxWatcher();
+
+  upscaleDropboxWatcher = watchUpscaleDropbox(dropboxDir, broadcastUpscaleDropboxResult, {
+    onError: (error) => logger.warn("upscale-dropbox", "scan-failed", { message: String(error) }),
+  });
+
+  const initial = await scanUpscaleDropboxInPaths(getUpscalePaths(), dropboxDir);
+  broadcastUpscaleDropboxResult(initial);
+  logger.info("upscale-dropbox", "ready", {
+    dropboxDir,
+    installed: initial.installedCount,
+    rejected: initial.rejectedCount,
+  });
+}
+
+async function stopUpscaleDropboxWatcher(): Promise<void> {
+  const watcher = upscaleDropboxWatcher;
+  upscaleDropboxWatcher = null;
+  if (watcher) {
+    await watcher.close().catch(() => undefined);
+  }
+}
+
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
@@ -916,6 +976,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   void shutdownExternalLibraryWatchers();
   stopImportReceiver();
+  void stopUpscaleDropboxWatcher();
   void cancelAllRealEsrganJobs();
   clearUpscaleSession();
   clearUpscaleOutputDirectories();

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useLibraryStore } from "@/features/library/store/useLibraryStore";
 import { featureGuideTranslations } from "@/features/library/components/featureGuideTranslations";
+import { todoWeatherTranslations } from "./todoWeatherTranslations";
 import { translateUiStatusText } from "@/components/uiStatusTranslations";
 import type { AppLanguage } from "@/types/locale";
 
@@ -17,6 +18,17 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 const upscaleTranslations: Record<string, string> = {
   "图片超分": "Image Upscale",
+  "去超分": "Send to Upscale",
+  "发送中…": "Sending…",
+  "发送到图片超分失败，请重试。": "Could not send the image to upscale. Try again.",
+  "替换原图并返回详情": "Replace Original & Return",
+  "替换原图？": "Replace original image?",
+  "确认替换": "Replace Image",
+  "替换中…": "Replacing…",
+  "确认后，超分结果将替换素材库中的当前图片。原图只会在替换成功后删除。": "The upscaled result will replace the current library image. The original is deleted only after replacement succeeds.",
+  "已用超分结果替换原图。": "The original image was replaced with the upscaled result.",
+  "替换原图失败，请重试。": "Could not replace the original image. Try again.",
+  "原图已替换，但返回详情失败，请重新打开素材详情。": "The image was replaced, but its details could not be reopened. Open the item details again.",
   "图片超分视图": "Image upscale views",
   "任务队列": "Task Queue",
   "前后对比": "Before / After",
@@ -122,6 +134,46 @@ const upscaleTranslations: Record<string, string> = {
   "轻量动漫模型，两倍放大": "Lightweight anime model at 2x",
   "轻量动漫模型，三倍放大": "Lightweight anime model at 3x",
   "轻量动漫模型，四倍放大": "Lightweight anime model at 4x",
+  "当前倍率模型尚未下载": "Current scale model not downloaded",
+  "下载 {scale}x 模型": "Download {scale}x model",
+  "需先下载模型": "Download the model first",
+  "所选引擎尚未安装": "Selected engine is not installed",
+  "另存为": "Save As",
+  "同时保存到目录": "Also save to a folder",
+  "尚未选择目录": "No folder selected",
+  "已另存为 {name}": "Saved as {name}",
+  "导出失败，请重试。": "Export failed. Try again.",
+  "底栏「导出」会把结果收录进素材库，无需任何设置。": "The Export button in the footer saves results to your library — no setup needed.",
+  "重新处理": "Reprocess",
+  "收起设置": "Collapse settings",
+  "展开设置": "Expand settings",
+  "滚轮缩放 · 左右拖动对比": "Scroll to zoom · Drag to compare",
+  "滚轮缩放 · 拖动平移": "Scroll to zoom · Drag to pan",
+  "已按当前模型重新入队，点「开始处理」执行。": "Re-queued with the current model. Click Start Processing to run it.",
+  "放大细节，左右对比满意后再导出": "Upscale details, compare, then export",
+  "队列里还没有图片": "No image in the queue yet",
+  "把图片拖进左侧区域，或直接选择文件。支持 PNG、JPG、WebP。": "Drop images into the panel on the left, or pick files. PNG, JPG and WebP are supported.",
+  "单张或整个目录，也可直接拖入": "A single file, a whole folder, or drop them in",
+  "选引擎与倍率": "Pick an engine and a scale",
+  "动漫用 Real-CUGAN，照片用 Real-ESRGAN": "Real-CUGAN for anime, Real-ESRGAN for photos",
+  "处理并对比": "Process and compare",
+  "左右拖动分割线，满意后导出": "Drag the divider, then export",
+  "拖到这里即可加入队列": "Drop them here to add them to the queue",
+  "组件已就绪，可直接开始处理": "Component ready — start processing",
+  "需先下载组件": "Download the component first",
+  "模型收件目录": "Model inbox",
+  "把下载好的模型丢进这个文件夹，软件会自动识别并装好，不需要再点安装。": "Drop downloaded models into this folder and the app installs them automatically — no extra steps.",
+  "立即扫描": "Scan now",
+  "扫描中…": "Scanning…",
+  "打开": "Open",
+  "读取中…": "Loading…",
+  "Real-CUGAN 模型 {count} / 11": "Real-CUGAN models {count} / 11",
+  "Real-ESRGAN 已就绪": "Real-ESRGAN ready",
+  "Real-ESRGAN 未就绪": "Real-ESRGAN not ready",
+  "上次扫描：装好 {installed} 个，跳过 {already} 个，未识别 {rejected} 个": "Last scan: {installed} installed, {already} skipped, {rejected} unrecognized",
+  "扫描收件目录失败，请重试。": "Could not scan the model inbox. Try again.",
+  "扫描明细": "Scan details",
+  "{count} 条": "{count} entries",
 };
 
 const translations: Record<string, string> = {
@@ -448,6 +500,7 @@ const translations: Record<string, string> = {
   "删除": "Delete",
   "编辑": "Edit",
   "导入": "Import",
+  "处理": "Process",
   "导出": "Export",
   "复制": "Copy",
   "清除": "Clear",
@@ -782,6 +835,9 @@ const additionalTranslations: Record<string, string> = {
   "依赖未满足": "Dependencies missing",
   "依赖：": "Dependencies: ",
   "被依赖：": "Used by: ",
+  "手动下载全部依赖文件": "Download all dependency files manually",
+  "在线下载慢或失败时，可以手动到网盘下载全部依赖文件。": "If the online download is slow or fails, you can download all dependency files manually from the cloud drive.",
+  "点击这里可以手动到网盘下载全部依赖文件": "Click here to download all dependency files from the cloud drive",
   "已启用": "Enabled",
   "已停用": "Disabled",
   "删除中…": "Deleting…",
@@ -2476,7 +2532,8 @@ function interpolate(text: string, values?: TranslationValues): string {
 
 export function translateUiText(language: AppLanguage, text: string, values?: TranslationValues): string {
   const translated = language === "en-US"
-    ? featureGuideTranslations[text]
+    ? todoWeatherTranslations[text]
+      ?? featureGuideTranslations[text]
       ?? recommendationTranslations[text]
       ?? additionalTranslations[text]
       ?? upscaleTranslations[text]

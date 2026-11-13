@@ -54,16 +54,34 @@ describe("module registry", () => {
     expect(hasBuiltinModuleCapability("nsfw-local-classification", installed)).toBe(true);
   });
 
-  it("keeps the image upscale workspace available before either runtime is installed", () => {
-    const state = resolveBuiltinModuleState();
+  it("gates image upscale on at least one installed upscale runtime", () => {
+    const empty = resolveBuiltinModuleState();
 
-    expect(isBuiltinModuleInstalled("real-cugan-runtime", state)).toBe(false);
-    expect(isBuiltinModuleInstalled("real-esrgan-runtime", state)).toBe(false);
-    expect(isBuiltinModuleEnabled("real-cugan-runtime", state)).toBe(false);
-    expect(isBuiltinModuleEnabled("real-esrgan-runtime", state)).toBe(false);
-    expect(hasBuiltinModuleCapability("image-upscale", state)).toBe(true);
-    expect(hasBuiltinModuleCapability("real-cugan-upscale-runtime", state)).toBe(false);
-    expect(hasBuiltinModuleCapability("real-esrgan-upscale-runtime", state)).toBe(false);
+    expect(isBuiltinModuleInstalled("real-cugan-runtime", empty)).toBe(false);
+    expect(isBuiltinModuleInstalled("real-esrgan-runtime", empty)).toBe(false);
+    expect(isBuiltinModuleEnabled("real-cugan-runtime", empty)).toBe(false);
+    expect(isBuiltinModuleEnabled("real-esrgan-runtime", empty)).toBe(false);
+    // 双引擎一个都没装时必须判为不可用：否则会出现「功能显示可用但点进去没引擎」。
+    expect(hasBuiltinModuleCapability("image-upscale", empty)).toBe(false);
+    expect(hasBuiltinModuleCapability("real-cugan-upscale-runtime", empty)).toBe(false);
+    expect(hasBuiltinModuleCapability("real-esrgan-upscale-runtime", empty)).toBe(false);
+
+    // anyOf 语义：只装其中一个引擎即可用。
+    const cuganOnly = resolveBuiltinModuleState({
+      "real-cugan-runtime": { installed: true, enabled: true },
+    });
+    expect(hasBuiltinModuleCapability("image-upscale", cuganOnly)).toBe(true);
+
+    const esrganOnly = resolveBuiltinModuleState({
+      "real-esrgan-runtime": { installed: true, enabled: true },
+    });
+    expect(hasBuiltinModuleCapability("image-upscale", esrganOnly)).toBe(true);
+
+    // 装了但被用户停用 -> 依赖不满足，能力再次关闭。
+    const disabled = resolveBuiltinModuleState({
+      "real-cugan-runtime": { installed: true, enabled: false },
+    });
+    expect(hasBuiltinModuleCapability("image-upscale", disabled)).toBe(false);
   });
 
   it("enables ffmpeg-dependent capabilities after the runtime is installed and enabled", () => {

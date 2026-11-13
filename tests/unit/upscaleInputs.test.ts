@@ -8,6 +8,7 @@ import {
   createUpscaleResult,
   readUpscaleInput,
   readUpscaleResult,
+  registerUpscaleLibraryItem,
   registerUpscalePaths,
 } from "../../electron/main/upscale/upscaleInputs";
 import { cleanupUpscaleCache } from "../../electron/main/upscale/upscaleCache";
@@ -105,6 +106,79 @@ describe("upscale input registry", () => {
     expect(previewMetadata.width).toBeLessThanOrEqual(640);
     expect(previewMetadata.height).toBeLessThanOrEqual(640);
     await expect(readUpscaleInput(descriptor.token)).resolves.toEqual(original);
+  });
+
+  it("keeps detail-source registration separate from a prior path-only registration", async () => {
+    const root = await makeRoot();
+    const imagePath = path.join(root, "source.png");
+    await writeImage(imagePath, "png");
+
+    const [plain] = await registerUpscalePaths([imagePath]);
+    const [detail] = await registerUpscalePaths([{
+      filePath: imagePath,
+      sourceItemId: "item-42",
+      sourceImageFileName: "source.png",
+    }]);
+    const [detailAgain] = await registerUpscalePaths([{
+      filePath: imagePath,
+      sourceItemId: "item-42",
+      sourceImageFileName: "source.png",
+    }]);
+
+    expect(detail.token).not.toBe(plain.token);
+    expect(detail).toMatchObject({
+      sourceItemId: "item-42",
+      sourceImageFileName: "source.png",
+    });
+    expect(detailAgain.token).toBe(detail.token);
+  });
+
+  it("registers the current library image with its stable source identity", async () => {
+    const root = await makeRoot();
+    const imagePath = path.join(root, "source.png");
+    await writeImage(imagePath, "png");
+    const registerPaths = async (inputs: Parameters<typeof registerUpscalePaths>[0]) => registerUpscalePaths(inputs);
+
+    const descriptor = await registerUpscaleLibraryItem("item-42", {
+      findItem: async () => ({ id: "item-42", imageFileName: "source.png" }),
+      resolveMediaPath: async () => imagePath,
+      stat: async () => ({ isFile: () => true }),
+      registerPaths,
+    });
+
+    expect(descriptor).toMatchObject({
+      sourceItemId: "item-42",
+      sourceImageFileName: "source.png",
+      displayName: "source.png",
+    });
+  });
+
+  it("rejects missing, video, and unavailable library sources", async () => {
+    const unreachable = async () => {
+      throw new Error("unexpected dependency call");
+    };
+    const registerPaths = async (inputs: Parameters<typeof registerUpscalePaths>[0]) => registerUpscalePaths(inputs);
+
+    await expect(registerUpscaleLibraryItem("missing", {
+      findItem: async () => null,
+      resolveMediaPath: unreachable,
+      stat: async () => null,
+      registerPaths,
+    })).rejects.toMatchObject({ code: "UPSCALE_INPUT_MISSING" });
+
+    await expect(registerUpscaleLibraryItem("video", {
+      findItem: async () => ({ id: "video", imageFileName: "clip.mp4" }),
+      resolveMediaPath: unreachable,
+      stat: async () => null,
+      registerPaths,
+    })).rejects.toMatchObject({ code: "UPSCALE_INPUT_UNSUPPORTED" });
+
+    await expect(registerUpscaleLibraryItem("unavailable", {
+      findItem: async () => ({ id: "unavailable", imageFileName: "gone.png" }),
+      resolveMediaPath: async () => "Z:\\missing\\gone.png",
+      stat: async () => null,
+      registerPaths,
+    })).rejects.toMatchObject({ code: "UPSCALE_INPUT_MISSING" });
   });
 
   it("rejects unsupported direct files and unregistered or invalidated tokens", async () => {

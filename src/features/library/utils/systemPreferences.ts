@@ -7,6 +7,7 @@ export const systemPreferenceSections = [
   "sidebar",
   "modules",
   "startupGallery",
+  "weather",
 ] as const;
 
 export type SystemPreferenceSection = (typeof systemPreferenceSections)[number];
@@ -44,6 +45,10 @@ export const systemPreferenceSectionMeta: Record<
   modules: {
     label: "模块管理",
     description: "功能开关与可选依赖",
+  },
+  weather: {
+    label: "地区与天气",
+    description: "待办页的城市与天气预报",
   },
   startupGallery: {
     label: "启动图库",

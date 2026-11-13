@@ -356,6 +356,16 @@ async function checkRuntimeDependencyAvailable(runtimeModuleId: BuiltinModuleId)
     return checkNsfwModuleInstalled();
   }
 
+  // 超分引擎不是「内置二进制」也不是「模块安装器拉取的包」，它的真实状态
+  // 由 upscale 子系统按 SHA-256 清单校验磁盘组件得出。
+  // 少了这两个分支，下面的兜底 return true 会把没装的引擎误报成已安装。
+  if (runtimeModuleId === "real-cugan-runtime" || runtimeModuleId === "real-esrgan-runtime") {
+    const { getUpscaleComponentStatus } = await import("../upscale/upscaleInstaller");
+    const engine = runtimeModuleId === "real-cugan-runtime" ? "real-cugan" : "real-esrgan";
+    const status = await getUpscaleComponentStatus(engine);
+    return status.installed;
+  }
+
   return true;
 }
 

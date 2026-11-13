@@ -304,14 +304,17 @@ async function verifyRequiredFiles(root: string): Promise<void> {
 
 async function isRealEsrganInstallValid(paths: UpscalePaths, artifact: RealEsrganArtifact): Promise<boolean> {
   try {
+    await verifyRequiredFiles(paths.realEsrganRoot);
     const manifest = JSON.parse(
       await fs.readFile(path.join(paths.realEsrganRoot, "manifest.json"), "utf8"),
-    ) as Partial<RealEsrganInstallManifest>;
-    if (manifest.version !== artifact.version || manifest.archiveSha256 !== artifact.sha256) {
-      return false;
-    }
-    await verifyRequiredFiles(paths.realEsrganRoot);
-    return true;
+    ) as Partial<RealEsrganInstallManifest> & { source?: string };
+    // 两条路都算安装成功：
+    //   1) 整包安装 —— 清单里的版本和整包 SHA-256 必须对得上；
+    //   2) 收件目录散件安装 —— 只要 12 个必需文件齐了就行，清单标 source:"manual"。
+    // 少了第二条，用户把 .bin/.param 手工放齐了也永远显示「未安装」。
+    const archiveMatch = manifest.version === artifact.version && manifest.archiveSha256 === artifact.sha256;
+    const manualMatch = manifest.source === "manual" || manifest.archiveSha256 === "manual";
+    return archiveMatch || manualMatch;
   } catch {
     return false;
   }

@@ -127,6 +127,15 @@ describe("web assistant view surface", () => {
     expect(IMAGE_GEN_SITE_RECOMMENDATIONS.some((site) => site.domain === "nsfw.nihaox.cc.cd")).toBe(false);
   });
 
+  it("removes the deleted 智画创 site from both catalogs", () => {
+    expect(WEB_ASSISTANT_SITES.map((site) => site.domain)).not.toContain("wisart.kuaileshifu.com");
+    expect(IMAGE_GEN_SITE_RECOMMENDATIONS.some((site) => site.domain === "wisart.kuaileshifu.com")).toBe(false);
+
+    const source = readSource("src/features/library/types/webAssistant.ts");
+    expect(source).not.toContain("wisart.kuaileshifu.com");
+    expect(source).not.toContain("智画创");
+  });
+
   it("renders a WebAssistantView block and a 网页助手 sidebar action in LibraryView", () => {
     const source = readSource("src/features/library/components/LibraryView.tsx");
     expect(source).toContain('import("./WebAssistantView")');

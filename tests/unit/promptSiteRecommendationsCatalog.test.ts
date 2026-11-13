@@ -32,13 +32,15 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(promptSiteRecommendations[1]?.url).toBe(SECOND_PINNED_PROMPT_SITE_URL);
   });
 
-  it("keeps the remaining requested image-generation cards in order", () => {
+  it("keeps the remaining image-generation cards in order after removing the deleted site", () => {
     expect(IMAGE_GEN_SITE_RECOMMENDATIONS.slice(0, 4).map((site) => site.url)).toEqual([
       "https://ai.xmiaom.com/sign-up?aff=bibi",
-      "https://wisart.kuaileshifu.com/",
       "https://platform.agnes-ai.com",
       "https://chatgpt.com",
+      "https://gemini.google.com",
     ]);
+    expect(IMAGE_GEN_SITE_RECOMMENDATIONS.some((site) => site.domain === "wisart.kuaileshifu.com")).toBe(false);
+    expect(recommendationImageCatalog["https://wisart.kuaileshifu.com/"]).toBeUndefined();
   });
 
   it("uses the online section order and free/paid API split", () => {
@@ -100,8 +102,8 @@ describe("resource recommendations catalog mirrors guliacer/resource-recommendat
     expect(source).toContain("https://github.com/guliacer/SuYan");
     expect(source).toContain("https://github.com/guliacer/TapRelay");
     expect(source).not.toContain("https://github.com/guliacer/TapRelay-remote-adapter-test");
-    // 生图网站数组已抽到共享文件 recommendationSites.ts，最后一条在此断言。
-    expect(sharedSitesSource).toContain("https://wisart.kuaileshifu.com/");
+    // 已下线的生图站点不能继续出现在共享目录或推荐数据中。
+    expect(sharedSitesSource).not.toContain("https://wisart.kuaileshifu.com/");
   });
 
   it("includes Agnes as a free image-generation recommendation with registration methods", () => {

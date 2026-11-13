@@ -42,13 +42,16 @@ describe("sidebar entry visibility", () => {
     expect(settings.sidebarEntryVisibility.systemPreferences).toBe(true);
   });
 
-  it("places image upscale after batch management in the material group", async () => {
+  it("places image upscale before prompt creation in the inspiration group", async () => {
     const { sidebarEntryGroups, sidebarEntryMeta } = await import(
       "../../src/features/library/utils/sidebarEntries"
     );
     const materialEntries = sidebarEntryGroups.find((group) => group.id === "materials")?.entries ?? [];
 
-    expect(materialEntries.indexOf("imageUpscale")).toBe(materialEntries.indexOf("promptLibrary") + 1);
+    const inspirationEntries = sidebarEntryGroups.find((group) => group.id === "inspiration")?.entries ?? [];
+
+    expect(materialEntries).not.toContain("imageUpscale");
+    expect(inspirationEntries.slice(0, 2)).toEqual(["imageUpscale", "textPrompts"]);
     expect(sidebarEntryMeta.imageUpscale).toEqual({
       label: "图片超分",
       description: "使用本地双引擎放大并修复图片",

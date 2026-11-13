@@ -42,6 +42,10 @@ export type ModuleManagementRow = {
   /** 依赖未满足导致自身 enabled 无效。 */
   blockedByDependencies: boolean;
   dependencyLabels: string[];
+  /** 「满足其一即可」的依赖标签，全都没装时用于提示用户装哪个。 */
+  anyOfDependencyLabels: string[];
+  /** anyOf 依赖里一个都不可用；为 true 时该模块因缺运行时依赖被禁用。 */
+  anyOfDependencyMissing: boolean;
   /** 直接依赖当前模块的功能，供删除确认明确告知影响。 */
   dependentLabels: string[];
 };
@@ -59,6 +63,13 @@ export function buildModuleManagementRows(state: BuiltinModuleState): ModuleMana
     const dependencyLabels = definition.dependencies
       .map((dependencyId) => builtinModuleDefinitions.find((entry) => entry.id === dependencyId)?.label)
       .filter((label): label is string => Boolean(label));
+    const anyOfDependencies = definition.anyOfDependencies ?? [];
+    const anyOfDependencyLabels = anyOfDependencies
+      .map((dependencyId) => builtinModuleDefinitions.find((entry) => entry.id === dependencyId)?.label)
+      .filter((label): label is string => Boolean(label));
+    const anyOfDependencyMissing =
+      anyOfDependencies.length > 0 &&
+      !anyOfDependencies.some((dependencyId) => isBuiltinModuleEnabled(dependencyId, state));
     const dependentLabels = builtinModuleDefinitions
       .filter((entry) => entry.dependencies.includes(definition.id))
       .map((entry) => entry.label);
@@ -80,6 +91,8 @@ export function buildModuleManagementRows(state: BuiltinModuleState): ModuleMana
       canToggleEnabled: canDisable && installed,
       blockedByDependencies: installed && rawEnabled && !effectivelyEnabled,
       dependencyLabels,
+      anyOfDependencyLabels,
+      anyOfDependencyMissing,
       dependentLabels,
     };
   });

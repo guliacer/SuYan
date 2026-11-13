@@ -207,6 +207,7 @@ import {
   writeProxySettings,
 } from "../network/proxySettingsStore";
 import { logStartupEvent } from "../startupLog";
+import type { SaveWeatherSettingsInput } from "../../../src/types/weather";
 import { exportLogs, logger } from "../appLogger";
 import { runExportTask } from "../app/exportTask";
 import { reportLibrarySize } from "../performance/performanceMonitor";
@@ -234,6 +235,7 @@ import {
 import {
   cancelRealEsrganService,
   exportUpscaleResultService,
+  pickUpscaleExportTargetService,
   getUpscaleStatusService,
   installUpscaleComponentService,
   pickUpscaleInputsService,
@@ -241,10 +243,15 @@ import {
   readUpscaleInputService,
   readUpscaleModelService,
   readUpscaleResultService,
+  registerUpscaleLibraryItemService,
   registerUpscalePathsService,
+  replaceUpscaleSourceService,
   removeUpscaleComponentService,
   runRealEsrganService,
   storeUpscaleResultService,
+  getUpscaleDropboxPathService,
+  scanUpscaleDropboxService,
+  openUpscaleDropboxService,
 } from "../upscale/upscaleService";
 import {
   getAccountStatus,
@@ -873,6 +880,11 @@ export function registerIpcHandlers(): void {
         ),
       ),
   );
+  ipcMain.handle(ipcChannels.weatherSettingsRead, () => handleResult("weather:settings-read", async () => (await import("../weather/weatherRuntime")).getWeatherService().readSettings()));
+  ipcMain.handle(ipcChannels.weatherPromptClaim, () => handleResult("weather:prompt-claim", async () => (await import("../weather/weatherRuntime")).getWeatherService().claimPrompt()));
+  ipcMain.handle(ipcChannels.weatherSettingsSave, (_event, input: SaveWeatherSettingsInput) => handleResult("weather:settings-save", async () => (await import("../weather/weatherRuntime")).getWeatherService().saveSettings(input)));
+  ipcMain.handle(ipcChannels.weatherCitiesSearch, (_event, query: unknown) => handleResult("weather:cities-search", async () => (await import("../weather/weatherCities")).searchWeatherCities(query)));
+  ipcMain.handle(ipcChannels.weatherForecastRead, () => handleResult("weather:forecast-read", async () => (await import("../weather/weatherRuntime")).getWeatherService().readForecast()));
   ipcMain.handle(ipcChannels.proxySettingsRead, () =>
     handleResult("proxy:settings-read", () => readProxySettings()),
   );
@@ -903,6 +915,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(ipcChannels.upscaleRegisterPaths, (_event, entries: unknown) =>
     handleResult("upscale:register-paths", () => registerUpscalePathsService(entries)),
   );
+  ipcMain.handle(ipcChannels.upscaleRegisterLibraryItem, (_event, itemId: unknown) =>
+    handleResult("upscale:register-library-item", () => registerUpscaleLibraryItemService(itemId)),
+  );
   ipcMain.handle(ipcChannels.upscaleReadInput, (_event, token: unknown) =>
     handleResult("upscale:read-input", () => readUpscaleInputService(token)),
   );
@@ -930,6 +945,21 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(ipcChannels.upscaleExport, (_event, request: unknown) =>
     handleResult("upscale:export", () => exportUpscaleResultService(request)),
+  );
+  ipcMain.handle(ipcChannels.upscaleExportBatch, (_event, request: unknown) =>
+    handleResult("upscale:pick-export-target", () => pickUpscaleExportTargetService(request)),
+  );
+  ipcMain.handle(ipcChannels.upscaleReplaceSource, (_event, request: unknown) =>
+    handleResult("upscale:replace-source", () => replaceUpscaleSourceService(request)),
+  );
+  ipcMain.handle(ipcChannels.upscaleDropboxPath, () =>
+    handleResult("upscale:dropbox-path", () => getUpscaleDropboxPathService()),
+  );
+  ipcMain.handle(ipcChannels.upscaleDropboxScan, () =>
+    handleResult("upscale:dropbox-scan", () => scanUpscaleDropboxService()),
+  );
+  ipcMain.handle(ipcChannels.upscaleDropboxOpen, () =>
+    handleResult("upscale:dropbox-open", () => openUpscaleDropboxService()),
   );
 
   ipcMain.handle(ipcChannels.batchDeduplicateScan, () =>

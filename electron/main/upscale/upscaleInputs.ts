@@ -1,13 +1,19 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import type {
   UpscaleInputDescriptor,
   UpscaleOutputFormat,
   UpscaleResultDescriptor,
 } from "../../../src/features/upscale/types";
+import type { LibraryItem } from "../../../src/features/library/types/library";
+import { isVideoMediaFile } from "../../../src/features/library/utils/mediaFileTypes";
+import { normalizeImageOrientationSize } from "../../../src/features/upscale/utils/upscaleOrientation";
+import { AppError } from "../ipc/errors";
 import { dialog } from "../app/fileDialogs";
+// 与 upscaleExport 同因：native sharp 只在 resources/vendor 下，
+// 顶层 require("sharp") 在主进程启动阶段必崩。
+import { getSharp } from "../runtime/imageRuntime";
 import { getUpscalePaths, type UpscalePaths } from "./upscalePaths";
 
 type UpscaleMediaType = UpscaleInputDescriptor["mediaType"];
@@ -17,9 +23,17 @@ export type UpscalePathInput =
   | {
       filePath: string;
       sourceItemId?: string | null;
+      sourceImageFileName?: string | null;
     };
 
 export type UpscaleInputPickKind = "files" | "directory";
+
+export type UpscaleLibraryItemRegistrationDependencies = {
+  findItem(itemId: string): Promise<Pick<LibraryItem, "id" | "imageFileName" | "mediaStorage"> | null>;
+  resolveMediaPath(item: Pick<LibraryItem, "imageFileName" | "mediaStorage">): Promise<string>;
+  stat(filePath: string): Promise<{ isFile(): boolean } | null>;
+  registerPaths(inputs: readonly UpscalePathInput[]): Promise<UpscaleInputDescriptor[]>;
+};
 
 type InputRecord = {
   descriptor: UpscaleInputDescriptor;
@@ -34,7 +48,7 @@ type ResultRecord = {
 const supportedExtensions = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 const inputRecords = new Map<string, InputRecord>();
 const resultRecords = new Map<string, ResultRecord>();
-const inputTokensByPath = new Map<string, string>();
+const inputTokensBySource = new Map<string, string>();
 
 export async function registerUpscalePaths(
   inputs: readonly UpscalePathInput[],
@@ -43,8 +57,8 @@ export async function registerUpscalePaths(
   const descriptors: UpscaleInputDescriptor[] = [];
 
   for (const entry of expanded) {
-    const key = pathKey(entry.filePath);
-    const existingToken = inputTokensByPath.get(key);
+    const key = sourceKey(entry);
+    const existingToken = inputTokensBySource.get(key);
     const existing = existingToken ? inputRecords.get(existingToken) : undefined;
     if (existing) {
       descriptors.push(existing.descriptor);
@@ -61,10 +75,11 @@ export async function registerUpscalePaths(
       byteSize: bytes.length,
       mediaType: metadata.mediaType,
       sourceItemId: entry.sourceItemId,
+      sourceImageFileName: entry.sourceImageFileName,
       previewDataUrl: await createPreviewDataUrl(bytes),
     };
     inputRecords.set(descriptor.token, { descriptor, filePath: entry.filePath });
-    inputTokensByPath.set(key, descriptor.token);
+    inputTokensBySource.set(key, descriptor.token);
     descriptors.push(descriptor);
   }
 
@@ -86,6 +101,46 @@ export async function pickUpscaleInputs(
   }
   return registerUpscalePaths(selection.filePaths);
 }
+
+export async function registerUpscaleLibraryItem(
+  itemId: string,
+  dependencies: UpscaleLibraryItemRegistrationDependencies = defaultLibraryItemRegistrationDependencies,
+): Promise<UpscaleInputDescriptor> {
+  const item = await dependencies.findItem(itemId);
+  if (!item) {
+    throw new AppError("UPSCALE_INPUT_MISSING", "来源素材不存在或已被删除。");
+  }
+  if (isVideoMediaFile(item.imageFileName)) {
+    throw new AppError("UPSCALE_INPUT_UNSUPPORTED", "视频素材不能发送到图片超分。");
+  }
+
+  const filePath = await dependencies.resolveMediaPath(item).catch(() => {
+    throw new AppError("UPSCALE_INPUT_MISSING", "来源图片不可用。");
+  });
+  const stats = await dependencies.stat(filePath).catch(() => null);
+  if (!stats?.isFile()) {
+    throw new AppError("UPSCALE_INPUT_MISSING", "来源图片不可用。");
+  }
+  const [descriptor] = await dependencies.registerPaths([{
+    filePath,
+    sourceItemId: item.id,
+    sourceImageFileName: item.imageFileName,
+  }]);
+  return descriptor;
+}
+
+const defaultLibraryItemRegistrationDependencies: UpscaleLibraryItemRegistrationDependencies = {
+  async findItem(itemId) {
+    const { findLibraryItemById } = await import("../library/libraryStore");
+    return findLibraryItemById(itemId);
+  },
+  async resolveMediaPath(item) {
+    const { resolveMediaAbsolutePath } = await import("../library/mediaPathResolver");
+    return resolveMediaAbsolutePath(item);
+  },
+  stat: (filePath) => fs.stat(filePath).catch(() => null),
+  registerPaths: (inputs) => registerUpscalePaths(inputs),
+};
 
 export async function readUpscaleInput(token: string): Promise<Buffer> {
   return readRegisteredFile(inputRecords, token, "UPSCALE_INPUT_MISSING");
@@ -149,19 +204,25 @@ export function resolveUpscaleResultPath(token: string): string {
 export function clearUpscaleSession(): void {
   inputRecords.clear();
   resultRecords.clear();
-  inputTokensByPath.clear();
+  inputTokensBySource.clear();
 }
 
 async function expandInputs(inputs: readonly UpscalePathInput[]): Promise<Array<{
   filePath: string;
   sourceItemId: string | null;
+  sourceImageFileName: string | null;
 }>> {
-  const expanded: Array<{ filePath: string; sourceItemId: string | null }> = [];
+  const expanded: Array<{
+    filePath: string;
+    sourceItemId: string | null;
+    sourceImageFileName: string | null;
+  }> = [];
   const seen = new Set<string>();
 
   for (const input of inputs) {
     const filePath = path.resolve(typeof input === "string" ? input : input.filePath);
     const sourceItemId = typeof input === "string" ? null : input.sourceItemId ?? null;
+    const sourceImageFileName = typeof input === "string" ? null : input.sourceImageFileName ?? null;
     const stats = await fs.lstat(filePath).catch(() => null);
     if (!stats || stats.isSymbolicLink()) {
       throw new Error("UPSCALE_INPUT_MISSING: 输入文件不存在");
@@ -169,7 +230,7 @@ async function expandInputs(inputs: readonly UpscalePathInput[]): Promise<Array<
     if (stats.isDirectory()) {
       const files = await collectSupportedFiles(filePath);
       for (const nestedPath of files) {
-        appendUnique(expanded, seen, nestedPath, null);
+        appendUnique(expanded, seen, nestedPath, null, null);
       }
       continue;
     }
@@ -179,7 +240,7 @@ async function expandInputs(inputs: readonly UpscalePathInput[]): Promise<Array<
     if (!isSupportedPath(filePath)) {
       throw new Error("UPSCALE_INPUT_UNSUPPORTED: 仅支持 PNG、JPEG 和 WebP");
     }
-    appendUnique(expanded, seen, filePath, sourceItemId);
+    appendUnique(expanded, seen, filePath, sourceItemId, sourceImageFileName);
   }
 
   return expanded;
@@ -202,18 +263,24 @@ async function collectSupportedFiles(root: string): Promise<string[]> {
 }
 
 function appendUnique(
-  entries: Array<{ filePath: string; sourceItemId: string | null }>,
+  entries: Array<{
+    filePath: string;
+    sourceItemId: string | null;
+    sourceImageFileName: string | null;
+  }>,
   seen: Set<string>,
   filePath: string,
   sourceItemId: string | null,
+  sourceImageFileName: string | null,
 ): void {
   const resolved = path.resolve(filePath);
-  const key = pathKey(resolved);
+  const entry = { filePath: resolved, sourceItemId, sourceImageFileName };
+  const key = sourceKey(entry);
   if (seen.has(key)) {
     return;
   }
   seen.add(key);
-  entries.push({ filePath: resolved, sourceItemId });
+  entries.push(entry);
 }
 
 async function readSourceFile(filePath: string): Promise<Buffer> {
@@ -229,19 +296,27 @@ async function readImageMetadata(
   errorCode: "UPSCALE_INPUT_UNSUPPORTED" | "UPSCALE_RESULT_MISSING",
 ): Promise<{ width: number; height: number; mediaType: UpscaleMediaType }> {
   try {
-    const metadata = await sharp(bytes, { failOn: "error" }).metadata();
+    const metadata = await getSharp()(bytes, { failOn: "error" }).metadata();
     const mediaType = mediaTypeForFormat(metadata.format);
     if (!metadata.width || !metadata.height || !mediaType) {
       throw new Error("missing metadata");
     }
-    return { width: metadata.width, height: metadata.height, mediaType };
+    // metadata() 返回的是文件里存的原始像素尺寸，不含 EXIF 方向；
+    // 而预览图经 .rotate() 摆正过。竖拍照片（orientation 5-8）必须交换宽高，
+    // 否则会出现「左栏写着 1080x1620、预览却是横图」。
+    const size = normalizeImageOrientationSize(
+      metadata.width,
+      metadata.height,
+      metadata.orientation,
+    );
+    return { width: size.width, height: size.height, mediaType };
   } catch {
     throw new Error(`${errorCode}: 图片无法解码`);
   }
 }
 
 async function createPreviewDataUrl(bytes: Buffer): Promise<string> {
-  const preview = await sharp(bytes, { failOn: "error" })
+  const preview = await getSharp()(bytes, { failOn: "error" })
     .rotate()
     .resize({ width: 640, height: 640, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 76, effort: 3 })
@@ -288,6 +363,14 @@ function isSupportedPath(filePath: string): boolean {
 function pathKey(filePath: string): string {
   const resolved = path.resolve(filePath);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+function sourceKey(entry: {
+  filePath: string;
+  sourceItemId: string | null;
+  sourceImageFileName: string | null;
+}): string {
+  return `${pathKey(entry.filePath)}\u0000${entry.sourceItemId ?? ""}\u0000${entry.sourceImageFileName ?? ""}`;
 }
 
 function assertSafeJobId(jobId: string): void {

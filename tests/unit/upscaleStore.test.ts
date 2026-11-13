@@ -116,6 +116,42 @@ describe("upscale queue store", () => {
     expect(store.getState().jobs.map((job) => job.status)).toEqual(["canceled", "queued"]);
   });
 
+  it("reprocesses canceled jobs immediately without starting other queued jobs", async () => {
+    let rejectFirst: ((error: Error) => void) | null = null;
+    let firstAttempt = true;
+    const calls: string[] = [];
+    const deps = dependencies({
+      process: vi.fn((job) => {
+        calls.push(job.id);
+        if (job.id === "job-1" && firstAttempt) {
+          firstAttempt = false;
+          return new Promise<UpscaleResultDescriptor>((_resolve, reject) => {
+            rejectFirst = reject;
+          });
+        }
+        return Promise.resolve(result(job.input.token));
+      }),
+      cancel: vi.fn(async () => {
+        rejectFirst?.(new Error("UPSCALE_CANCELED: 用户取消"));
+        return true;
+      }),
+    });
+    const store = createUpscaleStore(deps);
+    store.getState().enqueue([input("first"), input("second")]);
+
+    const firstRun = store.getState().startQueue();
+    await vi.waitFor(() => expect(store.getState().activeJobId).toBe("job-1"));
+    await store.getState().cancelActive();
+    await firstRun;
+
+    expect(store.getState().jobs.map((job) => job.status)).toEqual(["canceled", "queued"]);
+    await store.getState().reprocessCanceled();
+
+    expect(calls).toEqual(["job-1", "job-1"]);
+    expect(store.getState().jobs.map((job) => job.status)).toEqual(["result-ready", "queued"]);
+    expect(store.getState().isRunning).toBe(false);
+  });
+
   it("preserves queue and settings on the same module-scoped store instance", () => {
     const store = createUpscaleStore(dependencies());
     store.getState().setPreset("photo");
@@ -166,5 +202,87 @@ describe("upscale queue store", () => {
     expect(retryCommit).toEqual({ completed: 1, failed: 0 });
     expect(store.getState().jobs.map((job) => job.status)).toEqual(["completed", "completed"]);
     expect(deps.exportResult).toHaveBeenCalledTimes(3);
+  });
+
+  it("applies export overrides for one run without mutating the saved export settings", async () => {
+    const deps = dependencies();
+    const store = createUpscaleStore(deps);
+    store.getState().enqueue([input("first")]);
+    await store.getState().startQueue();
+
+    await store.getState().commitResults(undefined, { addToLibrary: true, saveToDirectory: false });
+
+    expect(deps.exportResult).toHaveBeenCalledTimes(1);
+    expect(deps.exportResult).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "job-1" }),
+      expect.objectContaining({ addToLibrary: true, saveToDirectory: false }),
+    );
+    // overrides 只作用于本次导出，用户保存的导出设置保持原样。
+    expect(store.getState().exportOptions.addToLibrary).toBe(false);
+    expect(store.getState().exportOptions.saveToDirectory).toBe(true);
+  });
+
+  it("keeps every job in result-ready when the export target is unavailable", async () => {
+    const deps = dependencies({
+      exportResult: vi.fn(async () => {
+        throw new Error("UPSCALE_EXPORT_FAILED: 尚未选择保存目录");
+      }),
+    });
+    const store = createUpscaleStore(deps);
+    store.getState().enqueue([input("first"), input("second")]);
+    await store.getState().startQueue();
+
+    const summary = await store.getState().commitResults(undefined, { addToLibrary: true });
+
+    expect(summary).toEqual({ completed: 0, failed: 2 });
+    expect(store.getState().jobs.map((job) => job.status)).toEqual(["result-ready", "result-ready"]);
+  });
+
+  it("re-queues a finished job with the newly selected model so it can run again", async () => {
+    const deps = dependencies();
+    const store = createUpscaleStore(deps);
+    store.getState().enqueue([input("first")]);
+    await store.getState().startQueue();
+    expect(store.getState().jobs[0].status).toBe("result-ready");
+
+    // 换模型：旧结果对应的是上一个模型，用户不满意必须能再跑一次。
+    store.getState().setModelId("cugan-4x-conservative");
+    store.getState().reprocess("job-1");
+
+    const reprocessed = store.getState().jobs[0];
+    expect(reprocessed.status).toBe("queued");
+    expect(reprocessed.modelId).toBe("cugan-4x-conservative");
+    expect(reprocessed.result).toBeNull();
+    expect(reprocessed.progress).toBe(0);
+    expect(reprocessed.errorCode).toBeNull();
+
+    await store.getState().startQueue();
+    expect(store.getState().jobs[0].status).toBe("result-ready");
+    expect(store.getState().jobs[0].modelId).toBe("cugan-4x-conservative");
+  });
+
+  it("ignores reprocess requests for the job that is currently running", async () => {
+    // 用对象存 resolver：写在回调里的赋值 TS 的控制流分析追不到，
+    // 直接用局部变量会被收窄成 never。
+    const deferred: { resolve?: (value: UpscaleResultDescriptor) => void } = {};
+    const deps = dependencies({
+      process: vi.fn(() => new Promise<UpscaleResultDescriptor>((resolve) => {
+        deferred.resolve = resolve;
+      })),
+    });
+    const store = createUpscaleStore(deps);
+    store.getState().enqueue([input("first")]);
+    const running = store.getState().startQueue();
+    await vi.waitFor(() => expect(store.getState().activeJobId).toBe("job-1"));
+
+    store.getState().reprocess("job-1");
+
+    // 正在跑的任务不能被重新入队，否则会重复执行。
+    expect(store.getState().jobs[0].status).toBe("preparing");
+    expect(store.getState().jobs[0].modelId).toBe("cugan-2x-conservative");
+
+    deferred.resolve?.(result("first"));
+    await running;
+    expect(store.getState().jobs[0].status).toBe("result-ready");
   });
 });

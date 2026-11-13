@@ -125,6 +125,17 @@ export const featureGuideDefinitions: Record<FeatureGuideId, FeatureGuideDefinit
       { title: "打开批处理工具", description: "同一工具栏还可以进入去重检测、图像压缩和视频压缩；这些操作只作用于选定或当前筛选范围。", target: '[data-feature-guide="prompt-library-actions"]' },
     ],
   },
+  imageUpscale: {
+    title: "图片超分",
+    intro: "把动漫插画或真实照片加入队列，选择对应引擎后放大修复，并按需要保存文件或收录到素材库。",
+    steps: [
+      { title: "建立处理队列", description: "添加一张、多张或整个目录的图片；队列会按当前顺序逐张处理，单张失败不会阻断后续任务。", target: '[data-feature-guide="upscale-queue"]' },
+      { title: "对比处理结果", description: "拖动分割线查看原图与结果，也可以缩放、平移或进入全屏检查细节。", target: '[data-feature-guide="upscale-compare"]' },
+      { title: "选择引擎和模型", description: "动漫插画默认使用 Real-CUGAN，真实照片默认使用 Real-ESRGAN；最终模型、倍率和性能参数都可以手动确认。", target: '[data-feature-guide="upscale-settings"]' },
+      { title: "确认导出方式", description: "保存到目录和加入素材库可以分别启用，也可以同时执行；格式、质量、命名和冲突策略都在开始前确认。", target: '[data-feature-guide="upscale-export"]' },
+      { title: "开始或取消任务", description: "底部操作条会显示组件状态和总进度；运行时可取消当前任务，已经完成的结果不会丢失。", target: '[data-feature-guide="upscale-actions"]' },
+    ],
+  },
   textPrompts: {
     title: "灵感创作",
     intro: "把零散想法整理为可搜索、可分类、可复用的灵感卡片。",
@@ -161,10 +172,10 @@ export const featureGuideDefinitions: Record<FeatureGuideId, FeatureGuideDefinit
   },
   canvasResult: {
     title: "生成结果预览",
-    intro: "这里是生成完成后的大图预览；可以切换结果、处理当前作品，并查看本次生成使用的提示词。",
+    intro: "这里是生成完成后的大图预览；可以处理当前作品，并查看本次生成使用的提示词。",
     steps: [
       { title: "查看完整作品", description: "中央区域会按原始比例显示当前生成的图像或视频，并尽量利用可用空间展示细节。", target: '[data-feature-guide="canvas-fullscreen-media"]' },
-      { title: "切换多张结果", description: "同一次生成有多张结果时，使用图像两侧的上一张、下一张按钮切换；底部编号会标记当前所在位置。", target: '[data-feature-guide="canvas-fullscreen-navigation"], [data-feature-guide="canvas-fullscreen-media"]' },
+      { title: "快捷切换结果", description: "左右箭头默认隐藏以保持画面干净；把鼠标移到图像左右边缘后，箭头会出现，点击即可切换上一张或下一张。", target: '[data-feature-guide="canvas-fullscreen-navigation"]' },
       { title: "处理当前作品", description: "右侧操作栏可以导出文件、收录到素材库或复制图像到系统剪贴板；收录状态会即时反馈。", target: '[data-feature-guide="canvas-fullscreen-actions"]' },
       { title: "查看生成信息", description: "点击信息按钮展开提示词面板，可查看本次实际使用的提示词、模型、尺寸和生成用时，并复制提示词。", target: '[data-feature-guide="canvas-fullscreen-prompt"]' },
       { title: "退出全屏预览", description: "完成查看后点击右上角关闭，返回创作画布；生成结果仍会保留在当前画布中。", target: '[data-feature-guide="canvas-fullscreen-close"]' },

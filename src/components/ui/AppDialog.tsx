@@ -3,6 +3,15 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useLocale } from "@/components/LocaleProvider";
 
+const dialogFocusableSelector = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
 type AppDialogProps = {
   children: ReactNode;
   overlayClassName?: string;
@@ -19,14 +28,54 @@ export function AppDialog({
   onClose,
 }: AppDialogProps) {
   const pointerStartedOnBackdrop = useRef(false);
+  const panelRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const animationFrame = window.requestAnimationFrame(() => {
+      const firstFocusable = panelRef.current?.querySelector<HTMLElement>(dialogFocusableSelector);
+      if (firstFocusable) {
+        firstFocusable.focus();
+      } else {
+        panelRef.current?.focus();
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      if (previousFocus?.isConnected) {
+        previousFocus.focus();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
         return;
       }
-      event.preventDefault();
-      onClose();
+      if (event.key === "Tab" && panelRef.current) {
+        const focusable = [...panelRef.current.querySelectorAll<HTMLElement>(dialogFocusableSelector)]
+          .filter((element) => element.getClientRects().length > 0);
+        if (focusable.length === 0) {
+          event.preventDefault();
+          panelRef.current.focus();
+          return;
+        }
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (event.shiftKey && (active === first || !panelRef.current.contains(active))) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
     };
 
     document.addEventListener("keydown", handleKeyDown);
@@ -47,10 +96,12 @@ export function AppDialog({
       }}
     >
       <section
+        ref={panelRef}
         aria-labelledby={titleId}
         aria-modal="true"
         className={`theme-dialog overflow-hidden rounded-2xl border border-border bg-panel shadow-image ${panelClassName}`}
         role="dialog"
+        tabIndex={-1}
       >
         {children}
       </section>

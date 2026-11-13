@@ -543,6 +543,11 @@ type LibraryState = {
   checkVideoRuntime: (options?: { force?: boolean }) => Promise<boolean>;
   /** 实测本地 NSFW 模块是否可用，并同步修正 moduleState。 */
   checkNsfwRuntime: () => Promise<boolean>;
+  /**
+   * 实测 Real-CUGAN / Real-ESRGAN 组件是否就绪，并同步修正 moduleState。
+   * 超分引擎的安装入口在「图片超分」工作台，模块面板只读其结果，不提供安装。
+   */
+  checkUpscaleRuntimes: () => Promise<void>;
 };
 
 let themeSwitchRevision = 0;
@@ -803,6 +808,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // 解绑后视频依赖不再随包分发：启动时用真实二进制可用性校正持久化状态。
     void get().checkVideoRuntime();
     void get().checkNsfwRuntime();
+    void get().checkUpscaleRuntimes();
 
     // The lexicon is a persistent knowledge library, including pending/unused tags.
     // Existing entries may only be reorganized through the explicit review flow.
@@ -4700,6 +4706,52 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
 
     return next.installed;
+  },
+
+  checkUpscaleRuntimes: async () => {
+    // 超分引擎有独立的数据面：模型/二进制落在 data/components 下，由 upscale
+    // 子系统用 SHA-256 清单校验，和模块安装器不是一套。
+    // 因此这里必须复用 getUpscaleComponentStatus 的探测口径，
+    // 不能走 checkModuleInstalled —— 后者对未登记的 runtime id 一律兜底 true，
+    // 会把没装的引擎误标成「已安装」。
+    const targets = [
+      { moduleId: "real-cugan-runtime", engine: "real-cugan" },
+      { moduleId: "real-esrgan-runtime", engine: "real-esrgan" },
+    ] as const;
+
+    const patch: BuiltinModuleStatePatch = {};
+
+    for (const { moduleId, engine } of targets) {
+      // 探测方法本身可能不存在（preload 与渲染端版本不一致、测试里的精简 mock），
+      // 直接调用会同步抛 TypeError，连 .catch 都接不住。这里先判存在再问。
+      if (typeof window.suyanApi?.getUpscaleComponentStatus !== "function") {
+        continue;
+      }
+      const result = await window.suyanApi
+        .getUpscaleComponentStatus(engine)
+        .catch(() => null);
+      // 探测失败（IPC 异常/主进程未就绪）时不改写持久化状态，
+      // 避免瞬时故障把已装用户误标为未装。
+      if (!result?.ok) {
+        continue;
+      }
+
+      const installed = result.data.installed;
+      const current = get().moduleState[moduleId];
+      // 引擎已就绪时保留用户原有的启用偏好；新装上默认启用；
+      // 组件文件消失（被删/校验失败）则强制 installed=false 且停用。
+      const next = installed
+        ? { installed: true, enabled: current.installed ? current.enabled : true }
+        : { installed: false, enabled: false };
+
+      if (current.installed !== next.installed || current.enabled !== next.enabled) {
+        patch[moduleId] = next;
+      }
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await get().setModuleState(patch);
+    }
   },
 
 }));

@@ -37,7 +37,7 @@ import type {
 } from "../../src/types/suyanApi";
 import { IpcChannelName } from "../shared/ipcChannels";
 import type { AccountPublicStatus } from "../../src/features/account/types/account";
-import type { UpscaleProgressEvent } from "../../src/features/upscale/types";
+import type { UpscaleDropboxScanResult, UpscaleProgressEvent } from "../../src/features/upscale/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>;
@@ -220,6 +220,11 @@ const suyanApi: SuyanApi = {
     invoke(IpcChannelName.WebAssistantImportCapture, platform, options),
   hideWebAssistant: (platform) => invoke(IpcChannelName.WebAssistantHide, platform),
   disposeWebAssistant: () => invoke(IpcChannelName.WebAssistantDispose),
+  readWeatherSettings: () => invoke(IpcChannelName.WeatherSettingsRead),
+  claimWeatherPrompt: () => invoke(IpcChannelName.WeatherPromptClaim),
+  saveWeatherSettings: (input) => invoke(IpcChannelName.WeatherSettingsSave, input),
+  searchWeatherCities: (query) => invoke(IpcChannelName.WeatherCitiesSearch, query),
+  readWeatherForecast: () => invoke(IpcChannelName.WeatherForecastRead),
   readProxySettings: () => invoke(IpcChannelName.ProxySettingsRead),
   saveProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsSave, settings),
   testProxySettings: (settings: ProxySettings) => invoke(IpcChannelName.ProxySettingsTest, settings),
@@ -232,6 +237,7 @@ const suyanApi: SuyanApi = {
     IpcChannelName.UpscaleRegisterPaths,
     files.map((file) => ({ filePath: webUtils.getPathForFile(file), sourceItemId })),
   ),
+  registerUpscaleLibraryItem: (itemId) => invoke(IpcChannelName.UpscaleRegisterLibraryItem, itemId),
   readUpscaleInput: (token) => invoke(IpcChannelName.UpscaleReadInput, token),
   readUpscaleModel: (modelId) => invoke(IpcChannelName.UpscaleReadModel, modelId),
   runRealEsrgan: (request) => invoke(IpcChannelName.UpscaleRunNative, request),
@@ -241,6 +247,16 @@ const suyanApi: SuyanApi = {
   readUpscaleResult: (token) => invoke(IpcChannelName.UpscaleReadResult, token),
   pickUpscaleOutputDirectory: () => invoke(IpcChannelName.UpscalePickOutputDirectory),
   exportUpscaleResult: (request) => invoke(IpcChannelName.UpscaleExport, request),
+  pickUpscaleExportTarget: (request) => invoke(IpcChannelName.UpscaleExportBatch, request),
+  replaceUpscaleSource: (request) => invoke(IpcChannelName.UpscaleReplaceSource, request),
+  getUpscaleDropboxPath: () => invoke(IpcChannelName.UpscaleDropboxPath),
+  scanUpscaleDropbox: () => invoke(IpcChannelName.UpscaleDropboxScan),
+  openUpscaleDropbox: () => invoke(IpcChannelName.UpscaleDropboxOpen),
+  onUpscaleDropboxChanged: (callback) => {
+    const handler = (_event: unknown, result: unknown) => callback(result as UpscaleDropboxScanResult);
+    ipcRenderer.on(IpcChannelName.UpscaleDropboxChanged, handler);
+    return () => ipcRenderer.removeListener(IpcChannelName.UpscaleDropboxChanged, handler);
+  },
   onUpscaleProgress: (callback) => {
     const handler = (_event: unknown, progress: unknown) => callback(progress as UpscaleProgressEvent);
     ipcRenderer.on(IpcChannelName.UpscaleProgress, handler);

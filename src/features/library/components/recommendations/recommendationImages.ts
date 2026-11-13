@@ -81,14 +81,8 @@ import img75 from "./images/sharedchat/usage.webp?url";
 import img76 from "./images/veilreader/screenshot-1.webp?url";
 import img77 from "./images/veilreader/screenshot-2.webp?url";
 import img78 from "./images/veilreader/screenshot-3.webp?url";
-import img79 from "./images/wisart/checkin.webp?url";
-import img80 from "./images/wisart/game-1.webp?url";
-import img81 from "./images/wisart/game-2.webp?url";
-import img82 from "./images/wisart/home.webp?url";
-import img83 from "./images/wisart/square.webp?url";
-import img84 from "./images/wisart/works.webp?url";
-import img85 from "./images/agnes/pricing.webp?url";
-import img86 from "./images/agnes/usage-overview.webp?url";
+import img79 from "./images/agnes/pricing.webp?url";
+import img80 from "./images/agnes/usage-overview.webp?url";
 
 const recommendationImageUrls: Record<string, string> = {
   "/images/abrdns/checkin.webp": img0,
@@ -170,14 +164,8 @@ const recommendationImageUrls: Record<string, string> = {
   "/images/veilreader/screenshot-1.webp": img76,
   "/images/veilreader/screenshot-2.webp": img77,
   "/images/veilreader/screenshot-3.webp": img78,
-  "/images/wisart/checkin.webp": img79,
-  "/images/wisart/game-1.webp": img80,
-  "/images/wisart/game-2.webp": img81,
-  "/images/wisart/home.webp": img82,
-  "/images/wisart/square.webp": img83,
-  "/images/wisart/works.webp": img84,
-  "/images/agnes/pricing.webp": img85,
-  "/images/agnes/usage-overview.webp": img86,
+  "/images/agnes/pricing.webp": img79,
+  "/images/agnes/usage-overview.webp": img80,
 };
 
 export function resolveRecommendationImageUrls(paths: string[] | undefined): string[] {

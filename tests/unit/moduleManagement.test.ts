@@ -44,7 +44,7 @@ describe("moduleManagement", () => {
     expect(compression?.blockedByDependencies).toBe(false);
   });
 
-  it("lists both upscale runtimes as installable dependencies", () => {
+  it("lists both upscale runtimes as installable dependencies and gates the upscale tool on them", () => {
     const rows = buildModuleManagementRows(resolveBuiltinModuleState());
     const byId = Object.fromEntries(rows.map((row) => [row.definition.id, row]));
 
@@ -52,7 +52,23 @@ describe("moduleManagement", () => {
     expect(byId["real-cugan-runtime"]?.canRestore).toBe(false);
     expect(byId["real-esrgan-runtime"]?.installed).toBe(false);
     expect(byId["real-esrgan-runtime"]?.canRestore).toBe(false);
-    expect(byId["image-upscale"]?.effectivelyEnabled).toBe(true);
+
+    // 两个引擎都没装时，「图片超分」必须显示为不可用并标记依赖未满足。
+    expect(byId["image-upscale"]?.effectivelyEnabled).toBe(false);
+    expect(byId["image-upscale"]?.anyOfDependencyMissing).toBe(true);
+    expect(byId["image-upscale"]?.anyOfDependencyLabels).toEqual([
+      "Real-CUGAN 运行依赖",
+      "Real-ESRGAN 运行依赖",
+    ]);
+
+    // 装好任意一个引擎后即可用。
+    const withCugan = buildModuleManagementRows(
+      resolveBuiltinModuleState({
+        "real-cugan-runtime": { installed: true, enabled: true },
+      }),
+    ).find((row) => row.definition.id === "image-upscale");
+    expect(withCugan?.effectivelyEnabled).toBe(true);
+    expect(withCugan?.anyOfDependencyMissing).toBe(false);
   });
 
   it("groups rows by category order", () => {

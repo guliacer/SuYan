@@ -49,6 +49,15 @@ describe("package-win", () => {
     expect(fs.readFileSync(path.join(component, "user-installed-model.onnx"), "utf8")).toBe("must-survive");
     expect(fs.existsSync(path.join(component, "old-file.txt"))).toBe(false);
   });
+  it("excludes local weather settings and cached forecasts from package payloads", () => {
+    const packageScript = fs.readFileSync(path.join(projectRoot, "package-win.cjs"), "utf8");
+    const emptyShellScript = fs.readFileSync(path.join(projectRoot, "scripts/check-empty-shell.cjs"), "utf8");
+    for (const fileName of ["weather-settings.json", "weather-cache.json"]) {
+      expect(packageScript).toContain(`"${fileName}"`);
+      expect(packageScript).toContain(`!**/${fileName}`);
+      expect(emptyShellScript).toContain(`"${fileName}"`);
+    }
+  });
   afterEach(() => {
     removePathIfExists(testRoot);
   });

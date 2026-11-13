@@ -22,6 +22,7 @@ import {
 import { getDefaultThemeAccentForPreset, getThemeAccentColor, getThemeModeLabel, isThemeCustomAccentSlot, themeAccentOptions, themeCustomAccentOptions, themePresetOptions } from "../utils/themeMode";
 import { ModuleManagementDialog } from "./ModuleManagementDialog";
 import { ProxySettingsDialog } from "./ProxySettingsDialog";
+import { WeatherSettingsPanel } from "@/features/weather/components/WeatherSettingsPanel";
 import { StartupGallerySettingsDialog } from "./StartupGallerySettingsDialog";
 import {
   visualLifeEffectIds,
@@ -80,6 +81,7 @@ const sectionIcons: Record<SystemPreferenceSection, ReactNode> = {
   sidebar: <PanelLeft size={16} />,
   modules: <Blocks size={16} />,
   startupGallery: <ImageIcon size={16} />,
+  weather: <Sun size={16} />,
 };
 
 /**
@@ -188,6 +190,7 @@ export function SystemPreferencesDialog({
         </nav>
 
         <div data-feature-guide="system-preferences-content" className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background/20 px-3 py-3 md:px-4 md:py-4">
+          {section === "weather" ? <WeatherSettingsPanel /> : null}
           {section === "proxy" ? (
             <ProxySettingsDialog
               embedded

@@ -56,12 +56,12 @@ export const sidebarEntryGroups: readonly SidebarEntryGroup[] = [
   {
     id: "materials",
     label: "素材",
-    entries: ["home", "categoryLexicon", "tagLexicon", "importMaterial", "libraryRoots", "promptLibrary", "imageUpscale"],
+    entries: ["home", "categoryLexicon", "tagLexicon", "importMaterial", "libraryRoots", "promptLibrary"],
   },
   {
     id: "inspiration",
     label: "灵感",
-    entries: ["textPrompts", "todo", "canvas", "webAssistant"],
+    entries: ["imageUpscale", "textPrompts", "todo", "canvas", "webAssistant"],
   },
   {
     id: "resources",

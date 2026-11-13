@@ -1460,6 +1460,8 @@ const forbiddenPackagePayloadNames = new Set([
   "library.json",
   "ai-settings.json",
   "proxy-settings.json",
+  "weather-settings.json",
+  "weather-cache.json",
   "view-settings.json",
   "window-state.json",
   "acceleration-settings.json",
@@ -1472,6 +1474,8 @@ const forbiddenPackagePayloadNames = new Set([
 const emptyShellExcludeGlobs = [
   "!**/ai-settings.json",
   "!**/proxy-settings.json",
+  "!**/weather-settings.json",
+  "!**/weather-cache.json",
   "!**/view-settings.json",
   "!**/window-state.json",
   "!**/acceleration-settings.json",

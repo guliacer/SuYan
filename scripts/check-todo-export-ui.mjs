@@ -6,6 +6,7 @@ const { chromium } = await import(pathToFileURL(process.argv[2]).href);
 const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module">
 import React from 'react';
 import {createRoot} from 'react-dom/client';
+import {LocaleProvider} from '/src/components/LocaleProvider.tsx';
 import {TodoWorkspace} from '/src/features/prompts/todos/components/TodoWorkspace.tsx';
 import {ExportProgressPanel} from '/src/components/ui/ExportProgressPanel.tsx';
 import '/src/styles/tokens.css';
@@ -21,22 +22,23 @@ window.suyanApi={
  importTodoFiles:async()=>({ok:true,data:{canceled:false,files:[{fileName:'待办.json',format:'json',candidateCount:2,warnings:[]}],candidates:[],warnings:[],libraries:[file]}}),
  importTodoLibraries:async libraries=>{window.importedLibraries=libraries;return {ok:true,data:file};},
 };
-createRoot(document.getElementById('root')).render(React.createElement(React.Fragment,null,React.createElement('div',{className:'h-screen bg-panel p-6 text-foreground'},React.createElement(TodoWorkspace)),React.createElement(ExportProgressPanel)));
+createRoot(document.getElementById('root')).render(React.createElement(LocaleProvider,null,React.createElement('div',{className:'h-screen bg-panel p-6 text-foreground'},React.createElement(TodoWorkspace)),React.createElement(ExportProgressPanel)));
 </script></body></html>`;
 const server=await createServer({server:{host:'127.0.0.1',port:5199,strictPort:true},plugins:[{name:'todo-export-fixture',configureServer(vite){vite.middlewares.use(async(req,res,next)=>{
  if(req.url?.split('?')[0]!=='/__todo-export-qa')return next();
  res.setHeader('content-type','text/html; charset=utf-8');res.end(await vite.transformIndexHtml('/__todo-export-qa',html));
 });}}]});
 await server.listen();await mkdir('output/todo-export',{recursive:true});
-const browser=await chromium.launch({channel:'msedge',headless:true});
+const browser=await chromium.launch({executablePath:process.env.SUYAN_QA_BROWSER??'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true});
 try {
  for(const width of [1280,750]){
   const context=await browser.newContext({viewport:{width,height:900}});
   await context.tracing.start({snapshots:true,screenshots:true});
-  const page=await context.newPage();page.setDefaultTimeout(10000);
+  const page=await context.newPage();page.setDefaultTimeout(15000);page.setDefaultNavigationTimeout(60000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   try {
    await page.goto('http://127.0.0.1:5199/__todo-export-qa',{waitUntil:'domcontentloaded'});
+   await page.getByRole('tab',{name:/全部事项/}).click();
    await page.getByText('设计封面',{exact:true}).waitFor();
    await page.getByRole('checkbox',{name:'全选当前事项',exact:true}).check();
    await page.getByRole('button',{name:'导出所选',exact:true}).click();
@@ -49,7 +51,7 @@ try {
    assert.deepEqual(await page.evaluate(()=>window.lastExportOptions),{taskIds:['task-0','task-1']});
    await page.getByLabel('快速新增事项',{exact:true}).fill('后台导出时仍可输入');
    await page.getByRole('tab',{name:/进度视图/}).click();
-   await page.getByRole('heading',{name:'待办事项',exact:true}).waitFor();
+   await page.getByRole('heading',{name:'今天，做点喜欢的事。',exact:true}).waitFor();
    await page.evaluate(()=>window.finishExport());
    await page.getByRole('button',{name:'关闭导出进度',exact:true}).click();
    await page.getByRole('button',{name:'更多待办操作',exact:true}).click();

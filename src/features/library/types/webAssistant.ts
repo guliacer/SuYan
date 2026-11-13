@@ -56,7 +56,6 @@ const OFFICIAL_SITE_TITLES: Record<string, string> = {
   "tensor.art": "Tensor.Art",
   "playground.com": "Playground",
   "ai.xmiaom.com": "咕嘎咕嘎",
-  "wisart.kuaileshifu.com": "智画创",
 };
 
 /** 分区 / registry 用的稳定 ascii slug，避免中文分区名导致登录态不落盘。 */
@@ -83,7 +82,6 @@ const SITE_PARTITION_SLUGS: Record<string, string> = {
   "tensor.art": "tensorart",
   "playground.com": "playground",
   "ai.xmiaom.com": "xmiaom",
-  "wisart.kuaileshifu.com": "wisart",
 };
 
 export type WebAssistantSiteEntry = {

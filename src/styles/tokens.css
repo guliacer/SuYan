@@ -2078,12 +2078,12 @@ textarea {
   height: var(--mist-height, 34%);
   border-radius: var(--mist-radius, 50%);
   background:
-    radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-mist-color) 42%, transparent), color-mix(in srgb, var(--canvas-mist-color) 15%, transparent) 30%, transparent 68%),
-    radial-gradient(ellipse at 62% 38%, color-mix(in srgb, var(--canvas-core-violet) 7%, transparent), transparent 66%);
-  filter: blur(var(--mist-blur, 54px)) saturate(0.82);
+    radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-mist-color) 28%, transparent), color-mix(in srgb, var(--canvas-mist-color) 8%, transparent) 34%, transparent 74%),
+    radial-gradient(ellipse at 62% 38%, color-mix(in srgb, var(--canvas-core-violet) 4%, transparent), transparent 72%);
+  filter: blur(var(--mist-blur, 140px)) saturate(0.62);
   mix-blend-mode: screen;
-  mask-image: radial-gradient(ellipse at center, #000 0%, rgb(0 0 0 / 0.82) 34%, transparent 76%);
-  -webkit-mask-image: radial-gradient(ellipse at center, #000 0%, rgb(0 0 0 / 0.82) 34%, transparent 76%);
+  mask-image: radial-gradient(ellipse at center, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.4) 34%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse at center, rgb(0 0 0 / 0.72) 0%, rgb(0 0 0 / 0.4) 34%, transparent 78%);
   mask-repeat: no-repeat;
   -webkit-mask-repeat: no-repeat;
   transform-origin: center;
@@ -2091,8 +2091,8 @@ textarea {
   opacity: 0;
 }
 .canvas-mist-node--light {
-  background: radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-light-surface) 8%, transparent), color-mix(in srgb, var(--canvas-light-surface) 2.5%, transparent) 36%, transparent 78%);
-  filter: blur(var(--mist-blur, 68px)) saturate(0.72);
+  background: radial-gradient(ellipse at var(--mist-focal-point, 50% 50%), color-mix(in srgb, var(--canvas-light-surface) 5%, transparent), color-mix(in srgb, var(--canvas-light-surface) 1.5%, transparent) 38%, transparent 82%);
+  filter: blur(var(--mist-blur, 170px)) saturate(0.52);
 }
 .canvas-page-grain {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' opacity='.5' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
@@ -2281,11 +2281,11 @@ textarea {
   inset: 0;
 }
 .canvas-backdrop > .canvas-background-layers > .canvas-mist-field {
-  opacity: 0.16;
+  opacity: 0.1;
 }
 .canvas-backdrop[data-canvas-mode="thinking"] > .canvas-background-layers > .canvas-mist-field,
 .canvas-backdrop[data-canvas-mode="busy"] > .canvas-background-layers > .canvas-mist-field {
-  opacity: 0.2;
+  opacity: 0.14;
 }
 .canvas-studio-surface {
   background:
@@ -2573,13 +2573,41 @@ textarea {
   animation: canvas-core-logo-birth var(--canvas-reveal-duration) ease-in both;
 }
 
-.canvas-generating-content .canvas-status-card--below-core {
+.canvas-generating-stage {
+  min-height: 0;
+}
+.canvas-generating-core-space {
+  min-height: 0;
+}
+.canvas-status-dock {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  padding-bottom: clamp(0.5rem, 2%, 1.5rem);
+  animation: canvas-status-dock-float 5.6s ease-in-out infinite;
+}
+.canvas-status-dock::before {
+  content: "";
   position: absolute;
   left: 50%;
-  bottom: clamp(1.75rem, 4%, 3.5rem);
+  bottom: 0.5rem;
+  width: min(15rem, 62%);
+  height: 2.75rem;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, color-mix(in srgb, var(--canvas-core-blue) 20%, transparent), transparent 72%);
+  filter: blur(18px);
+  opacity: 0.24;
+  transform: translateX(-50%) scale(0.86);
+  animation: canvas-status-aura-pulse 4.6s ease-in-out infinite;
+}
+.canvas-generating-content .canvas-status-card--below-core {
+  position: relative;
+  left: auto;
+  bottom: auto;
   width: min(calc(100% - 2rem), 28rem);
   margin: 0;
-  transform: translateX(-50%);
+  transform: none;
 }
 .canvas-status-card--below-core .canvas-waiting-message {
   max-width: min(100%, 24rem);
@@ -2616,41 +2644,36 @@ textarea {
 }
 .canvas-prompt-particle-trail {
   position: absolute;
-  left: 7%;
-  top: 12%;
-  width: 42%;
-  height: 74%;
+  inset: 0;
 }
 .canvas-prompt-particle {
   position: absolute;
-  left: 0;
-  top: calc(7% + var(--particle-index) * 7%);
+  left: var(--prompt-particle-start-x);
+  top: var(--prompt-particle-start-y);
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: var(--canvas-ai-ink);
   box-shadow: 0 0 9px color-mix(in srgb, var(--canvas-ai-ink) 28%, transparent);
-  animation: canvas-prompt-particle-flow 2.4s cubic-bezier(.22, .68, .3, 1) calc(var(--particle-index) * 90ms) infinite;
+  opacity: 0;
+  animation: canvas-prompt-particle-flow var(--prompt-particle-duration, 4s) cubic-bezier(.22, .68, .3, 1) var(--prompt-particle-delay, 0s) infinite;
 }
 .canvas-prompt-token {
   position: absolute;
-  left: var(--token-start, 6%);
-  top: 20%;
-  max-width: 28%;
+  left: var(--token-x, 50%);
+  top: var(--token-y, 64%);
+  max-width: min(44%, 16rem);
   overflow: hidden;
   color: color-mix(in srgb, var(--canvas-ai-ink) 66%, var(--color-foreground));
   font-size: 0.68rem;
   line-height: 1.2;
   opacity: 0;
+  text-align: center;
   text-overflow: ellipsis;
+  transform: translate(-50%, 7px) scale(0.96);
   white-space: nowrap;
-  animation: canvas-token-enter 3.4s ease-out calc(var(--token-index) * 120ms) infinite;
+  animation: canvas-token-enter var(--token-duration, 5s) ease-out var(--token-delay, 0s) infinite;
 }
-.canvas-prompt-token:nth-child(2) { --token-start: 6%; top: 23%; }
-.canvas-prompt-token:nth-child(3) { --token-start: 16%; top: 39%; }
-.canvas-prompt-token:nth-child(4) { --token-start: 7%; top: 55%; }
-.canvas-prompt-token:nth-child(5) { --token-start: 17%; top: 70%; }
-.canvas-prompt-token:nth-child(6) { --token-start: 7%; top: 83%; }
 .canvas-backdrop[data-canvas-mode="busy"] .canvas-prompt-token {
   animation-name: canvas-token-dissolve;
 }
@@ -2662,8 +2685,8 @@ textarea {
   width: 62%;
   height: 74%;
   border-radius: 1.25rem;
-  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--canvas-ai-ink) 8%, transparent), transparent 70%);
-  filter: blur(2px);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--canvas-ai-ink) 5%, transparent), transparent 74%);
+  filter: blur(18px) saturate(0.72);
 }
 .canvas-formation-block {
   position: absolute;
@@ -2671,14 +2694,44 @@ textarea {
   top: var(--block-top);
   width: var(--block-width);
   height: var(--block-height);
-  border-radius: 28% 40% 34% 46%;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--canvas-ai-ink) 18%, transparent), color-mix(in srgb, var(--color-primary) 7%, transparent));
+  border-radius: 50% 42% 58% 46% / 46% 58% 42% 54%;
+  background: radial-gradient(ellipse at 42% 48%, color-mix(in srgb, var(--canvas-ai-ink) 8%, transparent), color-mix(in srgb, var(--canvas-ai-ink) 3%, transparent) 42%, transparent 78%);
+  filter: blur(34px) saturate(0.68);
+  mix-blend-mode: screen;
   opacity: 0;
   transform: scale(0.72) rotate(-6deg);
   animation: canvas-formation-build 4.8s ease-out var(--block-delay) infinite;
 }
 .canvas-formation-block:nth-child(2n) {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--color-secondary) 15%, transparent), color-mix(in srgb, var(--canvas-ai-ink) 6%, transparent));
+  background: radial-gradient(ellipse at 56% 44%, color-mix(in srgb, var(--color-secondary) 6%, transparent), color-mix(in srgb, var(--canvas-ai-ink) 2.5%, transparent) 44%, transparent 80%);
+}
+
+.canvas-status-title {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  padding-inline: 0.18rem;
+  color: var(--canvas-surface-foreground);
+  background-image: linear-gradient(105deg, var(--canvas-surface-foreground) 0%, var(--canvas-surface-foreground) 38%, color-mix(in srgb, #ffffff 92%, var(--canvas-core-blue)) 50%, var(--canvas-surface-foreground) 62%, var(--canvas-surface-foreground) 100%);
+  background-position: 160% 0;
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--canvas-core-blue) 14%, transparent));
+  animation: canvas-status-sheen 3.8s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+.canvas-status-title::after {
+  content: "";
+  position: absolute;
+  inset: -35% auto -35% -34%;
+  width: 20%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, #ffffff 86%, var(--canvas-core-blue)), transparent);
+  filter: blur(2px);
+  opacity: 0;
+  transform: skewX(-18deg) translateX(-180%);
+  animation: canvas-status-title-glint 3.4s ease-in-out infinite;
 }
 
 /* A single soft sweep communicates the last, photographic scanning pass. */
@@ -2747,6 +2800,46 @@ textarea {
 }
 .canvas-reconstruction-scan::before { background-size: 100% 100%; background-image: linear-gradient(transparent, color-mix(in srgb, var(--canvas-ai-ink) 20%, transparent), transparent); }
 .canvas-result-actions { z-index: 2; }
+
+/* Keep the artwork unobstructed until the pointer enters a navigation side. */
+.canvas-carousel-nav-zone {
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 180ms ease-out;
+}
+.canvas-carousel-nav-zone:hover,
+.canvas-carousel-nav-zone:focus-within {
+  opacity: 1;
+}
+.canvas-carousel-nav-zone > button {
+  border-color: color-mix(in srgb, var(--color-border) 58%, transparent);
+  background: color-mix(in srgb, var(--color-panel) 42%, transparent);
+  color: color-mix(in srgb, var(--color-foreground) 78%, transparent);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-foreground) 7%, transparent);
+}
+.canvas-carousel-nav-zone > button:hover,
+.canvas-carousel-nav-zone > button:focus-visible {
+  background: color-mix(in srgb, var(--color-panel) 56%, transparent);
+}
+.canvas-fullscreen-nav-zone {
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 180ms ease-out;
+}
+.canvas-fullscreen-nav-zone:hover,
+.canvas-fullscreen-nav-zone:focus-within {
+  opacity: 1;
+}
+.canvas-fullscreen-nav-zone > button {
+  border-color: color-mix(in srgb, var(--color-border) 58%, transparent);
+  background: color-mix(in srgb, var(--color-panel) 42%, transparent);
+  color: color-mix(in srgb, var(--color-foreground) 82%, transparent);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--color-foreground) 12%, transparent);
+}
+.canvas-fullscreen-nav-zone > button:hover,
+.canvas-fullscreen-nav-zone > button:focus-visible {
+  background: color-mix(in srgb, var(--color-panel) 58%, transparent);
+}
 
 .canvas-empty-frame {
   position: relative;
@@ -2866,24 +2959,64 @@ textarea {
   50% { transform: translate3d(5px, -8px, 0); opacity: 0.3; }
 }
 @keyframes canvas-prompt-particle-flow {
-  0% { transform: translate3d(0, 0, 0) scale(0.6); opacity: 0; }
-  18% { opacity: 0.58; }
-  80% { transform: translate3d(210px, 36px, 0) scale(1); opacity: 0.22; }
-  100% { transform: translate3d(250px, 42px, 0) scale(0.25); opacity: 0; }
+  0%, 8% {
+    left: var(--prompt-particle-start-x);
+    top: var(--prompt-particle-start-y);
+    transform: translate(-50%, -50%) scale(0.4);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.58;
+  }
+  48% {
+    left: var(--prompt-particle-mid-x);
+    top: var(--prompt-particle-mid-y);
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0.42;
+  }
+  78% {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.58);
+    opacity: 0.18;
+  }
+  100% {
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.08);
+    opacity: 0;
+  }
 }
 @keyframes canvas-token-enter {
-  0%, 10% { left: var(--token-start); transform: translateX(-12px); opacity: 0; }
-  28%, 68% { left: calc(var(--token-start) + 4%); transform: translateX(0); opacity: 0.72; }
-  100% { left: 86%; transform: translateX(-100%); opacity: 0; }
+  0%, 14% { transform: translate(-50%, 7px) scale(0.96); opacity: 0; filter: blur(4px); }
+  28%, 64% { transform: translate(-50%, 0) scale(1); opacity: 0.52; filter: blur(0); }
+  100% { transform: translate(-50%, -5px) scale(0.98); opacity: 0; filter: blur(4px); }
 }
 @keyframes canvas-token-dissolve {
-  0%, 18% { left: var(--token-start); transform: translateX(0); opacity: 0.38; filter: blur(0); }
-  62%, 100% { left: 86%; transform: translateX(-100%); opacity: 0; filter: blur(4px); }
+  0%, 18% { transform: translate(-50%, 0); opacity: 0.34; filter: blur(0); }
+  62%, 100% { transform: translate(-50%, -5px); opacity: 0; filter: blur(4px); }
 }
 @keyframes canvas-formation-build {
-  0%, 12% { transform: scale(0.72) rotate(-6deg); opacity: 0; }
-  42%, 74% { transform: scale(1) rotate(0); opacity: 0.52; }
-  100% { transform: scale(1.04) rotate(2deg); opacity: 0.2; }
+  0%, 12% { transform: scale(0.78) rotate(-6deg); opacity: 0; }
+  42%, 74% { transform: scale(1) rotate(0); opacity: 0.24; }
+  100% { transform: scale(1.06) rotate(2deg); opacity: 0.08; }
+}
+@keyframes canvas-status-sheen {
+  0%, 20% { background-position: 160% 0; }
+  62%, 100% { background-position: -60% 0; }
+}
+@keyframes canvas-status-title-glint {
+  0%, 24% { opacity: 0; transform: skewX(-18deg) translateX(-180%); }
+  38% { opacity: 0.72; }
+  58%, 100% { opacity: 0; transform: skewX(-18deg) translateX(670%); }
+}
+@keyframes canvas-status-dock-float {
+  0%, 100% { transform: translateY(1px); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes canvas-status-aura-pulse {
+  0%, 100% { opacity: 0.16; transform: translateX(-50%) scale(0.84); }
+  50% { opacity: 0.34; transform: translateX(-50%) scale(1.04); }
 }
 @keyframes canvas-scan-travel {
   from { transform: translateY(-28%); }
@@ -2937,6 +3070,8 @@ textarea {
 
 @media (hover: none) {
   .canvas-result-actions { opacity: 1; }
+  .canvas-carousel-nav-zone { opacity: 1; }
+  .canvas-fullscreen-nav-zone { opacity: 1; }
 }
 
 .sort-control-panel {
@@ -3038,6 +3173,17 @@ textarea {
   .canvas-prompt-particle,
   .canvas-prompt-token,
   .canvas-formation-block {
+    animation: none !important;
+  }
+
+  .canvas-status-title {
+    animation: none !important;
+    background-position: 50% 0;
+  }
+
+  .canvas-status-dock,
+  .canvas-status-dock::before,
+  .canvas-status-title::after {
     animation: none !important;
   }
 
@@ -3816,4 +3962,68 @@ html:not([data-theme="light"]) .visual-life-effect-overlay {
 @keyframes app-loading-progress-slide {
   0% { transform: translateX(-20%); }
   100% { transform: translateX(220%); }
+}
+
+/*
+ * 超分工作台画布底纹。空态需要一点肌理，否则整块实心 panel 看起来像没做完的白板。
+ * 只用令牌色合成，不引入新的字面色值。
+ */
+.upscale-canvas-grid {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--color-foreground) 7%, transparent) 1px,
+    transparent 0
+  );
+  background-size: 18px 18px;
+}
+
+/*
+ * 预览区背后的透明棋盘格。刻意压到很低对比，只负责托住图片边界，
+ * 不和数据本身抢注意力；深色主题下由令牌自动跟随。
+ */
+.upscale-alpha-checker {
+  background-color: var(--color-panel);
+  background-image:
+    linear-gradient(45deg, color-mix(in srgb, var(--color-foreground) 3.5%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--color-foreground) 3.5%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--color-foreground) 3.5%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--color-foreground) 3.5%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+/*
+ * 超分工作台沿用创作画布的卡片语言：同样的描边色、同样的柔和投影、
+ * 同样的渐变表面。画布那边的规则在 .canvas-layout 里，这里照抄一份，
+ * 两个模块看起来才像同一个产品，而不是两套拼装风格。
+ */
+.upscale-panel {
+  border-color: color-mix(in srgb, var(--color-panel) 70%, var(--color-border));
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--color-foreground) 3%, transparent);
+}
+
+/* 预览画布的表面：和创作画布的工作区同一套径向渐变语言。 */
+.upscale-surface {
+  background:
+    radial-gradient(ellipse 72% 88% at 18% 18%, color-mix(in srgb, var(--color-chrome-start) 38%, transparent), transparent 68%),
+    radial-gradient(ellipse 70% 78% at 84% 76%, color-mix(in srgb, var(--color-chrome-end) 34%, transparent), transparent 70%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 86%, transparent), color-mix(in srgb, var(--color-chrome-control) 30%, transparent) 52%, color-mix(in srgb, var(--color-panel) 78%, transparent));
+}
+
+/* 分段控件：创作画布的引擎/倍率切换用的就是这一套。 */
+.upscale-segment {
+  border-color: color-mix(in srgb, var(--color-border) 80%, transparent);
+  background: color-mix(in srgb, var(--color-background) 70%, transparent);
+}
+.upscale-segment > button {
+  color: var(--color-muted);
+}
+.upscale-segment > button:hover {
+  color: var(--color-foreground);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+.upscale-segment > button[data-active="true"] {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 28%, transparent);
 }

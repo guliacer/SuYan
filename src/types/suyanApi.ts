@@ -1,4 +1,5 @@
 import type { TagOrganizationPreview, TagOrganizationRequest } from "../features/library/types/tagKnowledge";
+import type { WeatherCity, WeatherForecast, WeatherPromptClaim, WeatherSettings, SaveWeatherSettingsInput } from "./weather";
 import type { TodoCalendarSettings, TodoCalendarChange, TodoHolidayResult } from "./todoCalendar";
 import type {
   LibraryFile,
@@ -88,14 +89,18 @@ import type {
 import type {
   RealEsrganRunRequest,
   UpscaleComponentStatus,
+  UpscaleDropboxScanResult,
   UpscaleEngine,
   UpscaleExportRequest,
   UpscaleExportResult,
+  UpscaleExportTargetDescriptor,
   UpscaleInputDescriptor,
   UpscaleModelId,
   UpscaleOutputDirectoryDescriptor,
   UpscaleOutputFormat,
   UpscaleProgressEvent,
+  UpscaleReplaceSourceRequest,
+  UpscaleReplaceSourceResult,
   UpscaleResultDescriptor,
 } from "../features/upscale/types";
 
@@ -653,6 +658,11 @@ export type SuyanApi = {
   ) => Promise<IpcResult<ImportImagesData>>;
   hideWebAssistant: (platform?: WebAssistantTargetId) => Promise<IpcResult<{ visible: false }>>;
   disposeWebAssistant: () => Promise<IpcResult<{ disposed: true }>>;
+  readWeatherSettings: () => Promise<IpcResult<WeatherSettings>>;
+  claimWeatherPrompt: () => Promise<IpcResult<WeatherPromptClaim>>;
+  saveWeatherSettings: (input: SaveWeatherSettingsInput) => Promise<IpcResult<WeatherSettings>>;
+  searchWeatherCities: (query: string) => Promise<IpcResult<WeatherCity[]>>;
+  readWeatherForecast: () => Promise<IpcResult<WeatherForecast | null>>;
   readProxySettings: () => Promise<IpcResult<ProxySettings>>;
   saveProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxySettings>>;
   testProxySettings: (settings: ProxySettings) => Promise<IpcResult<ProxyTestData>>;
@@ -665,6 +675,7 @@ export type SuyanApi = {
   removeUpscaleComponent: (engine: UpscaleEngine) => Promise<IpcResult<{ removed: boolean }>>;
   pickUpscaleInputs: (kind: "files" | "directory") => Promise<IpcResult<UpscaleInputDescriptor[]>>;
   registerUpscaleFiles: (files: File[], sourceItemId?: string | null) => Promise<IpcResult<UpscaleInputDescriptor[]>>;
+  registerUpscaleLibraryItem: (itemId: string) => Promise<IpcResult<UpscaleInputDescriptor>>;
   readUpscaleInput: (token: string) => Promise<IpcResult<Uint8Array>>;
   readUpscaleModel: (modelId: UpscaleModelId) => Promise<IpcResult<Uint8Array>>;
   runRealEsrgan: (request: RealEsrganRunRequest) => Promise<IpcResult<UpscaleResultDescriptor>>;
@@ -677,6 +688,20 @@ export type SuyanApi = {
   readUpscaleResult: (token: string) => Promise<IpcResult<Uint8Array>>;
   pickUpscaleOutputDirectory: () => Promise<IpcResult<UpscaleOutputDirectoryDescriptor | null>>;
   exportUpscaleResult: (request: UpscaleExportRequest) => Promise<IpcResult<UpscaleExportResult>>;
+  pickUpscaleExportTarget: (request: {
+    mode: "library" | "directory" | "file";
+    fileName?: string;
+    format?: UpscaleOutputFormat;
+  }) => Promise<IpcResult<UpscaleExportTargetDescriptor | null>>;
+  replaceUpscaleSource: (request: UpscaleReplaceSourceRequest) => Promise<IpcResult<UpscaleReplaceSourceResult>>;
+  /** 模型收件目录：返回目录路径（不存在会顺手建好）。 */
+  getUpscaleDropboxPath: () => Promise<IpcResult<{ dropboxDir: string }>>;
+  /** 扫描收件目录，把能识别的模型装好并登记。 */
+  scanUpscaleDropbox: () => Promise<IpcResult<UpscaleDropboxScanResult>>;
+  /** 在资源管理器里打开收件目录。 */
+  openUpscaleDropbox: () => Promise<IpcResult<{ opened: true; path: string }>>;
+  /** 监听「文件已丢进收件目录、自动装好了」的事件。 */
+  onUpscaleDropboxChanged: (callback: (result: UpscaleDropboxScanResult) => void) => () => void;
   onUpscaleProgress: (callback: (progress: UpscaleProgressEvent) => void) => () => void;
   deduplicateScan: () => Promise<IpcResult<DeduplicateResult>>;
   compressImages: (options: ImageCompressOptions) => Promise<IpcResult<CompressResult>>;

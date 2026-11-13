@@ -2,16 +2,20 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 type Sharp = {
-  (buffer: Buffer): SharpPipeline;
+  (buffer: Buffer, options?: { failOn?: "none" | "truncated" | "error" | "warning" }): SharpPipeline;
 };
 
 type SharpPipeline = {
   rotate(): SharpPipeline;
+  /** 超分导出要保持原图 EXIF/ICC，需要显式透传元数据。 */
+  withMetadata(): SharpPipeline;
   jpeg(options: { quality: number; mozjpeg?: boolean }): SharpPipeline;
-  png(options: { compressionLevel: number; palette: boolean; quality: number }): SharpPipeline;
-  webp(options: { quality: number }): SharpPipeline;
+  png(options: { compressionLevel: number; palette: boolean; quality?: number }): SharpPipeline;
+  webp(options: { quality: number; effort?: number }): SharpPipeline;
   resize(options: { width?: number; height?: number; fit?: string; withoutEnlargement?: boolean }): SharpPipeline;
-  metadata(): Promise<{ width?: number; height?: number }>;
+  /** format 由 sharp 从字节流嗅探，扩展名不可信时以此为准。
+   *  orientation 来自 EXIF（1-8），5-8 表示需要旋转 90°，宽高要互换。 */
+  metadata(): Promise<{ width?: number; height?: number; format?: string; orientation?: number }>;
   stats(): Promise<{ channels: Array<{ max: number; min: number }> }>;
   toBuffer(): Promise<Buffer>;
   toFile(path: string): Promise<unknown>;

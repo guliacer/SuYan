@@ -48,6 +48,12 @@ export type BuiltinModuleDefinition = {
   defaultInstalled: boolean;
   defaultEnabled: boolean;
   dependencies: readonly BuiltinModuleId[];
+  /**
+   * 「满足其一即可」的运行时依赖。
+   * 用于双引擎二选一的场景（图片超分 = Real-CUGAN 或 Real-ESRGAN），
+   * dependencies 表达「全都要」，anyOfDependencies 表达「至少一个」。
+   */
+  anyOfDependencies?: readonly BuiltinModuleId[];
   capabilities: readonly BuiltinModuleCapability[];
 };
 
@@ -184,12 +190,14 @@ export const builtinModuleDefinitions: readonly BuiltinModuleDefinition[] = [
   {
     id: "image-upscale",
     label: "图片超分",
-    description: "使用 Real-CUGAN 与 Real-ESRGAN 放大并修复本地图片。",
+    description: "使用 Real-CUGAN 与 Real-ESRGAN 放大并修复本地图片。两个引擎按需下载，装好任意一个即可使用。",
     category: "batch",
     required: false,
     defaultInstalled: true,
     defaultEnabled: true,
     dependencies: ["core-library"],
+    // 双引擎二选一：只装 Real-CUGAN（动漫）或只装 Real-ESRGAN（照片）都算可用。
+    anyOfDependencies: ["real-cugan-runtime", "real-esrgan-runtime"],
     capabilities: ["image-upscale"],
   },
 ];
@@ -280,7 +288,21 @@ export function isBuiltinModuleEnabled(
   const nextVisiting = new Set(visiting);
   nextVisiting.add(moduleId);
 
-  return definition.dependencies.every((dependencyId) =>
+  const requiredDependenciesSatisfied = definition.dependencies.every((dependencyId) =>
+    isBuiltinModuleEnabled(dependencyId, state, nextVisiting),
+  );
+  if (!requiredDependenciesSatisfied) {
+    return false;
+  }
+
+  const anyOfDependencies = definition.anyOfDependencies ?? [];
+  if (anyOfDependencies.length === 0) {
+    return true;
+  }
+
+  // 任一可选依赖可用即可；全部未装时整个能力判为不可用，
+  // 这样「图片超分」不会在没有任何引擎的情况下还显示「可用」。
+  return anyOfDependencies.some((dependencyId) =>
     isBuiltinModuleEnabled(dependencyId, state, nextVisiting),
   );
 }

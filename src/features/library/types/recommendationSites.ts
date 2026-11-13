@@ -18,7 +18,7 @@ export type RecommendationSite = {
 /**
  * 与线上 resource-recommendations 的生图分类对齐。
  *
- * 维护顺序：后续新增的生图站点插入数组最前面；当前前四位是用户指定的重点卡片，
+ * 维护顺序：后续新增的生图站点插入数组最前面；当前前三位是用户指定的重点卡片，
  * 新增站点会自然排在它们之前，其余历史卡片保持原有相对顺序。
  */
 export const IMAGE_GEN_SITE_RECOMMENDATIONS: RecommendationSite[] = [
@@ -28,13 +28,6 @@ export const IMAGE_GEN_SITE_RECOMMENDATIONS: RecommendationSite[] = [
     url: "https://ai.xmiaom.com/sign-up?aff=bibi",
     description: "多方式注册，可签到，可生图。",
     tags: ["L 站", "多方式注册", "可签到", "可生图"],
-  },
-  {
-    title: "智画创",
-    domain: "wisart.kuaileshifu.com",
-    url: "https://wisart.kuaileshifu.com/",
-    description: "L 站注册，需要注册码，可签到，可玩小游戏。",
-    tags: ["L 站注册", "需要注册码", "可签到", "小游戏"],
   },
   {
     title: "Agnes",
