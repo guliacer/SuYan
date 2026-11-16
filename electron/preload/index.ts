@@ -147,6 +147,7 @@ const suyanApi: SuyanApi = {
   copyImage: (imageFileName: string) => invoke(IpcChannelName.ImageCopy, imageFileName),
   exportImage: (source: Parameters<SuyanApi["exportImage"]>[0]) => invoke(IpcChannelName.ImageExport, source),
   getImageFileSize: (imageFileName: string) => invoke(IpcChannelName.ImageGetFileSize, imageFileName),
+  getImagePaletteSample: (imageFileName: string) => invoke(IpcChannelName.ImageGetPaletteSample, imageFileName),
   resolveImageThumbnail: (imageFileName: string) => invoke(IpcChannelName.ImageThumbnailResolve, imageFileName),
   resolveImageThumbnails: (imageFileNames: string[]) =>
     invoke(IpcChannelName.ImageThumbnailsResolve, imageFileNames),

@@ -1,6 +1,6 @@
 import { clipboard, nativeImage } from "electron";
 import fs from "node:fs/promises";
-import { getSharp } from "../runtime/imageRuntime";
+import { createSharpImageFromBuffer } from "../library/photoshopImage";
 import { AppError } from "../ipc/errors";
 import { logger } from "../appLogger";
 
@@ -10,7 +10,7 @@ export async function copyImageFileToClipboard(filePath: string, imageFileName: 
   try {
     const bytes = await fs.readFile(filePath);
     stage = "decode";
-    const png = await getSharp()(bytes).rotate().png({ compressionLevel: 6, palette: false, quality: 100 }).toBuffer();
+    const png = await createSharpImageFromBuffer(bytes).rotate().png({ compressionLevel: 6, palette: false, quality: 100 }).toBuffer();
     const image = nativeImage.createFromBuffer(png);
     if (image.isEmpty()) throw new Error("Empty PNG image");
     stage = "write";

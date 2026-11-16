@@ -24,6 +24,7 @@ export const videoFileExtensions = [
 
 export const imageFileExtensions = [
   ".png",
+  ".psd",
   ".jpg",
   ".jpeg",
   ".webp",

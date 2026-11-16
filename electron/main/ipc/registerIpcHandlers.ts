@@ -126,6 +126,7 @@ import {
 } from "../library/lexiconFiles";
 import { getImageThumbnailPath, getImagePath } from "../library/libraryPaths";
 import { resolveMediaAbsolutePath } from "../library/mediaPathResolver";
+import { sampleImagePaletteFromBuffer } from "../library/imagePalette";
 import {
   findLibraryItemByImageFileName,
   findLibraryItemById,
@@ -638,6 +639,17 @@ export function registerIpcHandlers(): void {
       const imagePath = item ? await resolveMediaAbsolutePath(item) : getImagePath(imageFileName);
       const stats = await fs.stat(imagePath).catch(() => null);
       return { size: stats?.size ?? 0 };
+    }),
+  );
+  ipcMain.handle(ipcChannels.imageGetPaletteSample, (_event, imageFileName: unknown) =>
+    handleResult("image:get-palette-sample", async () => {
+      if (typeof imageFileName !== "string" || !imageFileName || imageFileName.length > 256 || /[\\/]/.test(imageFileName)) {
+        throw new AppError("INVALID_IMAGE_FILE_NAME", "素材文件名不合法。");
+      }
+      const item = await findLibraryItemByImageFileName(imageFileName);
+      if (!item) throw new AppError("IMAGE_NOT_FOUND", "素材不存在。");
+      const imagePath = await resolveMediaAbsolutePath(item);
+      return sampleImagePaletteFromBuffer(await fs.readFile(imagePath));
     }),
   );
   ipcMain.handle(ipcChannels.clipboardWriteText, (_event, text: string) =>

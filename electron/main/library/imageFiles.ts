@@ -1,5 +1,6 @@
 import { clipboard, net } from "electron";
 import { copyImageFileToClipboard } from "../clipboard/copyImageFile";
+import { getCopiedImportSource } from "./importSource";
 import { dialog } from "../app/fileDialogs";
 import { formatExportFileName } from "../app/exportFileName";
 import { reportExportProgress } from "../app/exportTask";
@@ -523,7 +524,7 @@ async function copyMediaFileToBlankLibraryItem(
   const draft = await readImportImageMetadataDraft(sourcePath);
 
   const work = await readWorkFromImageFile(sourcePath);
-  return { ...buildImportedMediaItem(draft, id, imageFileName, now), ...work };
+  return { ...buildImportedMediaItem(draft, id, imageFileName, now), ...work, importSource: await getCopiedImportSource(sourcePath) };
 }
 
 function buildImportedMediaItem(

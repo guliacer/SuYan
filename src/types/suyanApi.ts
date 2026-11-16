@@ -563,6 +563,7 @@ export type SuyanApi = {
   copyImage: (imageSource: string) => Promise<IpcResult<{ copied: true }>>;
   exportImage: (source: string | GeneratedWorkExportInput) => Promise<IpcResult<ExportImageData>>;
   getImageFileSize: (imageFileName: string) => Promise<IpcResult<{ size: number }>>;
+  getImagePaletteSample: (imageFileName: string) => Promise<IpcResult<{ width: number; height: number; pixels: Uint8Array }>>;
   resolveImageThumbnail: (imageFileName: string) => Promise<IpcResult<ResolvedImageSourceData>>;
   resolveImageThumbnails: (imageFileNames: string[]) => Promise<IpcResult<ResolvedImageSourcesData>>;
   writeClipboardText: (text: string) => Promise<IpcResult<{ copied: true }>>;

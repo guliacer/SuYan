@@ -90,7 +90,7 @@ import { appVersion, suyanGithubReleasesUrl } from "../appVersion";
 import { ImageDropOverlay } from "./shell/ImageDropOverlay";
 import { StatusToast } from "./shell/StatusToast";
 import { AiErrorDialog } from "./shell/AiErrorDialog";
-import { DeferredViewFallback, PromptDetailFallback } from "./shell/DeferredFallbacks";
+import { DeferredViewFallback } from "./shell/DeferredFallbacks";
 import { AppTitleBar } from "./shell/AppTitleBar";
 import { AboutDialog } from "./shell/AboutDialog";
 import { AppUpdateDialog } from "./shell/AppUpdateDialog";
@@ -127,6 +127,11 @@ import { NsfwImage } from "./NsfwImage";
 import { VisualLifeMediaFrame } from "./VisualLifeEffectOverlay";
 import { MediaFullscreenOverlay } from "./MediaFullscreenOverlay";
 import { VideoPromptTile } from "./video/VideoPromptTile";
+import { LibraryDirectoryMode } from "./LibraryDirectoryMode";
+import { LibraryMediaViewer } from "./LibraryMediaViewer";
+import { LibraryAssetInfo } from "./LibraryAssetInfo";
+import { getLibraryDirectoryAncestorIds, getLibraryItemDirectoryId, mergeLibraryDirectoryNodes, UNFILED_LIBRARY_DIRECTORY_ID } from "../utils/libraryDirectory";
+import { buildLibraryDirectoryColors } from "../utils/libraryDirectoryAppearance";
 import { RotatingLoadingTip } from "@/components/ui/RotatingLoadingTip";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { AccountSidebarEntry } from "@/features/account/components/AccountSidebarEntry";
@@ -228,8 +233,8 @@ const NsfwSettingsDialog = lazy(() =>
 const SystemPreferencesDialog = lazy(() =>
   import("./SystemPreferencesDialog").then((module) => ({ default: module.SystemPreferencesDialog })),
 );
-const loadPromptDetailDialog = () => import("./PromptDetailDialog");
-const PromptDetailDialog = lazy(() => loadPromptDetailDialog().then((module) => ({ default: module.PromptDetailDialog })));
+// Load the full editor only after the viewer's explicit prompt expansion.
+const PromptDetailDialog = lazy(() => import("./PromptDetailDialog").then((module) => ({ default: module.PromptDetailDialog })));
 const PromptLibraryManagerView = lazy(() =>
   import("./PromptLibraryManagerDialog").then((module) => ({ default: module.PromptLibraryManagerView })),
 );
@@ -363,6 +368,8 @@ export function LibraryView() {
   recordLibraryViewRender();
   const items = useLibraryStore((state) => state.items);
   const libraryRoots = useLibraryStore((state) => state.libraryRoots);
+  const libraryDirectorySettings = useLibraryStore((state) => state.libraryDirectorySettings);
+  const imageViewTransforms = useLibraryStore((state) => state.imageViewTransforms);
   const searchQuery = useLibraryStore((state) => state.searchQuery);
   const tagOrder = useLibraryStore((state) => state.tagOrder);
   const likedImageIds = useLibraryStore((state) => state.likedImageIds);
@@ -444,6 +451,8 @@ export function LibraryView() {
   const scanLibraryRoot = useLibraryStore((state) => state.scanLibraryRoot);
   const setLibraryRootWatch = useLibraryStore((state) => state.setLibraryRootWatch);
   const reorderLibraryRoots = useLibraryStore((state) => state.reorderLibraryRoots);
+  const saveLibraryDirectorySettings = useLibraryStore((state) => state.saveLibraryDirectorySettings);
+  const saveImageViewTransform = useLibraryStore((state) => state.saveImageViewTransform);
   const remapLibraryRoot = useLibraryStore((state) => state.remapLibraryRoot);
   const removeLibraryRoot = useLibraryStore((state) => state.removeLibraryRoot);
   const purgeMissingLibraryRootItems = useLibraryStore((state) => state.purgeMissingLibraryRootItems);
@@ -562,6 +571,7 @@ export function LibraryView() {
     defaultSystemPreferenceSection,
   );
   const [isLibraryRootsOpen, setIsLibraryRootsOpen] = useState(false);
+  const [isLibraryRootsDialogOpen, setIsLibraryRootsDialogOpen] = useState(false);
   const [isDirectoryImportModeOpen, setIsDirectoryImportModeOpen] = useState(false);
   const [isImportMenuOpen, setIsImportMenuOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(getStoredSidebarOpen);
@@ -787,9 +797,6 @@ export function LibraryView() {
       setIsNsfwSettingsOpen(false);
     }
 
-    if (isLibraryRootsOpen && !sidebarEntryVisibility.libraryRoots) {
-      setIsLibraryRootsOpen(false);
-    }
 
     if (
       (isDirectoryImportModeOpen || isImportMenuOpen) &&
@@ -811,7 +818,6 @@ export function LibraryView() {
     isAiSettingsOpen,
     isDirectoryImportModeOpen,
     isImportMenuOpen,
-    isLibraryRootsOpen,
     isLogExportOpen,
     isNsfwSettingsOpen,
     mainView,
@@ -1114,7 +1120,6 @@ export function LibraryView() {
     isAboutOpen,
     isAiSettingsOpen,
     isDirectoryImportModeOpen,
-    isLibraryRootsOpen,
     isLogExportOpen,
     isNsfwSettingsOpen,
     isSystemPreferencesOpen,
@@ -1439,7 +1444,19 @@ export function LibraryView() {
     [masonryDisplayItems, visibleCount],
   );
   const hasVisibleResults = displayCount > 0;
-  const detailItem = promptCards.find((item) => item.id === detailItemId) ?? null;
+  const libraryItemById = useMemo(() => new Map(items.map(item => [item.id, item])), [items]);
+  const isMediaViewerOpen = Boolean(detailItemId);
+  const mediaViewerDirectorySettings = useMemo(
+    () => isMediaViewerOpen ? mergeLibraryDirectoryNodes({ items, roots: libraryRoots, settings: libraryDirectorySettings }) : null,
+    [isMediaViewerOpen, items, libraryRoots, libraryDirectorySettings],
+  );
+  const detailItem = useMemo(() => {
+    if (!detailItemId) return null;
+    const card = promptCards.find(item => item.id === detailItemId);
+    if (card) return card;
+    const rawItem = libraryItemById.get(detailItemId);
+    return rawItem ? toPromptCardData(rawItem) : null;
+  }, [detailItemId, promptCards, libraryItemById]);
   const detailGroupItems = useMemo(
     () => (detailItem ? getPromptImageGroupItems(detailItem, promptCards, likedImageIds) : []),
     [detailItem, likedImageIds, promptCards],
@@ -1503,7 +1520,6 @@ export function LibraryView() {
     isAiSettingsOpen,
     isDirectoryImportModeOpen,
     isImportMenuOpen,
-    isLibraryRootsOpen,
     isLogExportOpen,
     isNsfwSettingsOpen,
     isSystemPreferencesOpen,
@@ -1595,34 +1611,7 @@ export function LibraryView() {
     };
   }, [isInitialLibraryLoading]);
 
-  useEffect(() => {
-    if (!hasInitialLoadFinished) {
-      return;
-    }
 
-    const prefetchDetailDialog = () => {
-      void loadPromptDetailDialog()
-        .then(() => {
-          logRendererStartupEvent("detail-dialog:prefetched");
-        })
-        .catch(() => {
-          logRendererStartupEvent("detail-dialog:prefetch-failed");
-        });
-    };
-
-    const timer = window.setTimeout(() => {
-      if (typeof window.requestIdleCallback === "function") {
-        window.requestIdleCallback(prefetchDetailDialog, { timeout: 1800 });
-        return;
-      }
-
-      prefetchDetailDialog();
-    }, 900);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [hasInitialLoadFinished]);
 
   const handleHomeSearchSubmit = useCallback(() => {
     setVisibleCount(pageSize);
@@ -1647,6 +1636,120 @@ export function LibraryView() {
     },
     [downloadRemoteMaterial],
   );
+  const handleSaveLibraryAssetInfo = useCallback(async (id: string, patch: Partial<LibraryItem>) => {
+    await saveItem(id, patch, { background: true, silent: true, preserveManualTags: true });
+    const latest = useLibraryStore.getState().items.find(item => item.id === id);
+    return Boolean(latest && Object.entries(patch).every(([key, value]) =>
+      JSON.stringify(latest[key as keyof LibraryItem]) === JSON.stringify(value),
+    ));
+  }, [saveItem]);
+  const mediaViewerDirectoryColors = useMemo(() => buildLibraryDirectoryColors(mediaViewerDirectorySettings?.nodes ?? []), [mediaViewerDirectorySettings?.nodes]);
+  const locateMediaViewerItem = useCallback((item: LibraryItem, tag = "") => {
+    if (!mediaViewerDirectorySettings) return;
+    const directoryId = getLibraryItemDirectoryId(item, mediaViewerDirectorySettings, mediaViewerDirectorySettings.nodes) ?? UNFILED_LIBRARY_DIRECTORY_ID;
+    setDetailItemId(null);
+    setIsLibraryRootsOpen(true);
+    void saveLibraryDirectorySettings({
+      ...mediaViewerDirectorySettings,
+      selectedNodeId: directoryId,
+      browseBy: "directories",
+      expandedNodeIds: [...new Set([...(mediaViewerDirectorySettings.expandedNodeIds ?? []), ...getLibraryDirectoryAncestorIds(mediaViewerDirectorySettings.nodes, directoryId)])],
+      includeDescendants: false,
+      searchQuery: "",
+      mediaFilter: "all",
+      favoriteOnly: false,
+      formatFilter: "",
+      tagFilter: tag,
+      categoryFilter: "",
+      minimumRating: 0,
+      availabilityFilter: "all",
+    });
+  }, [mediaViewerDirectorySettings, saveLibraryDirectorySettings]);
+  const renderMediaViewerInfo = useCallback((id: string, compact: boolean) => {
+    const item = libraryItemById.get(id);
+    if (!item || !mediaViewerDirectorySettings) return null;
+    const directoryId = getLibraryItemDirectoryId(item, mediaViewerDirectorySettings, mediaViewerDirectorySettings.nodes);
+    const storage = item.mediaStorage;
+    return <LibraryAssetInfo
+      key={item.id}
+      item={item}
+      root={storage && storage !== "managed" ? libraryRoots.find(root => root.id === storage.rootId) : undefined}
+      directoryName={mediaViewerDirectorySettings.nodes.find(node => node.id === directoryId)?.name}
+      directoryColor={mediaViewerDirectoryColors.get(directoryId ?? "")}
+      compact={compact}
+      blur={blurNsfwImages}
+      favorite={likedImageIds.includes(id)}
+      onSave={handleSaveLibraryAssetInfo}
+      onPreview={openFullscreenMedia}
+      onCopyImage={file => void copyImage(file)}
+      onCopyText={(text, label) => void copyText(text, label)}
+      onFavorite={itemId => void toggleFavoriteImage(itemId)}
+      onLocate={locateMediaViewerItem}
+      onFilterTag={tag => locateMediaViewerItem(item, tag)}
+      onExport={file => void exportImage(file)}
+    />;
+  }, [libraryItemById, mediaViewerDirectorySettings, mediaViewerDirectoryColors, libraryRoots, blurNsfwImages, likedImageIds,
+    handleSaveLibraryAssetInfo, openFullscreenMedia, copyImage, copyText, toggleFavoriteImage, locateMediaViewerItem, exportImage]);
+  function renderPromptPanelForItem(itemId: string, onCollapse: () => void) {
+    const card = promptCards.find(candidate => candidate.id === itemId);
+    const rawItem = card ? null : libraryItemById.get(itemId);
+    const item = card ?? (rawItem ? toPromptCardData(rawItem) : null);
+    if (!item) return null;
+    const groupItems = getPromptImageGroupItems(item, promptCards, likedImageIds);
+    const groupIndex = groupItems.findIndex(groupItem => groupItem.id === item.id);
+    return (
+      <PromptDetailDialog
+        presentation="panel"
+        key={item.id}
+        isBusy={isBusy}
+        isImageLiked={likedImageIds.includes(item.id)}
+        item={item}
+        imageCount={groupItems.length}
+        imageIndex={groupIndex}
+        generationModelOrder={generationModelOrder}
+        hiddenGenerationModels={hiddenGenerationModels}
+        aiSettings={aiSettings}
+        blurNsfwImages={blurNsfwImages}
+        knownCategories={photographyCategoryLabels}
+        onAnalyzePrompt={analyzePromptWithAi}
+        onOptimizePrompt={optimizePromptWithAi}
+        onTranslatePrompt={translatePromptWithAi}
+        onReverseImagePrompt={reverseImagePromptWithAi}
+        onClose={onCollapse}
+        onCopyImage={() => void copyImage(item.imageFileName)}
+        onCopyText={(text) => void copyText(text, t("已复制提示词。"))}
+        onDelete={() => void handleDeleteDetailItem()}
+        onExportImage={() => void exportImage(item.imageFileName)}
+        onImportImages={() => void handleImportImageFilesForDetail()}
+        onImportClipboardImage={() => void handleImportClipboardImageForDetail()}
+        onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(item, prompt, negativePrompt)}
+        onPushPromptToCanvas={(prompt, negativePrompt) => pushPromptToCanvas(item, prompt, negativePrompt)}
+        onNavigateNext={() => navigateDetail(1)}
+        onNavigatePrevious={() => navigateDetail(-1)}
+        onUpsertCustomCategory={upsertCustomCategory}
+        onShareGroup={() => {
+          if (groupItems.length === 0) return;
+          void requestExportZip(groupItems.map(groupItem => groupItem.id));
+        }}
+        onSave={(patch, options) =>
+          saveItem(item.id, patch, {
+            background: true,
+            silent: true,
+            preserveManualTags: options?.preserveManualTags,
+          })
+        }
+        onSaveGenerationModelPreferences={(patch) => void saveGenerationModelPreferences(patch)}
+        onSaveAiActionModelPreference={saveAiActionModelPreference}
+        onSaveAiRecognitionSourcePreferences={saveAiRecognitionSourcePreferences}
+        onToggleImageLike={() => void toggleFavoriteImage(item.id)}
+        onGenerateVideoFrames={generateVideoFrames}
+        onImportVideoReferenceImages={importVideoReferenceImages}
+        onDeleteVideoReferenceImage={deleteVideoReferenceImage}
+        onImportClipboardReferenceImage={importClipboardReferenceImage}
+        onImportReferenceImageFromUrl={importReferenceImageFromUrl}
+      />
+    );
+  }
   const handleCopyPromptItem = useCallback(
     (item: PromptCardData) => {
       void copyText(buildPromptText(item, t), t("已复制提示词。"));
@@ -2155,6 +2258,10 @@ export function LibraryView() {
     storeSidebarOpen(nextIsOpen);
   }
 
+  function toggleActiveSidebar() {
+    toggleSidebar();
+  }
+
   function applySidebarWidthToDom(nextWidth: number) {
     const sidebarElement = sidebarElementRef.current;
     const scrollContainer = scrollContainerRef.current;
@@ -2246,7 +2353,7 @@ export function LibraryView() {
       onDragLeave={handleWindowDragLeave}
       onDrop={handleWindowDrop}
     >
-      <AppTitleBar isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleSidebar} />
+      <AppTitleBar isSidebarOpen={isSidebarOpen} onToggleSidebar={toggleActiveSidebar} />
       {isDirectoryImportModeOpen ? (
         <DirectoryImportModeDialog
           isBusy={isBusy}
@@ -2261,12 +2368,12 @@ export function LibraryView() {
           }}
         />
       ) : null}
-      {isLibraryRootsOpen ? (
+      {isLibraryRootsDialogOpen ? (
         <LibraryRootsDialog
           isBusy={isBusy}
           roots={libraryRoots}
           onAdd={() => setIsDirectoryImportModeOpen(true)}
-          onClose={() => setIsLibraryRootsOpen(false)}
+          onClose={() => setIsLibraryRootsDialogOpen(false)}
           onPurgeMissing={(rootId) => void purgeMissingLibraryRootItems(rootId)}
           onRemap={(rootId) => void remapLibraryRoot(rootId)}
           onRemove={(rootId) => void removeLibraryRoot(rootId)}
@@ -2274,9 +2381,69 @@ export function LibraryView() {
           onScan={(rootId) => void scanLibraryRoot(rootId)}
           onWatchChange={(rootId, enabled) => void setLibraryRootWatch(rootId, enabled)}
           onValidate={() => void validateExternalLibrary()}
+
         />
       ) : null}
       {isImageDragOver ? <ImageDropOverlay /> : null}
+      {isLibraryRootsOpen ? (
+        <LibraryDirectoryMode
+          blurNsfwImages={blurNsfwImages}
+          isBusy={isBusy}
+          isSidebarOpen={isSidebarOpen}
+          items={items}
+          roots={libraryRoots}
+          settings={libraryDirectorySettings}
+          categoryTaxonomy={categoryTaxonomy}
+          likedImageIds={likedImageIds}
+          visualLifeSettings={visualLifeSettings}
+          onAddDirectory={() => setIsDirectoryImportModeOpen(true)}
+          onChangeSettings={saveLibraryDirectorySettings}
+          onExit={() => { setDetailItemId(null); setIsLibraryRootsOpen(false); }}
+          onPrepareItem={openDetailItem}
+          onOpenManager={() => setIsLibraryRootsDialogOpen(true)}
+          renderFocusedViewer={({ itemId, promptExpanded, promptRequestToken }, callbacks) => (
+            <LibraryMediaViewer
+              embedded
+              directoryOnly
+              showDirectoryTree={false}
+              items={items}
+              roots={libraryRoots}
+              directorySettings={libraryDirectorySettings}
+              currentItemId={itemId}
+              imageViewTransforms={imageViewTransforms}
+              blurNsfwImages={blurNsfwImages}
+              initialPromptExpanded={promptExpanded}
+              promptRequestToken={promptRequestToken}
+              onSelectItem={(nextItemId) => { callbacks.onSelectItem(nextItemId); openDetailItem(nextItemId); }}
+              onClose={() => { callbacks.onClose(); setDetailItemId(null); }}
+              onImmersiveChange={callbacks.onImmersiveChange}
+              onSaveImageViewTransform={saveImageViewTransform}
+              renderInfo={renderMediaViewerInfo}
+              renderPromptPanel={renderPromptPanelForItem}
+            />
+          )}
+          onScanRoot={(rootId) => void scanLibraryRoot(rootId)}
+          onValidate={() => void validateExternalLibrary()}
+          onCopyImage={useLibraryStore.getState().copyImage}
+          onCopyText={useLibraryStore.getState().copyText}
+          onToggleFavorite={useLibraryStore.getState().toggleFavoriteImage}
+          onSaveTags={async (ids, tags) => {
+            const current = useLibraryStore.getState();
+            return current.saveItemsBatch(current.items.filter(item => ids.includes(item.id)).map(item => ({ itemId: item.id, patch: { tags: Array.from(new Set([...item.tags, ...tags])) } })));
+          }}
+          onRenameItem={async (id, title) => {
+            await useLibraryStore.getState().saveItem(id, { title });
+            return useLibraryStore.getState().items.find(item => item.id === id)?.title === title;
+          }}
+          onSaveItem={handleSaveLibraryAssetInfo}
+          onExportImage={useLibraryStore.getState().exportImage}
+          onExportItems={useLibraryStore.getState().exportZip}
+          onDeleteItems={async (ids) => {
+            await useLibraryStore.getState().deleteItems(ids, false);
+            return !useLibraryStore.getState().items.some(item => ids.includes(item.id));
+          }}
+        />
+      ) : (
       <div className="library-content-frame relative flex min-h-0 flex-1">
         <div aria-hidden="true" className="library-atmosphere" />
         {isSidebarOpen ? (
@@ -2285,6 +2452,7 @@ export function LibraryView() {
             isBusy={isBusy}
             isCompact={sidebarWidth <= compactSidebarBreakpoint}
             isImportMenuOpen={isImportMenuOpen}
+            isLibraryRootsOpen={isLibraryRootsOpen}
             sidebarEntryVisibility={sidebarEntryVisibility}
             importMenuContentRef={importMenuContentRef}
             importMenuRef={importMenuRef}
@@ -2587,6 +2755,7 @@ export function LibraryView() {
           </CanvasPageBackground>
         </div>
       </div>
+      )}
 
       {statusMessage ? (
         <StatusToast
@@ -2606,61 +2775,21 @@ export function LibraryView() {
         />
       ) : null}
 
-      {detailItem ? (
-        <Suspense fallback={<PromptDetailFallback />}>
-          <PromptDetailDialog
-            key={detailItem.id}
-            isBusy={isBusy}
-            isImageLiked={likedImageIds.includes(detailItem.id)}
-            item={detailItem}
-            imageCount={detailGroupItems.length}
-            imageIndex={detailGroupIndex}
-            generationModelOrder={generationModelOrder}
-            hiddenGenerationModels={hiddenGenerationModels}
-            aiSettings={aiSettings}
-            blurNsfwImages={blurNsfwImages}
-            knownCategories={photographyCategoryLabels}
-            onAnalyzePrompt={analyzePromptWithAi}
-            onOptimizePrompt={optimizePromptWithAi}
-            onTranslatePrompt={translatePromptWithAi}
-            onReverseImagePrompt={reverseImagePromptWithAi}
-            onClose={() => setDetailItemId(null)}
-            onCopyImage={() => void copyImage(detailItem.imageFileName)}
-            onCopyText={(text) => void copyText(text, t("已复制提示词。"))}
-            onDelete={() => void handleDeleteDetailItem()}
-            onExportImage={() => void exportImage(detailItem.imageFileName)}
-            onImportImages={() => void handleImportImageFilesForDetail()}
-            onImportClipboardImage={() => void handleImportClipboardImageForDetail()}
-            onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(detailItem, prompt, negativePrompt)}
-            onPushPromptToCanvas={(prompt, negativePrompt) => pushPromptToCanvas(detailItem, prompt, negativePrompt)}
-            onNavigateNext={() => navigateDetail(1)}
-            onNavigatePrevious={() => navigateDetail(-1)}
-            onUpsertCustomCategory={upsertCustomCategory}
-            onShareGroup={() => {
-              if (detailGroupItems.length === 0) {
-                return;
-              }
-
-              void requestExportZip(detailGroupItems.map((groupItem) => groupItem.id));
-            }}
-            onSave={(patch, options) =>
-              saveItem(detailItem.id, patch, {
-                background: true,
-                silent: true,
-                preserveManualTags: options?.preserveManualTags,
-              })
-            }
-            onSaveGenerationModelPreferences={(patch) => void saveGenerationModelPreferences(patch)}
-            onSaveAiActionModelPreference={saveAiActionModelPreference}
-            onSaveAiRecognitionSourcePreferences={saveAiRecognitionSourcePreferences}
-            onToggleImageLike={() => void toggleFavoriteImage(detailItem.id)}
-            onGenerateVideoFrames={generateVideoFrames}
-            onImportVideoReferenceImages={importVideoReferenceImages}
-            onDeleteVideoReferenceImage={deleteVideoReferenceImage}
-            onImportClipboardReferenceImage={importClipboardReferenceImage}
-            onImportReferenceImageFromUrl={importReferenceImageFromUrl}
-          />
-        </Suspense>
+      {detailItem && !isLibraryRootsOpen ? (
+        <LibraryMediaViewer
+          items={items}
+          roots={libraryRoots}
+          directorySettings={libraryDirectorySettings}
+          currentItemId={detailItem.id}
+          imageViewTransforms={imageViewTransforms}
+          blurNsfwImages={blurNsfwImages}
+          showDirectoryTree={false}
+          onSelectItem={openDetailItem}
+          onClose={() => setDetailItemId(null)}
+          onSaveImageViewTransform={saveImageViewTransform}
+          renderInfo={renderMediaViewerInfo}
+          renderPromptPanel={renderPromptPanelForItem}
+        />
       ) : null}
 
       {isAiSettingsOpen ? (
@@ -2889,6 +3018,7 @@ type LibrarySidebarProps = {
   isBusy: boolean;
   isCompact: boolean;
   isImportMenuOpen: boolean;
+  isLibraryRootsOpen: boolean;
   sidebarEntryVisibility: SidebarEntryVisibility;
   sidebarRef: React.RefObject<HTMLElement | null>;
   width: number;
@@ -2924,6 +3054,7 @@ function LibrarySidebar({
   isBusy,
   isCompact,
   isImportMenuOpen,
+  isLibraryRootsOpen,
   sidebarEntryVisibility,
   sidebarRef,
   width,
@@ -3046,6 +3177,15 @@ function LibrarySidebar({
               onClick={onOpenTagLexicon}
             />
           ) : null}
+          {isEntryVisible("libraryRoots") ? (
+            <SidebarActionButton
+              active={isLibraryRootsOpen}
+              icon={<FolderTree size={17} />}
+              isCompact={isCompact}
+              label={t("目录浏览")}
+              onClick={onOpenLibraryRoots}
+            />
+          ) : null}
           {isEntryVisible("importMaterial") ? (
           <div className="relative min-w-0" data-feature-guide="import-menu" ref={importMenuRef}>
               <SidebarActionButton
@@ -3075,14 +3215,6 @@ function LibrarySidebar({
                   )
                 : null}
             </div>
-          ) : null}
-          {isEntryVisible("libraryRoots") ? (
-            <SidebarActionButton
-              icon={<FolderTree size={17} />}
-              isCompact={isCompact}
-              label={t("素材目录")}
-              onClick={onOpenLibraryRoots}
-            />
           ) : null}
           {isEntryVisible("promptLibrary") ? (
             <SidebarActionButton

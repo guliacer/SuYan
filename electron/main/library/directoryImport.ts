@@ -1,3 +1,4 @@
+import { getCopiedImportSource } from "./importSource";
 import { dialog } from "../app/fileDialogs";
 import type { BrowserWindow } from "electron";
 import path from "node:path";
@@ -70,6 +71,7 @@ export async function chooseAndImportManagedDirectory(
         ...item,
         title: item.title.trim() || path.basename(sourcePath, path.extname(sourcePath)),
         mediaStorage: "managed",
+        importSource: await getCopiedImportSource(sourcePath, directoryPath),
       });
     } catch (error) {
       skippedCount += 1;

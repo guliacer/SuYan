@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -69,7 +69,7 @@ describe("PromptDetailDialog prompt actions", () => {
     expect(source).toContain("negativePromptHidden: true,");
     expect(source).toContain("setCanvasPromptUndoSnapshot({");
     expect(source).toContain("referenceImages: [...canvasDraft.referenceImages, newEntry],");
-    expect(source).toContain("onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(detailItem, prompt, negativePrompt)}");
+    expect(source).toContain("onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(item, prompt, negativePrompt)}");
   });
 
   it("clears stale negative prompt text when transferring a positive-only prompt", () => {
@@ -89,7 +89,7 @@ describe("PromptDetailDialog prompt actions", () => {
     expect(source).toContain('if (isCurrentMediaVideoFile) {\n      return "prompt";');
     expect(source).toContain("allowImageSource={!isCurrentMediaVideoFile}");
     expect(source).toContain('视频仅支持文本分析');
-    expect(fs.readFileSync(libraryViewPath, "utf8")).toContain("key={detailItem.id}");
+    expect(fs.readFileSync(libraryViewPath, "utf8")).toContain("key={item.id}");
   });
 
   it("registers manually entered categories before persisting secondary genre ids", () => {

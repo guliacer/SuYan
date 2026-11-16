@@ -2,11 +2,13 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 type Sharp = {
-  (buffer: Buffer): SharpPipeline;
+  (buffer: Buffer, options?: { raw: { width: number; height: number; channels: 3 | 4 } }): SharpPipeline;
 };
 
 type SharpPipeline = {
   rotate(): SharpPipeline;
+  ensureAlpha(): SharpPipeline;
+  raw(): SharpPipeline;
   jpeg(options: { quality: number; mozjpeg?: boolean }): SharpPipeline;
   png(options: { compressionLevel: number; palette: boolean; quality: number }): SharpPipeline;
   webp(options: { quality: number }): SharpPipeline;
@@ -14,6 +16,7 @@ type SharpPipeline = {
   metadata(): Promise<{ width?: number; height?: number }>;
   stats(): Promise<{ channels: Array<{ max: number; min: number }> }>;
   toBuffer(): Promise<Buffer>;
+  toBuffer(options: { resolveWithObject: true }): Promise<{ data: Buffer; info: { width: number; height: number; channels: number } }>;
   toFile(path: string): Promise<unknown>;
 };
 

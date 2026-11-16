@@ -107,11 +107,12 @@ export const featureGuideDefinitions: Record<FeatureGuideId, FeatureGuideDefinit
   },
   libraryRoots: {
     title: "素材目录",
-    intro: "挂载外部文件夹后，软件可以持续扫描目录变化，同时保留原文件不被改动。",
+    intro: "在目录工作区里浏览和归纳素材；展示层级、归类和布局会自动保留，磁盘原文件保持不变。",
     steps: [
-      { title: "查看已挂载目录", description: "每个目录会显示可用状态、上次扫描时间和监视开关；不可用的目录需要重新定位。", target: '[data-feature-guide="library-roots-list"]' },
-      { title: "处理目录操作", description: "可以重新扫描、重新定位、清理失效索引或移除挂载；移除只清理软件索引，不删除磁盘原文件。", target: '[data-feature-guide="library-roots-actions"]' },
-      { title: "添加新的素材目录", description: "添加后软件会按目录建立外链索引，适合管理大量本地素材而不重复复制原图。", target: '[data-feature-guide="library-roots-add"]' },
+      { title: "搜索和调整浏览", description: "顶部可以添加或扫描素材目录，组合名称、标签、格式和收藏筛选，并切换瀑布流、网格、列表及卡片尺寸。", target: '[data-feature-guide="directory-toolbar"]' },
+      { title: "归纳目录和素材", description: "左侧可新建归纳目录，拖动目录上、中、下区域来排序或嵌套；选中素材后拖入目录会批量归类，不会移动原文件。", target: '[data-feature-guide="directory-tree"]' },
+      { title: "查看素材和批量操作", description: "Ctrl 或 Shift 支持多选，空格预览、Enter 打开详情；批量工具栏可以添加标签、导出分享包或只移除索引。", target: '[data-feature-guide="directory-results"]' },
+      { title: "返回普通工作区", description: "点击退出目录模式恢复普通导航；下次进入或重启软件时，目录层级、归类和筛选仍会保留。", target: '[data-feature-guide="directory-exit"]' },
     ],
   },
   promptLibrary: {
@@ -123,6 +124,15 @@ export const featureGuideDefinitions: Record<FeatureGuideId, FeatureGuideDefinit
       { title: "同步账户作品", description: "登录后可以把已勾选作品关联到当前账户；系统会区分已有作者信息的作品，避免快速选择误替换其他账户。", target: '[data-feature-guide="prompt-library-actions"]' },
       { title: "导出完整分享包", description: "导出所选会携带图像、提示词以及对应的分类库、标签库、分组和封面；导入方不需要重新手动归纳。", target: '[data-feature-guide="prompt-library-actions"]' },
       { title: "打开批处理工具", description: "同一工具栏还可以进入去重检测、图像压缩和视频压缩；这些操作只作用于选定或当前筛选范围。", target: '[data-feature-guide="prompt-library-actions"]' },
+    ],
+  },
+  imageUpscale: {
+    title: "图片超分",
+    intro: "使用本地超分模型放大和修复图片，导出结果后可以继续收录到素材库。",
+    steps: [
+      { title: "选择输入图片", description: "选择一张或多张本地图片作为超分输入，右侧会显示当前任务和预览。", target: '[data-feature-guide="image-upscale-input"]' },
+      { title: "选择引擎与模型", description: "根据图片类型选择 Real-CUGAN 或 Real-ESRGAN，以及合适的倍率和模型。", target: '[data-feature-guide="image-upscale-model"]' },
+      { title: "导出或收录结果", description: "任务完成后可以导出到指定目录，也可以把放大结果追加到原素材组。", target: '[data-feature-guide="image-upscale-export"]' },
     ],
   },
   textPrompts: {

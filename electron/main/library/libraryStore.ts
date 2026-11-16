@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { normalizeLibraryImportSource } from "../../../src/features/library/utils/libraryImportSource";
 import type { LibraryFile, LibraryItem, MediaStorage, VideoKeyframe } from "../../../src/features/library/types/library";
 import type { CategoryAssignmentSource } from "../../../src/features/library/types/category";
 import { normalizeNsfwRating } from "../../../src/features/library/utils/nsfwRating";
@@ -334,6 +335,9 @@ export function normalizeItem(item: LibraryItem): LibraryItem {
     mediaStorage: normalizeMediaStorage(item.mediaStorage),
     prompt: item.prompt,
     negativePrompt: item.negativePrompt,
+    ...(item.notes !== undefined ? { notes: typeof item.notes === "string" ? item.notes.slice(0,100000) : null } : {}),
+    ...(item.rating !== undefined ? { rating: typeof item.rating === "number" && Number.isFinite(item.rating) ? Math.max(0, Math.min(5, Math.round(item.rating))) : null } : {}),
+    ...(item.importSource !== undefined ? { importSource: normalizeLibraryImportSource(item.importSource) } : {}),
     category: normalizeOptionalString(item.category),
     categoryId: normalizeOptionalString(item.categoryId),
     genreIds: normalizeOptionalStringArray(item.genreIds),

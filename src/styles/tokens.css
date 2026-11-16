@@ -3353,6 +3353,45 @@ html[data-window-material="acrylic"] .library-atmosphere {
   }
 }
 
+/*
+ * 大图查看器的沉浸模式：铺满整个窗口并隐藏自绘标题栏，让注意力只落在图像上。
+ * 由 LibraryMediaViewer 在根元素维护 data-media-immersive-viewers 计数，
+ * 只在至少有一个沉浸查看器时生效，退出后立即恢复标题栏与内容安全区。
+ */
+html[data-media-immersive-viewers]:not([data-media-immersive-viewers="0"]) [data-app-titlebar="true"] {
+  display: none;
+}
+
+html[data-media-immersive-viewers]:not([data-media-immersive-viewers="0"]) .app-window-overlay[data-media-viewer-immersive="true"] {
+  inset: var(--app-window-gutter);
+  border-radius: var(--app-window-radius);
+}
+
+/* 图像两侧的留白用带氛围底图的毛玻璃，跟随主题，不再是纯白硬底。 */
+.media-viewer-immersive {
+  background-color: color-mix(in srgb, var(--color-chrome-underlay) calc(var(--theme-navigation-opacity) * 0.62), transparent);
+  background-image: var(--app-atmosphere-image);
+  background-position: center;
+  background-size: auto;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
+  backdrop-filter: blur(28px) saturate(1.2);
+}
+
+[data-theme="dark"] .media-viewer-immersive {
+  background-color: color-mix(in srgb, var(--color-chrome-underlay) calc(var(--theme-navigation-opacity) * 0.86), transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .media-viewer-immersive {
+    background-color: var(--color-chrome-underlay);
+    background-image: var(--app-atmosphere-image);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 .library-content-frame {
   isolation: isolate;
 }

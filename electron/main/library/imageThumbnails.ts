@@ -6,6 +6,7 @@ import { isAudioMediaFile, isVideoMediaFile } from "../../../src/features/librar
 import { logger } from "../appLogger";
 import { getImagePath, getImageThumbnailPath, getImageThumbnailsDir } from "./libraryPaths";
 import { resolveMediaAbsolutePath } from "./mediaPathResolver";
+import { createSharpImageFromBuffer } from "./photoshopImage";
 import { extractVideoFrameToPath, probeVideoDuration } from "./videoFrameExtractor";
 import { waitForImportedVideoNormalization } from "./videoImportNormalizer";
 
@@ -175,17 +176,16 @@ async function createImageThumbnailPathFromSource(
 
 async function createThumbnailWithSharp(imagePath: string, thumbnailPath: string): Promise<string | null> {
   try {
-    const { isSharpAvailable, getSharp } = await import("../runtime/imageRuntime");
+    const { isSharpAvailable } = await import("../runtime/imageRuntime");
     if (!isSharpAvailable()) {
       logger.warn("media-thumbnail", "sharp-unavailable", { file: imagePath });
       return null;
     }
 
-    const sharp = getSharp();
     const tempPath = `${thumbnailPath}.${process.pid}.tmp`;
     const buffer = await fs.readFile(imagePath);
 
-    await sharp(buffer)
+    await createSharpImageFromBuffer(buffer)
       .resize({
         width: maxThumbnailSide,
         height: maxThumbnailSide,

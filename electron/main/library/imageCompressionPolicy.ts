@@ -1,4 +1,5 @@
 export type ImportImageExtension =
+  | ".psd"
   | ".png"
   | ".jpg"
   | ".webp"
@@ -28,6 +29,7 @@ const minimumSavingBytes = 1024;
 const minimumSavingRatio = 0.98;
 
 const allowedImportImageExtensions = new Set<ImportImageExtension>([
+  ".psd",
   ".png",
   ".jpg",
   ".webp",
@@ -47,6 +49,7 @@ const allowedImportImageExtensions = new Set<ImportImageExtension>([
  * Formats whose original bytes are preserved and can be copied without decoding.
  */
 export const passthroughImportImageExtensions = new Set<ImportImageExtension>([
+  ".psd",
   ".gif",
   ".avif",
   ".heic",

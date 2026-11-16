@@ -32,6 +32,20 @@ Keep artwork, videos, prompts, categories, tags, and creative plans together so 
 
 <img src="./photo/readme/library.png" alt="Library browsing" width="100%" />
 
+### Directory browsing
+
+- Browse and organize materials in a hierarchical directory tree: create, rename, drag to regroup, and toggle whether to include subdirectories.
+- Directory mode shows the current folder as masonry, grid, or list, with search, filters, sorting, and batch actions to select, move, tag, export, or remove indexes.
+- The material count sits just above the action buttons, while the tile-size control lives below the action row in the detail panel, taking no extra space.
+- Select an item to review its details and edit prompts and tags on the right; double-click for a focused view with a large image and a thumbnail strip for quick switching, plus direct copy, favorite, and export actions.
+- The prompt panel can expand to show the full prompt, and its width is draggable so more content fits on screen.
+
+<img src="./photo/readme/directory-browse.jpg" alt="Directory browsing: folder tree and masonry materials" width="100%" />
+
+<img src="./photo/readme/directory-viewer.jpg" alt="Directory browsing: focused viewer and detail panel" width="100%" />
+
+<img src="./photo/readme/directory-prompt.jpg" alt="Directory browsing: expanded prompt detail panel" width="100%" />
+
 ### Import, batch processing, and export
 
 - Import local images / videos, paste clipboard images, read Word documents, import share ZIPs, or parse supported web share links.

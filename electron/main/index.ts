@@ -1,3 +1,4 @@
+import { getDisplayableImagePath } from "./library/photoshopImage";
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, shell, type IpcMainEvent } from "electron";
 import { release as osRelease } from "node:os";
 import { supportsWindowAcrylic } from "./window/windowMaterial";
@@ -714,7 +715,7 @@ app.whenReady().then(async () => {
         await waitForImportedVideoNormalization(imagePath);
       }
 
-      return await serveFileWithRange(imagePath, request.headers.get("range"));
+      return await serveFileWithRange(await getDisplayableImagePath(imagePath), request.headers.get("range"));
     } catch (error) {
       logger.error("media", "app-image:error", { message: String(error) });
       return new Response("Not found", { status: 404 });
@@ -821,7 +822,7 @@ app.whenReady().then(async () => {
 
       if (imageStats) {
         source = "original";
-        return net.fetch(pathToFileURL(imagePath).toString());
+        return net.fetch(pathToFileURL(await getDisplayableImagePath(imagePath)).toString());
       }
 
       return new Response("", {

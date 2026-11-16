@@ -35,6 +35,7 @@ export type ImportAudioExtension = ".mp3" | ".wav" | ".m4a" | ".aac" | ".flac" |
 export type ImportMediaExtension = ImportImageExtension | ImportVideoExtension | ImportAudioExtension;
 
 export const supportedImportImageExtensions = [
+  "psd",
   "png",
   "jpg",
   "jpeg",

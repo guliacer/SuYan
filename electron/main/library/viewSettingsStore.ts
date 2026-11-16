@@ -16,6 +16,8 @@ import type {
 } from "../../../src/features/library/types/library";
 import type { CategoryTaxonomy } from "../../../src/features/library/types/category";
 import type { PromptViewSettings } from "../../../src/features/prompts/types";
+import { createDefaultLibraryDirectorySettings, normalizeLibraryDirectorySettings } from "../../../src/features/library/utils/libraryDirectory";
+import { normalizeImageViewTransforms } from "../../../src/features/library/utils/imageViewTransform";
 import { defaultAppLanguage, normalizeAppLanguage, isAppLanguage } from "../../../src/types/locale";
 import { createEmptyCategoryTaxonomy } from "../../../src/features/library/utils/categoryTaxonomy";
 import { defaultCanvasDraftSettings, normalizeCanvasDraftSettings } from "../../../src/features/library/utils/canvasGeneration";
@@ -149,9 +151,8 @@ export async function writeLibraryViewSettingsUnlocked(
 
 async function writeLibraryViewSettingsCore(settings: LibraryViewSettings): Promise<void> {
   const { promptLexicons: _promptLexicons, ...mainSettings } = settings;
-  const tempPath = `${getLibraryViewSettingsPath()}.tmp`;
-  await fs.writeFile(tempPath, JSON.stringify(mainSettings, null, 2), "utf8");
-  await fs.rename(tempPath, getLibraryViewSettingsPath());
+  // Share the library writer: unique temporary file, Windows replacement retry, and recovery copies.
+  await writeLibraryJsonAtomically(getLibraryViewSettingsPath(), JSON.stringify(mainSettings, null, 2));
 }
 
 async function writeLexiconFile(filePath: string, entries: readonly PromptImageLexiconEntry[]): Promise<void> {
@@ -257,6 +258,8 @@ export function normalizeLibraryViewSettings(input: unknown): LibraryViewSetting
     materialBrowserSortDirection: normalizeMaterialBrowserSortDirection(input.materialBrowserSortDirection),
     materialBrowserRandomSeed: normalizeMaterialBrowserRandomSeed(input.materialBrowserRandomSeed),
     materialBrowserScrollTop: normalizeMaterialBrowserScrollTop(input.materialBrowserScrollTop),
+    libraryDirectorySettings: normalizeLibraryDirectorySettings(input.libraryDirectorySettings),
+    imageViewTransforms: normalizeImageViewTransforms(input.imageViewTransforms),
     networkMaterialImportMode: normalizeNetworkMaterialImportMode(input.networkMaterialImportMode),
     promptLexicons:
       input.promptLexicons === null || input.promptLexicons === undefined
@@ -341,6 +344,8 @@ function isLibraryViewSettings(input: unknown): input is LibraryViewSettings {
       input.promptLexicons === undefined ||
       isPromptLexiconSettings(input.promptLexicons)) &&
     isBuiltinModuleState(input.moduleState) &&
+    (input.libraryDirectorySettings === undefined || isRecord(input.libraryDirectorySettings)) &&
+    (input.imageViewTransforms === undefined || isRecord(input.imageViewTransforms)) &&
     (input.promptViewSettings === undefined || isPromptViewSettings(input.promptViewSettings))
   );
 }
@@ -386,6 +391,8 @@ function createDefaultViewSettings(): LibraryViewSettings {
     materialBrowserSortDirection: "desc",
     materialBrowserRandomSeed: 0,
     materialBrowserScrollTop: 0,
+    libraryDirectorySettings: createDefaultLibraryDirectorySettings(),
+    imageViewTransforms: {},
     networkMaterialImportMode: "download",
     promptLexicons: null,
     moduleState: resolveBuiltinModuleState(),

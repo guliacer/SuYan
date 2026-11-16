@@ -226,6 +226,7 @@ const detailPromptCardTone = {
 } as const;
 
 type PromptDetailDialogProps = {
+  presentation?: "dialog" | "panel";
   item: PromptCardData;
   isBusy: boolean;
   imageCount: number;
@@ -279,6 +280,7 @@ type PromptDetailDialogProps = {
 };
 
 export function PromptDetailDialog({
+  presentation = "dialog",
   item,
   generationModelOrder,
   hiddenGenerationModels,
@@ -570,6 +572,7 @@ export function PromptDetailDialog({
   }, [negativePromptDraft, promptDraft]);
 
   useEffect(() => {
+    if (presentation === "panel") return;
     setDetailImageSource("thumbnail");
     setVideoOrientation(null);
     setCompressFeedback(null);
@@ -586,11 +589,11 @@ export function PromptDetailDialog({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [item.imageFileName]);
+  }, [item.imageFileName, presentation]);
 
   // 获取效果图文件大小，用于判断是否需要显示"文件过大"提醒。
   useEffect(() => {
-    if (!item.imageFileName || isVideoMediaFile(item.imageFileName)) {
+    if (presentation === "panel" || !item.imageFileName || isVideoMediaFile(item.imageFileName)) {
       setImageFileSize(0);
       return;
     }
@@ -605,13 +608,13 @@ export function PromptDetailDialog({
     return () => {
       isCanceled = true;
     };
-  }, [item.imageFileName]);
+  }, [item.imageFileName, presentation]);
 
   useEffect(() => {
     setDetailImageMeta(null);
 
     const fileName = item.imageFileName;
-    if (!fileName || isVideoMediaFile(fileName)) {
+    if (presentation === "panel" || !fileName || isVideoMediaFile(fileName)) {
       return;
     }
 
@@ -634,7 +637,7 @@ export function PromptDetailDialog({
       cancelled = true;
       probe.onload = null;
     };
-  }, [item.imageFileName, item.updatedAt]);
+  }, [item.imageFileName, item.updatedAt, presentation]);
 
   useEffect(() => {
     const areaEl = detailImageAreaRef.current;
@@ -656,7 +659,7 @@ export function PromptDetailDialog({
       observer.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [item.imageFileName]);
+  }, [item.imageFileName, presentation]);
 
   const detailImageBox = useMemo(() => {
     if (!detailImageMeta || detailAvailableWidth <= 0 || detailViewportHeight <= 0) {
@@ -696,6 +699,9 @@ export function PromptDetailDialog({
   }, [isPromptEditing]);
 
   useEffect(() => {
+    // Embedded panels delegate viewer-level Escape to their host; auxiliary menus keep their own handlers.
+    if (presentation === "panel") return;
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         if (isDeleteConfirmOpen) {
@@ -712,7 +718,7 @@ export function PromptDetailDialog({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isDeleteConfirmOpen, onClose]);
+  }, [isDeleteConfirmOpen, onClose, presentation]);
 
   useEffect(() => {
     if (!isDeleteConfirmOpen) {
@@ -1743,12 +1749,29 @@ export function PromptDetailDialog({
     element.muted = getStoredVideoMuted();
   }
 
-  return (
-    <AppDialog
-      overlayClassName="z-40 p-2 min-[720px]:p-3 min-[920px]:p-5"
-      panelClassName="grid max-h-[min(96dvh,100%)] w-full max-w-[min(1840px,100%)] grid-rows-[minmax(0,30dvh)_minmax(0,1fr)] overflow-hidden min-[560px]:grid-rows-[minmax(0,32dvh)_minmax(0,1fr)] min-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,min(94dvh,100%))]"
-      onClose={onClose}
-    >
+  function renderPresentation(children: ReactNode) {
+    if (presentation === "panel") {
+      return (
+        <div className="flex h-full min-h-0 min-w-0 w-full flex-col overflow-hidden" data-prompt-detail-presentation="panel">
+          {children}
+        </div>
+      );
+    }
+
+    return (
+      <AppDialog
+        overlayClassName="z-40 p-2 min-[720px]:p-3 min-[920px]:p-5"
+        panelClassName="grid max-h-[min(96dvh,100%)] w-full max-w-[min(1840px,100%)] grid-rows-[minmax(0,30dvh)_minmax(0,1fr)] overflow-hidden min-[560px]:grid-rows-[minmax(0,32dvh)_minmax(0,1fr)] min-[900px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] min-[900px]:grid-rows-[minmax(0,min(94dvh,100%))]"
+        onClose={onClose}
+      >
+        {children}
+      </AppDialog>
+    );
+  }
+
+  return renderPresentation(
+    <>
+        {presentation === "dialog" ? (
         <div
           className={`relative flex min-h-0 min-w-0 flex-col overflow-y-auto bg-panel px-3 py-3 min-[720px]:min-h-0 min-[720px]:px-4 min-[900px]:min-h-[70dvh] min-[900px]:border-r min-[900px]:border-border min-[900px]:px-6 ${
             isCurrentMediaLandscape ? "min-[900px]:justify-center min-[900px]:py-4" : "min-[900px]:py-6"
@@ -2130,8 +2153,11 @@ export function PromptDetailDialog({
             </div>
           </div>
         </div>
+        ) : null}
 
-          <aside className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto bg-panel px-4 py-3 min-[720px]:px-5 min-[720px]:py-4 min-[900px]:max-h-[min(94dvh,100%)] min-[900px]:px-7 min-[900px]:py-5">
+          <aside className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto bg-panel px-4 py-3 min-[720px]:px-5 min-[720px]:py-4 min-[900px]:max-h-[min(94dvh,100%)] min-[900px]:px-7 min-[900px]:py-5"
+            style={presentation === "panel" ? { flex: 1, height: "100%", maxHeight: "100%" } : undefined}
+          >
           <header
             className={`group/detail-card relative max-[899px]:max-h-[min(28dvh,16rem)] max-[899px]:overflow-y-auto shrink-0 overflow-hidden rounded-xl border bg-panel shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-image focus-within:-translate-y-1 focus-within:shadow-image ${detailInfoCardTone.article}`}
           >
@@ -2682,7 +2708,7 @@ export function PromptDetailDialog({
           onClose={() => setReferenceImagePreview(null)}
         />
       ) : null}
-    </AppDialog>
+    </>
   );
 }
 

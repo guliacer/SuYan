@@ -36,7 +36,7 @@ describe("feature guides", () => {
   });
 
   it("defines a complete guide with anchored steps for every sidebar feature", () => {
-    expect(Object.keys(featureGuideDefinitions)).toHaveLength(23);
+    expect(Object.keys(featureGuideDefinitions)).toHaveLength(24);
     for (const definition of Object.values(featureGuideDefinitions)) {
       expect(definition.steps.length).toBeGreaterThanOrEqual(3);
       expect(definition.steps.length).toBeLessThanOrEqual(10);
@@ -45,6 +45,19 @@ describe("feature guides", () => {
       expect(definition.steps.every((step) => step.target.trim().length > 0)).toBe(true);
       expect(definition.steps.every((step) => step.description.length > 0)).toBe(true);
       expect(definition.steps.every((step) => !step.target.includes("data-feature-guide-page"))).toBe(true);
+    }
+  });
+
+  it("anchors the directory tour to the focused workspace rather than its closed management dialog", () => {
+    const directorySource = readFileSync("src/features/library/components/LibraryDirectoryMode.tsx", "utf8");
+    expect(featureGuideDefinitions.libraryRoots.steps.map(step => step.target)).toEqual([
+      '[data-feature-guide="directory-toolbar"]',
+      '[data-feature-guide="directory-tree"]',
+      '[data-feature-guide="directory-results"]',
+      '[data-feature-guide="directory-exit"]',
+    ]);
+    for (const anchor of ["directory-toolbar", "directory-tree", "directory-results", "directory-exit"]) {
+      expect(directorySource).toContain('data-feature-guide="' + anchor + '"');
     }
   });
 

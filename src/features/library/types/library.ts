@@ -49,6 +49,9 @@ export type VideoKeyframe = {
   label: string;
 };
 
+/** Original folder structure of copied media; never used as a file-system reference. */
+export type LibraryImportSource = { rootId: string; rootName: string; relativePath: string; size?: number | null; mtimeMs?: number | null };
+
 export type LibraryItem = {
   id: string;
   title: string;
@@ -57,6 +60,9 @@ export type LibraryItem = {
   mediaStorage?: MediaStorage;
   prompt: string;
   negativePrompt: string;
+  notes?: string | null;
+  rating?: number | null;
+  importSource?: LibraryImportSource | null;
   /**
    * Legacy display/label field kept for compatibility with v0.1.0 data and share packages.
    * Prefer categoryId for assignment; category is kept in sync as the resolved label.
@@ -221,6 +227,21 @@ export type CategoryWorkspaceState = {
   learningEvents: CategoryLearningEvent[];
 };
 
+export type ImageViewTransform = {
+  rotation: 0 | 90 | 180 | 270;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
+};
+
+export type {
+  LibraryDirectoryGalleryMode,
+  LibraryDirectoryMediaFilter,
+  LibraryDirectoryNode,
+  LibraryDirectoryNodeKind,
+  LibraryDirectorySettings,
+  LibraryDirectorySortDirection,
+  LibraryDirectorySortMode,
+} from "../utils/libraryDirectory";
 export type LibraryViewSettings = {
   /** 软件界面语言；缺失时兼容旧版本并使用简体中文。 */
   language: AppLanguage;
@@ -283,6 +304,10 @@ export type LibraryViewSettings = {
   materialBrowserSortDirection: MaterialBrowserSortDirection;
   materialBrowserRandomSeed: number;
   materialBrowserScrollTop: number;
+  /** Billfish 风格素材目录工作区的树、归类与浏览设置。 */
+  libraryDirectorySettings: import("../utils/libraryDirectory").LibraryDirectorySettings;
+  /** 非破坏性保存的单素材旋转与镜像视图变换。 */
+  imageViewTransforms: Record<string, ImageViewTransform>;
   networkMaterialImportMode: NetworkMaterialImportMode;
   promptLexicons: PromptLexiconSettings | null;
   moduleState: BuiltinModuleState;

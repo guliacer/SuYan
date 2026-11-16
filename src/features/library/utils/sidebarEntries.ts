@@ -56,7 +56,7 @@ export const sidebarEntryGroups: readonly SidebarEntryGroup[] = [
   {
     id: "materials",
     label: "素材",
-    entries: ["home", "categoryLexicon", "tagLexicon", "importMaterial", "libraryRoots", "promptLibrary", "imageUpscale"],
+    entries: ["home", "categoryLexicon", "tagLexicon", "libraryRoots", "importMaterial", "promptLibrary", "imageUpscale"],
   },
   {
     id: "inspiration",
@@ -82,7 +82,7 @@ export const sidebarEntryMeta: Record<SidebarEntryId, { label: string; descripti
   categoryLexicon: { label: "分类浏览", description: "按分类查看已整理的素材" },
   tagLexicon: { label: "标签浏览", description: "按标签查看已整理的素材" },
   importMaterial: { label: "导入素材", description: "导入图片、目录、文档或分享包" },
-  libraryRoots: { label: "素材目录", description: "管理外部素材目录" },
+  libraryRoots: { label: "目录浏览", description: "按目录查看和整理素材" },
   promptLibrary: { label: "批量管理", description: "批量整理、导出和处理素材" },
   imageUpscale: { label: "图片超分", description: "使用本地双引擎放大并修复图片" },
   textPrompts: { label: "灵感创作", description: "管理独立的提示词卡片" },

@@ -76,6 +76,11 @@ describe("managed directory import", () => {
     expect(result.importedCount).toBe(2);
     expect(result.library.items).toHaveLength(2);
     expect(result.library.items.every((item) => item.mediaStorage === "managed")).toBe(true);
+    const first = result.library.items.find(item => item.id === "first") as LibraryItem & { importSource?: { relativePath: string; rootName: string } };
+    const second = result.library.items.find(item => item.id === "second") as LibraryItem & { importSource?: { relativePath: string; rootName: string } };
+    expect(first.importSource?.relativePath).toBe("first.jpg");
+    expect(second.importSource?.relativePath).toBe("nested/second.mp4");
+    expect(second.importSource?.rootName).toBe(path.basename(sourcePath));
     expect(progress).toEqual(["first.jpg", path.join("nested", "second.mp4")]);
     expect(await fs.readFile(firstPath)).toEqual(firstBytes);
     expect(await fs.readFile(secondPath)).toEqual(secondBytes);

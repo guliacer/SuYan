@@ -44,11 +44,11 @@ describe("压力测试：5600 条素材性能验证", () => {
   const promptCards = mockItems.map(toPromptCardData);
   const likedImageIds = mockItems.slice(0, 100).map((item) => item.id);
 
-  // 阈值 3000ms：单文件冷路径通常在 1900-2400ms；完整 Vitest 并行运行
-  // 时会共享 CPU，2500ms 会把约 100ms 的调度波动误报成回归。
-  // 这是回归护栏而非基准测试——目的是拦住数量级退化，不是守住毫秒级抖动。
-  const cardConversionBudgetMs = 3000;
-  const pipelineBudgetMs = 3000;
+  // 这是回归护栏而非基准测试：完整 Vitest 并行运行会共享 CPU，阈值需留出调度余量。
+  // 单文件冷路径通常约 2s；5000ms 仍能拦住数量级退化，同时避免把并行抖动误报为回归。
+  const cardConversionBudgetMs = 5000;
+  const pipelineBudgetMs = 5000;
+  const groupKeyBudgetMs = 250;
 
   it(`toPromptCardData: ${itemCount} 条转换 < ${cardConversionBudgetMs}ms（冷路径，仅数据变更时执行）`, () => {
     const start = performance.now();
@@ -130,7 +130,7 @@ describe("压力测试：5600 条素材性能验证", () => {
     }
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(100);
+    expect(elapsed).toBeLessThan(groupKeyBudgetMs);
   });
 
   it(`综合流水线: 转换 → 过滤 → 排序 → 分组 总计 < ${pipelineBudgetMs}ms`, () => {

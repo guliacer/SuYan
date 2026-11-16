@@ -57,6 +57,7 @@ import type {
   LibraryItem,
   LibraryRoot,
   LibraryViewSettings,
+  ImageViewTransform,
   MaterialBrowserCollectionMode,
   MaterialBrowserGalleryMode,
   MaterialBrowserSortDirection,
@@ -109,6 +110,8 @@ import { normalizeCategoryLabelKey } from "../utils/categoryId";
 import type { ProxyDetectionData, ProxySettings } from "../types/proxy";
 import { defaultProxySettings } from "../types/proxy";
 import { buildLibraryFile, uniqueTags } from "../utils/buildLibraryFile";
+import { createDefaultLibraryDirectorySettings, normalizeLibraryDirectorySettings } from "../utils/libraryDirectory";
+import { DEFAULT_IMAGE_VIEW_TRANSFORM, normalizeImageViewTransform, normalizeImageViewTransforms } from "../utils/imageViewTransform";
 import {
   defaultCanvasDraftSettings,
   normalizeCanvasDraftSettings,
@@ -185,6 +188,12 @@ import { defaultVisualLifeSettings, normalizeVisualLifeSettings, type VisualLife
 let viewSettingsWriteChain: Promise<void> = Promise.resolve();
 let tagOrganizationRevision = 0;
 let archiveKnowledgeRevision = 0;
+let libraryDirectorySaveRevision = 0;
+let libraryDirectorySavesInFlight = 0;
+let confirmedLibraryDirectorySettings: LibraryViewSettings["libraryDirectorySettings"] | null = null;
+let imageViewTransformSavesInFlight = 0;
+let imageViewTransformRevision = 0;
+const imageViewTransformRevisions = new Map<string, number>();
 
 export function runTagOrganization<T>(work: () => Promise<T>): Promise<T> {
   const task = viewSettingsWriteChain.then(async () => {
@@ -207,7 +216,7 @@ function saveLibraryViewSettingsSerialized(
 ): Promise<IpcResult<LibraryViewSettings>> {
   const revision = tagOrganizationRevision;
   const knowledgeRevision = archiveKnowledgeRevision;
-  const task = viewSettingsWriteChain.then(() => {
+  const task = viewSettingsWriteChain.then(async () => {
     const current = useLibraryStore.getState();
     const next = knowledgeRevision !== archiveKnowledgeRevision ? {
       ...settings, promptLexicons: current.promptLexicons,
@@ -215,7 +224,17 @@ function saveLibraryViewSettingsSerialized(
     } : revision !== tagOrganizationRevision ? {
       ...settings, promptLexicons: { ...settings.promptLexicons!, tags: current.promptLexicons?.tags ?? [] },
     } : settings;
-    return window.suyanApi.saveLibraryViewSettings(next);
+    // Directory navigation is optimistic. A queued settings snapshot must not
+    // overwrite a directory operation made while it was waiting for the file.
+    const result = await window.suyanApi.saveLibraryViewSettings({
+      ...next,
+      libraryDirectorySettings: current.libraryDirectorySettings,
+      imageViewTransforms: current.imageViewTransforms,
+    });
+    if (result.ok) {
+      confirmedLibraryDirectorySettings = normalizeLibraryDirectorySettings(result.data.libraryDirectorySettings);
+    }
+    return result;
   });
   viewSettingsWriteChain = task.then(
     () => undefined,
@@ -348,6 +367,8 @@ type LibraryState = {
   materialBrowserSortDirection: MaterialBrowserSortDirection;
   materialBrowserRandomSeed: number;
   materialBrowserScrollTop: number;
+  libraryDirectorySettings: import("../utils/libraryDirectory").LibraryDirectorySettings;
+  imageViewTransforms: Record<string, ImageViewTransform>;
   networkMaterialImportMode: NetworkMaterialImportMode;
   promptLexicons: PromptLexiconSettings | null;
   promptViewSettings: PromptViewSettings;
@@ -408,6 +429,8 @@ type LibraryState = {
   saveNetworkMaterialImportMode: (networkMaterialImportMode: NetworkMaterialImportMode) => Promise<boolean>;
   saveMasonryTileWidth: (masonryTileWidth: number) => Promise<void>;
   saveMaterialBrowserSettings: (patch: MaterialBrowserSettingsPatch) => Promise<boolean>;
+  saveLibraryDirectorySettings: (settings: import("../utils/libraryDirectory").LibraryDirectorySettings) => Promise<boolean>;
+  saveImageViewTransform: (itemId: string, transform: ImageViewTransform) => Promise<boolean>;
   saveMaterialBrowserScrollTop: (scrollTop: number) => void;
   gradeAllImagesForNsfw: (options?: { force?: boolean }) => Promise<void>;
   saveAiSettings: (settings: SaveAiProviderSettingsPayload) => Promise<boolean | string>;
@@ -671,6 +694,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   materialBrowserSortDirection: "desc",
   materialBrowserRandomSeed: 0,
   materialBrowserScrollTop: 0,
+  libraryDirectorySettings: createDefaultLibraryDirectorySettings(),
+  imageViewTransforms: {},
   networkMaterialImportMode: "download",
   promptLexicons: null,
   promptViewSettings: {
@@ -1635,6 +1660,78 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return false;
   },
 
+  saveLibraryDirectorySettings: async (settings) => {
+    const previous = get().libraryDirectorySettings;
+    if (libraryDirectorySavesInFlight === 0) {
+      confirmedLibraryDirectorySettings = previous;
+    }
+    const requestRevision = ++libraryDirectorySaveRevision;
+    libraryDirectorySavesInFlight += 1;
+    const next = normalizeLibraryDirectorySettings(settings);
+    set({ libraryDirectorySettings: next, statusMessage: null });
+
+    let result: IpcResult<LibraryViewSettings>;
+    try {
+      result = await saveLibraryViewSettingsSerialized(
+        buildLibraryViewSettings(get(), { libraryDirectorySettings: next }),
+      );
+    } catch {
+      result = { ok: false, error: { code: "VIEW_SETTINGS_SAVE_FAILED", message: "目录设置保存失败，请重试。" } };
+    } finally {
+      libraryDirectorySavesInFlight -= 1;
+    }
+
+    // An older response no longer owns the optimistic workspace state.
+    if (requestRevision !== libraryDirectorySaveRevision) {
+      return result.ok;
+    }
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+    set({
+      libraryDirectorySettings: confirmedLibraryDirectorySettings ?? previous,
+      statusMessage: errorStatus(result.error.code, result.error.message),
+    });
+    return false;
+  },
+  saveImageViewTransform: async (itemId, input) => {
+    if (!itemId.trim() || itemId.length > 256) return false;
+    const transform = normalizeImageViewTransform(input);
+    const previousTransforms = get().imageViewTransforms;
+    const previous = previousTransforms[itemId];
+    if (previous?.rotation === transform.rotation && previous.flipHorizontal === transform.flipHorizontal && previous.flipVertical === transform.flipVertical) return true;
+    const next = { ...previousTransforms };
+    if (transform.rotation === DEFAULT_IMAGE_VIEW_TRANSFORM.rotation && !transform.flipHorizontal && !transform.flipVertical) delete next[itemId];
+    else next[itemId] = transform;
+    const revision = ++imageViewTransformRevision;
+    imageViewTransformRevisions.set(itemId, revision);
+    imageViewTransformSavesInFlight += 1;
+    set({ imageViewTransforms: next, statusMessage: null });
+
+    let result: IpcResult<LibraryViewSettings>;
+    try {
+      result = await saveLibraryViewSettingsSerialized(buildLibraryViewSettings(get(), { imageViewTransforms: next }));
+    } catch {
+      result = { ok: false, error: { code: "VIEW_SETTINGS_SAVE_FAILED", message: "素材视图变换保存失败，请重试。" } };
+    } finally {
+      imageViewTransformSavesInFlight -= 1;
+    }
+
+    if (result.ok) {
+      syncLibraryViewSettings(set, result.data);
+      return true;
+    }
+    if (imageViewTransformRevisions.get(itemId) === revision) {
+      const current = { ...get().imageViewTransforms };
+      if (previous) current[itemId] = previous;
+      else delete current[itemId];
+      set({ imageViewTransforms: current });
+      imageViewTransformRevisions.delete(itemId);
+    }
+    set({ statusMessage: errorStatus(result.error.code, result.error.message) });
+    return false;
+  },
   saveMaterialBrowserScrollTop: (scrollTop) => {
     const nextScrollTop = normalizeMaterialBrowserScrollTop(scrollTop);
     if (materialBrowserScrollSaveTimer) {
@@ -4760,6 +4857,8 @@ function buildLibraryViewSettings(
     materialBrowserSortDirection: state.materialBrowserSortDirection,
     materialBrowserRandomSeed: Math.max(0, Math.trunc(state.materialBrowserRandomSeed)),
     materialBrowserScrollTop: normalizeMaterialBrowserScrollTop(state.materialBrowserScrollTop),
+    libraryDirectorySettings: state.libraryDirectorySettings,
+    imageViewTransforms: state.imageViewTransforms,
     networkMaterialImportMode: state.networkMaterialImportMode,
     promptLexicons: state.promptLexicons,
     categoryWorkspace: {
@@ -4832,6 +4931,12 @@ function syncLibraryViewSettings(
     materialBrowserSortDirection: settings.materialBrowserSortDirection,
     materialBrowserRandomSeed: settings.materialBrowserRandomSeed,
     materialBrowserScrollTop: settings.materialBrowserScrollTop,
+    libraryDirectorySettings: libraryDirectorySavesInFlight > 0
+      ? useLibraryStore.getState().libraryDirectorySettings
+      : normalizeLibraryDirectorySettings(settings.libraryDirectorySettings),
+    imageViewTransforms: imageViewTransformSavesInFlight > 0
+      ? useLibraryStore.getState().imageViewTransforms
+      : normalizeImageViewTransforms(settings.imageViewTransforms),
     networkMaterialImportMode: settings.networkMaterialImportMode,
     promptLexicons: settings.promptLexicons,
     promptViewSettings: settings.promptViewSettings,
