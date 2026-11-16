@@ -214,7 +214,29 @@ Before pushing or creating a GitHub Release, `pnpm check:release-notes` must pas
 
 ## Changelog
 
-### v0.4.0 (current release)
+### v0.4.4 (current version)
+
+Compared with `v0.4.1`, this release focuses on directory browsing, asset details, and image viewing.
+
+- **Directory browsing**: Added a dedicated directory workspace with a directory tree, batch grouping, filtering, sorting, zooming, and descendant-folder control.
+- **Image viewing**: Added immersive mode with a frosted-glass background, hides the title bar only while immersive, and allows the prompt panel width to be dragged.
+- **Asset details**: Moved Export into the action row, adjusted Favorite and Select positions, and let asset count and size controls settle automatically based on panel state.
+- **Bottom controls**: Changed the status bar into a floating pill at the lower-right, keeping zoom and count information without taking a full row.
+- **Interface cleanup**: Moved "Include subfolders" into the More menu to reduce persistent toolbar clutter.
+- **Docs**: Added real screenshots to the directory-browsing section and documented how to widen the prompt panel.
+
+### v0.4.1 (historical version)
+
+Compared with `v0.4.0`, this release completes image upscaling, task planning, and account experience.
+
+- **Image upscaling workspace**: Added a Real-CUGAN and Real-ESRGAN workflow with queued jobs, result comparison, runtime management, and export settings.
+- **Inspiration and task planning**: Grouped creative tools under Inspiration and added a focused Today view for tasks.
+- **Optional weather**: Let the task page show weather by location, with no repeated prompts after skipping setup.
+- **Resource catalog**: Removed the discontinued Wisart site from the web assistant, recommendations, and bundled screenshots; old selections fall back to the default site.
+- **Experience**: Improved sign-in feedback, location-name display, dialog layouts, module management, canvas controls, and localized text.
+- **Fixes**: Fixed garbled Chinese text on the delete page and added a reprocess action for paused tasks.
+
+### v0.4.0 (historical release)
 
 This release is published as `v0.4.0`. GitHub Releases and both mirror drives provide the same four Windows packages.
 
@@ -233,7 +255,7 @@ This release is published as `v0.4.0`. GitHub Releases and both mirror drives pr
 - Refined the creative-canvas background, creation core, and reveal animation so the canvas and gallery share the same misty theme.
 - Refined System Settings layout by reducing unused space and aligning theme, language, proxy, and other controls.
 
-### v0.3.8 (previous release)
+### v0.3.8 (historical release)
 
 Compared with `v0.2.10`, this release adds accounts, idea management, web assistance, and local content rating while improving the creation, organization, and backup workflows.
 
