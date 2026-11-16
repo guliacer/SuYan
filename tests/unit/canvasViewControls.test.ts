@@ -43,8 +43,13 @@ describe("CanvasView controls", () => {
     expect(canvasStylesSource).toContain("--canvas-stage-surface: var(--canvas-surface);");
     expect(canvasStylesSource).toContain("border-radius: 50% !important;");
     expect(canvasStylesSource).toContain("object-fit: cover;");
-    expect(canvasStylesSource).toContain("bottom: clamp(1.75rem, 4%, 3.5rem);");
-    expect(canvasStylesSource).toContain("filter: blur(var(--mist-blur, 54px)) saturate(0.82);");
+    expect(canvasStylesSource).toContain(".canvas-status-dock");
+    expect(canvasStylesSource).toContain("filter: blur(var(--mist-blur, 140px)) saturate(0.62);");
+    expect(canvasStylesSource).toContain("@keyframes canvas-status-sheen");
+    expect(canvasStylesSource).toContain("@keyframes canvas-status-title-glint");
+    expect(canvasStylesSource).toContain("@keyframes canvas-status-dock-float");
+    expect(canvasStylesSource).toContain("@keyframes canvas-status-aura-pulse");
+    expect(canvasStylesSource).not.toContain("bottom: clamp(1.75rem, 4%, 3.5rem);");
     expect(canvasStylesSource).toContain("will-change: transform, opacity;");
     expect(canvasStylesSource).toContain('[data-background-mode="mist"]');
     expect(canvasStylesSource).toContain("radial-gradient(ellipse 68% 82% at 16% 16%");
@@ -54,6 +59,13 @@ describe("CanvasView controls", () => {
     expect(canvasSource).toContain('data-feature-guide="canvas-results-panel"');
     expect(canvasSource).toContain('t("生成作品")');
     expect(canvasSource).toContain('t("点击查看大图")');
+    expect(canvasSource).toContain("canvas-carousel-nav-zone");
+    expect(canvasStylesSource).toContain(".canvas-carousel-nav-zone:hover");
+    expect(canvasStylesSource).toContain(".canvas-carousel-nav-zone:focus-within");
+    expect(canvasStylesSource).toContain("background: color-mix(in srgb, var(--color-panel) 42%, transparent)");
+    expect(canvasSource).toContain("bg-panel/45");
+    expect(canvasSource).not.toContain("bg-panel/90");
+    expect(canvasStylesSource).toContain(".canvas-carousel-nav-zone { opacity: 1; }");
     expect(canvasSource).toContain('t("显示作品展示区")');
     expect(canvasSource).toContain('t("隐藏作品展示区")');
     expect(canvasSource).toContain("canvas-results-panel__list");
@@ -75,7 +87,7 @@ describe("CanvasView controls", () => {
 
   it("lets the shared workspace-width setting control the full creative canvas", () => {
     expect(librarySource).toContain('"--library-workspace-width"');
-    expect(librarySource).toContain('className="library-workspace-surface relative mx-auto min-h-0 min-w-0');
+    expect(librarySource).toContain("library-workspace-surface relative mx-auto min-h-0 min-w-0");
     expect(canvasSource).toContain('className="mx-auto w-full max-w-none px-3');
     expect(canvasSource).not.toContain("max-w-[min(100%,1400px)]");
     expect(canvasStylesSource).toContain('.library-background-layer[data-current-view="canvas"] > .library-workspace-surface');
@@ -266,6 +278,11 @@ describe("CanvasView controls", () => {
     // 未点击查看时整块「生成结果」面板不渲染，只保留右侧圆形操作按钮。
     expect(canvasSource).toContain("{promptOpen ? (");
     expect(canvasSource).toContain("absolute right-16 top-1/2 z-20");
+    expect(canvasSource).toContain('data-feature-guide="canvas-fullscreen-navigation"');
+    expect(canvasSource).toContain("onPrev: () => void");
+    expect(canvasSource).toContain("onNext: () => void");
+    expect(canvasStylesSource).toContain(".canvas-fullscreen-nav-zone:hover");
+    expect(canvasStylesSource).toContain(".canvas-fullscreen-nav-zone { opacity: 1; }");
   });
 
   it("adds a manual archive action next to copy in both the hover bar and fullscreen toolbar", () => {

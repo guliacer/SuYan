@@ -1,15 +1,17 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import sharp from "sharp";
 import type { LibraryItem } from "../../../src/features/library/types/library";
 import type {
   UpscaleExportOptions,
   UpscaleExportRequest,
   UpscaleExportResult,
+  UpscaleExportTargetDescriptor,
   UpscaleInputDescriptor,
   UpscaleOutputDirectoryDescriptor,
   UpscaleOutputFormat,
+  UpscaleReplaceSourceRequest,
+  UpscaleReplaceSourceResult,
 } from "../../../src/features/upscale/types";
 import { getUpscaleModelDefinition } from "../../../src/features/upscale/utils/upscaleModels";
 import {
@@ -18,6 +20,10 @@ import {
 } from "../../../src/features/upscale/utils/upscaleExport";
 import { dialog } from "../app/fileDialogs";
 import type { GeneratedImageImportPayload } from "../library/imageFiles";
+// sharp 是 native 模块，装在 resources/vendor/node_modules 下，
+// 无法通过 asar 内的裸 require("sharp") 解析。必须走带 vendor 回退的懒加载，
+// 否则主进程一加载本文件就抛 "Cannot find module 'sharp'"。
+import { getSharp } from "../runtime/imageRuntime";
 import {
   getUpscaleInputDescriptor,
   readUpscaleResult,
@@ -34,6 +40,13 @@ type LibraryImportRequest = {
   metadata: GeneratedImageImportPayload["metadata"];
 };
 
+type ReplaceSourceImageRequest = {
+  sourceItemId: string;
+  expectedImageFileName: string;
+  bytes: Buffer;
+  mediaType: UpscaleInputDescriptor["mediaType"];
+};
+
 export type UpscaleExportDependencies = {
   getInputDescriptor(token: string): UpscaleInputDescriptor;
   readResult(token: string): Promise<Buffer>;
@@ -41,8 +54,11 @@ export type UpscaleExportDependencies = {
   findSourceItem(itemId: string): Promise<LibraryItem | null>;
   encodeResult(bytes: Buffer, options: EncodeOptions): Promise<Buffer>;
   importToLibrary(payload: LibraryImportRequest): Promise<string[]>;
+  replaceSourceImage(payload: ReplaceSourceImageRequest): Promise<UpscaleReplaceSourceResult>;
   pathExists(filePath: string): Promise<boolean>;
   writeFile(filePath: string, bytes: Buffer): Promise<unknown>;
+  /** 「另存为」覆盖写。未注入时回退到 fs.writeFile。 */
+  writeFileReplace?(filePath: string, bytes: Buffer): Promise<unknown>;
   rename(source: string, target: string): Promise<unknown>;
   remove(filePath: string): Promise<unknown>;
 };
@@ -94,6 +110,42 @@ export function resolveUpscaleOutputDirectory(token: string): string {
   return directory;
 }
 
+/**
+ * 一次性选定导出目标，系统对话框只弹一次，之后逐条提交导出。
+ * - library：收录进素材库，不需要任何系统对话框
+ * - directory：选目录，批量写盘
+ * - file：另存为指定文件路径（画布结果 hover 的单张导出）
+ *
+ * 用户取消时返回 null，调用方据此保持任务状态不变。
+ */
+export async function pickUpscaleExportTarget(
+  mode: "library" | "directory" | "file",
+  options: { fileName: string; format: UpscaleOutputFormat },
+): Promise<UpscaleExportTargetDescriptor | null> {
+  if (mode === "library") {
+    return { mode: "library", directoryToken: null, filePath: null };
+  }
+  if (mode === "directory") {
+    const selection = await dialog.showOpenDialog({
+      title: "选择超分图片保存目录",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (selection.canceled || !selection.filePaths[0]) return null;
+    const descriptor = await registerUpscaleOutputDirectory(selection.filePaths[0]);
+    return { mode: "directory", directoryToken: descriptor.token, filePath: null };
+  }
+  const selection = await dialog.showSaveDialog({
+    title: "导出超分结果",
+    defaultPath: options.fileName,
+    filters: [
+      { name: `${options.format.toUpperCase()} 图片`, extensions: [extensionFor(options.format)] },
+    ],
+  });
+  if (selection.canceled || !selection.filePath) return null;
+  const directory = await registerUpscaleOutputDirectory(path.dirname(selection.filePath));
+  return { mode: "file", directoryToken: directory.token, filePath: selection.filePath };
+}
+
 export function clearUpscaleOutputDirectories(): void {
   outputDirectories.clear();
 }
@@ -121,21 +173,27 @@ export async function exportUpscaleResultWithDependencies(
 
   let fileCommit: FileCommit | null = null;
   if (options.saveToDirectory) {
-    if (!options.outputDirectoryToken) {
-      throw new Error("UPSCALE_EXPORT_FAILED: 尚未选择保存目录");
+    if (options.targetFilePath) {
+      // 「另存为」：用户已在系统对话框里选定完整路径，直接落盘，
+      // 不再套命名模板与同名策略。
+      fileCommit = await commitExactFile(options.targetFilePath, encoded, dependencies);
+    } else {
+      if (!options.outputDirectoryToken) {
+        throw new Error("UPSCALE_EXPORT_FAILED: 尚未选择保存目录");
+      }
+      const directory = dependencies.resolveOutputDirectory(options.outputDirectoryToken);
+      const outputName = buildUpscaleOutputName(input.displayName, request.modelId, options.namingPattern);
+      fileCommit = await commitOutputFile(
+        directory,
+        outputName,
+        extensionFor(options.format),
+        encoded,
+        options.conflictPolicy,
+        dependencies,
+      ).catch((error: unknown) => {
+        throw new Error(`UPSCALE_EXPORT_FAILED: ${errorMessage(error, "文件保存失败")}`);
+      });
     }
-    const directory = dependencies.resolveOutputDirectory(options.outputDirectoryToken);
-    const outputName = buildUpscaleOutputName(input.displayName, request.modelId, options.namingPattern);
-    fileCommit = await commitOutputFile(
-      directory,
-      outputName,
-      extensionFor(options.format),
-      encoded,
-      options.conflictPolicy,
-      dependencies,
-    ).catch((error: unknown) => {
-      throw new Error(`UPSCALE_EXPORT_FAILED: ${errorMessage(error, "文件保存失败")}`);
-    });
   }
 
   let importedItemIds: string[] = [];
@@ -160,6 +218,45 @@ export async function exportUpscaleResultWithDependencies(
     importedItemIds,
     skipped: fileCommit?.skipped ?? false,
   };
+}
+
+export function replaceUpscaleSource(
+  request: UpscaleReplaceSourceRequest,
+): Promise<UpscaleReplaceSourceResult> {
+  return replaceUpscaleSourceWithDependencies(request, createDefaultDependencies());
+}
+
+export async function replaceUpscaleSourceWithDependencies(
+  request: UpscaleReplaceSourceRequest,
+  dependencies: UpscaleExportDependencies,
+): Promise<UpscaleReplaceSourceResult> {
+  const input = dependencies.getInputDescriptor(request.inputToken);
+  if (!input.sourceItemId || !input.sourceImageFileName) {
+    throw new Error("UPSCALE_SOURCE_REPLACE_FAILED: 输入未从素材详情注册");
+  }
+
+  const resultBytes = await dependencies.readResult(request.resultToken).catch(() => {
+    throw new Error("UPSCALE_RESULT_MISSING: 超分结果已过期");
+  });
+  const format = formatFor(input.mediaType);
+  const encoded = await dependencies.encodeResult(resultBytes, {
+    format,
+    quality: format === "png" ? null : 92,
+    preserveMetadata: true,
+  }).catch((error: unknown) => {
+    throw new Error(`UPSCALE_SOURCE_REPLACE_FAILED: ${errorMessage(error, "图片编码失败")}`);
+  });
+
+  return dependencies.replaceSourceImage({
+    sourceItemId: input.sourceItemId,
+    expectedImageFileName: input.sourceImageFileName,
+    bytes: encoded,
+    mediaType: mimeFor(format),
+  }).catch((error: unknown) => {
+    const message = errorMessage(error, "替换原图失败");
+    if (message.startsWith("UPSCALE_SOURCE_REPLACE_FAILED")) throw error;
+    throw new Error(`UPSCALE_SOURCE_REPLACE_FAILED: ${message}`);
+  });
 }
 
 async function commitOutputFile(
@@ -231,6 +328,46 @@ async function commitOutputFile(
   };
 }
 
+/**
+ * 「另存为」的落盘提交：写到用户指定的完整路径。
+ * 目标已存在时先备份，失败或回滚时恢复，避免把用户原文件弄丢。
+ */
+async function commitExactFile(
+  targetFilePath: string,
+  bytes: Buffer,
+  dependencies: UpscaleExportDependencies,
+): Promise<FileCommit> {
+  const resolved = path.resolve(targetFilePath);
+  const fileName = path.basename(resolved);
+  if (!fileName) {
+    throw new Error("UPSCALE_EXPORT_FAILED: 输出文件名无效");
+  }
+  const existed = await dependencies.pathExists(resolved);
+  const backup = existed ? `${resolved}.${randomUUID()}.backup` : null;
+  try {
+    if (backup) await dependencies.rename(resolved, backup);
+    if (dependencies.writeFileReplace) {
+      await dependencies.writeFileReplace(resolved, bytes);
+    } else {
+      await fs.writeFile(resolved, bytes);
+    }
+  } catch (error) {
+    if (backup) await dependencies.rename(backup, resolved).catch(() => undefined);
+    throw new Error(`UPSCALE_EXPORT_FAILED: ${errorMessage(error, "文件保存失败")}`);
+  }
+  return {
+    fileName,
+    skipped: false,
+    finalize: async () => {
+      if (backup) await dependencies.remove(backup).catch(() => undefined);
+    },
+    rollback: async () => {
+      await dependencies.remove(resolved).catch(() => undefined);
+      if (backup) await dependencies.rename(backup, resolved).catch(() => undefined);
+    },
+  };
+}
+
 function buildLibraryMetadata(
   input: UpscaleInputDescriptor,
   modelId: UpscaleExportRequest["modelId"],
@@ -275,14 +412,20 @@ function createDefaultDependencies(): UpscaleExportDependencies {
       });
       return result.importedItemIds;
     },
+    replaceSourceImage: async (payload) => {
+      const { replaceLibrarySourceImage } = await import("../library/upscaleSourceReplacement");
+      return replaceLibrarySourceImage(payload);
+    },
     pathExists: (filePath) => fs.stat(filePath).then(() => true, () => false),
     writeFile: (filePath, bytes) => fs.writeFile(filePath, bytes, { flag: "wx" }),
+    writeFileReplace: (filePath, bytes) => fs.writeFile(filePath, bytes),
     rename: (source, target) => fs.rename(source, target),
     remove: (filePath) => fs.rm(filePath, { force: true }),
   };
 }
 
 async function encodeResult(bytes: Buffer, options: EncodeOptions): Promise<Buffer> {
+  const sharp = getSharp();
   let pipeline = sharp(bytes, { failOn: "error" }).rotate();
   if (options.preserveMetadata) {
     pipeline = pipeline.withMetadata();
@@ -313,6 +456,12 @@ function extensionFor(format: UpscaleOutputFormat): "png" | "jpg" | "webp" {
 
 function mimeFor(format: UpscaleOutputFormat): "image/png" | "image/jpeg" | "image/webp" {
   return format === "jpeg" ? "image/jpeg" : format === "webp" ? "image/webp" : "image/png";
+}
+
+function formatFor(mediaType: UpscaleInputDescriptor["mediaType"]): UpscaleOutputFormat {
+  if (mediaType === "image/jpeg") return "jpeg";
+  if (mediaType === "image/webp") return "webp";
+  return "png";
 }
 
 function errorMessage(error: unknown, fallback: string): string {

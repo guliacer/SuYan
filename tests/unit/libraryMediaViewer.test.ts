@@ -59,11 +59,11 @@ function viewerProps(patch: Partial<ComponentProps<typeof viewer.LibraryMediaVie
 
 function detailProps(presentation?: "dialog" | "panel"): ComponentProps<typeof PromptDetailDialog> {
   return {
-    item: toPromptCardData(alpha), presentation, isBusy: false, imageCount: 2, imageIndex: 0,
+    item: toPromptCardData(alpha), presentation, isBusy: false, isSendingToUpscale: false, imageCount: 2, imageIndex: 0,
     generationModelOrder: [], hiddenGenerationModels: [], blurNsfwImages: false, isImageLiked: false, knownCategories: [],
     aiSettings: { activeProfileId: "", profiles: [], actionPreferences: {}, recognitionSourcePreferences: {}, enabled: false, baseUrl: "", hasApiKey: false, apiKeyPreview: "", model: "" },
     onAnalyzePrompt: vi.fn(), onClose: vi.fn(), onCopyImage: vi.fn(), onCopyText: vi.fn(), onDelete: vi.fn(), onExportImage: vi.fn(),
-    onImportClipboardImage: vi.fn(), onImportImages: vi.fn(), onPushToCanvas: vi.fn(), onPushPromptToCanvas: vi.fn(),
+    onImportClipboardImage: vi.fn(), onImportImages: vi.fn(), onPushToCanvas: vi.fn(), onPushPromptToCanvas: vi.fn(), onSendToUpscale: vi.fn(),
     onNavigateNext: vi.fn(), onNavigatePrevious: vi.fn(), onShareGroup: vi.fn(), onSave: vi.fn(),
     onSaveGenerationModelPreferences: vi.fn(), onSaveAiActionModelPreference: vi.fn(), onSaveAiRecognitionSourcePreferences: vi.fn(),
     onOptimizePrompt: vi.fn(), onTranslatePrompt: vi.fn(), onReverseImagePrompt: vi.fn(), onToggleImageLike: vi.fn(),

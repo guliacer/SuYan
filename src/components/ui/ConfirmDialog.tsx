@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AppDialog } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
@@ -48,22 +48,6 @@ export function ConfirmDialog({
   const resolvedCancelLabel = cancelLabel ?? t("取消");
   const resolvedConfirmLabel = confirmLabel ?? t("确定");
   const resolvedBusyLabel = busyLabel ?? t("处理中…");
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !isBusy) {
-        event.preventDefault();
-        onCancel();
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isBusy, onCancel, open]);
-
   if (!open) {
     return null;
   }

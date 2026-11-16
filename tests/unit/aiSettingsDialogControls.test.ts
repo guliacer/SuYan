@@ -65,6 +65,9 @@ describe("AI settings list controls", () => {
     expect(titleBarSource).not.toContain("icon-tooltip-button__bubble");
     expect(appDialogSource).toContain('title={resolvedAriaLabel}');
     expect(appDialogSource).toContain("app-window-overlay");
+    expect(appDialogSource).toContain("panelRef.current?.focus()");
+    expect(appDialogSource).toContain('event.key === "Tab"');
+    expect(appDialogSource).toContain("previousFocus.focus()");
     expect(appDialogSource).not.toContain("icon-tooltip-button__bubble");
   });
 

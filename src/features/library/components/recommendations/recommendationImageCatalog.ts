@@ -124,14 +124,6 @@ export const recommendationImageCatalog: Record<string, string[]> = {
     "/images/news-html-digest/screenshot-1.webp",
     "/images/news-html-digest/screenshot-2.webp",
   ],
-  "https://wisart.kuaileshifu.com/": [
-    "/images/wisart/home.webp",
-    "/images/wisart/works.webp",
-    "/images/wisart/square.webp",
-    "/images/wisart/game-1.webp",
-    "/images/wisart/game-2.webp",
-    "/images/wisart/checkin.webp",
-  ],
 };
 
 export function getRecommendationImagePaths(url: string): string[] {

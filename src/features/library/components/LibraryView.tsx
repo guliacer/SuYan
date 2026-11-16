@@ -66,6 +66,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ScanLine,
   ScrollText,
   Search,
   Settings,
@@ -250,6 +251,9 @@ const TextPromptLibrary = lazy(() =>
 const TodoWorkspace = lazy(() =>
   import("@/features/prompts").then((module) => ({ default: module.TodoWorkspace })),
 );
+const UpscaleWorkspace = lazy(() =>
+  import("@/features/upscale").then((module) => ({ default: module.UpscaleWorkspace })),
+);
 
 const pageSize = 16;
 const gridVisibleTagCount = 5;
@@ -287,7 +291,12 @@ const STARTUP_PREWARM_VIEWS: LibraryMainView[] = ["categoryLexicon", "tagLexicon
 
 type CollectionMode = "all" | "featured";
 type GalleryMode = "masonry" | "grid";
-type LibraryMainView = "home" | "canvas" | "webAssistant" | "textPrompts" | "todo" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
+type LibraryMainView = "home" | "canvas" | "webAssistant" | "imageUpscale" | "textPrompts" | "todo" | "promptLibrary" | "categoryLexicon" | "tagLexicon" | "promptSites";
+type UpscaleDetailReturnContext = {
+  itemId: string;
+  originalImageFileName: string;
+  previousMainView: LibraryMainView;
+};
 type LibrarySidebarActiveView =
   | LibraryMainView
   | "aiSettings"
@@ -546,6 +555,9 @@ export function LibraryView() {
   const masonryLayoutRafRef = useRef(0);
   const [visibleCount, setVisibleCount] = useState(pageSize);
   const [detailItemId, setDetailItemId] = useState<string | null>(null);
+  const [upscaleDetailReturn, setUpscaleDetailReturn] = useState<UpscaleDetailReturnContext | null>(null);
+  const [upscaleSendingItemId, setUpscaleSendingItemId] = useState<string | null>(null);
+  const upscaleSendPendingRef = useRef(false);
   const [fullscreenMedia, setFullscreenMedia] = useState<PromptCardData | null>(null);
   const [isCanvasResultPreviewOpen, setIsCanvasResultPreviewOpen] = useState(false);
 
@@ -1702,6 +1714,7 @@ export function LibraryView() {
         presentation="panel"
         key={item.id}
         isBusy={isBusy}
+        isSendingToUpscale={upscaleSendingItemId === item.id}
         isImageLiked={likedImageIds.includes(item.id)}
         item={item}
         imageCount={groupItems.length}
@@ -1724,6 +1737,7 @@ export function LibraryView() {
         onImportClipboardImage={() => void handleImportClipboardImageForDetail()}
         onPushToCanvas={(prompt, negativePrompt) => void pushImageToCanvas(item, prompt, negativePrompt)}
         onPushPromptToCanvas={(prompt, negativePrompt) => pushPromptToCanvas(item, prompt, negativePrompt)}
+        onSendToUpscale={() => void sendDetailImageToUpscale(item)}
         onNavigateNext={() => navigateDetail(1)}
         onNavigatePrevious={() => navigateDetail(-1)}
         onUpsertCustomCategory={upsertCustomCategory}
@@ -1802,6 +1816,61 @@ export function LibraryView() {
       durationMs: Math.round(performance.now() - startedAt),
       to: view,
     });
+  }
+
+  async function sendDetailImageToUpscale(item: PromptCardData): Promise<void> {
+    if (upscaleSendPendingRef.current || !item.imageFileName || isVideoMediaFile(item.imageFileName)) {
+      return;
+    }
+
+    upscaleSendPendingRef.current = true;
+    setUpscaleSendingItemId(item.id);
+    try {
+      const result = await window.suyanApi.registerUpscaleLibraryItem(item.id);
+      if (!result.ok) {
+        showStatusMessage({ type: "error", text: t(result.error.message) });
+        return;
+      }
+
+      const { upscaleStore } = await import("@/features/upscale/store/useUpscaleStore");
+      const previousJobIds = new Set(upscaleStore.getState().jobs.map((job) => job.id));
+      upscaleStore.getState().enqueue([result.data]);
+      const addedJob = upscaleStore.getState().jobs.find((job) => !previousJobIds.has(job.id));
+      if (addedJob) {
+        upscaleStore.getState().select(addedJob.id);
+      }
+
+      setUpscaleDetailReturn({
+        itemId: item.id,
+        originalImageFileName: item.imageFileName,
+        previousMainView: mainView,
+      });
+      setDetailItemId(null);
+      openMainView("imageUpscale");
+    } catch {
+      showStatusMessage({ type: "error", text: t("发送到图片超分失败，请重试。") });
+    } finally {
+      upscaleSendPendingRef.current = false;
+      setUpscaleSendingItemId(null);
+    }
+  }
+
+  async function handleUpscaleSourceReplaced(sourceItemId: string): Promise<void> {
+    const returnContext = upscaleDetailReturn?.itemId === sourceItemId ? upscaleDetailReturn : null;
+    if (!returnContext) {
+      throw new Error(t("原图已替换，但返回详情失败，请重新打开素材详情。"));
+    }
+
+    await load();
+    const refreshedItem = useLibraryStore.getState().items.find((item) => item.id === sourceItemId);
+    if (!refreshedItem || refreshedItem.imageFileName === returnContext.originalImageFileName) {
+      throw new Error(t("原图已替换，但返回详情失败，请重新打开素材详情。"));
+    }
+
+    openMainView(returnContext.previousMainView);
+    setDetailItemId(sourceItemId);
+    setUpscaleDetailReturn(null);
+    showStatusMessage({ type: "success", text: t("已用超分结果替换原图。") });
   }
 
   /**
@@ -2342,7 +2411,7 @@ export function LibraryView() {
     "--library-sidebar-width": isSidebarOpen ? `${liveSidebarWidth}px` : "0px",
   } as CSSProperties & Record<"--library-sidebar-width", string>;
   const workspaceSurfaceStyle = {
-    "--library-workspace-width": `${workspaceWidthPercent}%`,
+    "--library-workspace-width": mainView === "imageUpscale" ? "100%" : `${workspaceWidthPercent}%`,
   } as CSSProperties & Record<"--library-workspace-width", string>;
 
   return (
@@ -2488,6 +2557,7 @@ export function LibraryView() {
             onOpenHome={openHomeView}
             onOpenLibraryRoots={() => setIsLibraryRootsOpen(true)}
             onOpenManager={() => openMainView("promptLibrary")}
+            onOpenUpscale={() => openMainView("imageUpscale")}
             onOpenTextPrompts={() => openMainView("textPrompts")}
             onOpenTodo={() => openMainView("todo")}
             onOpenPromptSites={() => openMainView("promptSites")}
@@ -2503,11 +2573,14 @@ export function LibraryView() {
           className="relative z-10 min-h-0 flex-1 overflow-y-auto"
           style={scrollContainerStyle}
         >
-          <CanvasPageBackground className="library-background-layer min-h-full w-full bg-background" currentView={mainView}>
+          <CanvasPageBackground
+            className={`library-background-layer min-h-full w-full bg-background ${mainView === "imageUpscale" ? "h-full" : ""}`}
+            currentView={mainView}
+          >
             {mainView === "canvas" ? <CanvasPageAtmosphere /> : null}
             <div
               data-feature-guide-page={mainView}
-              className="library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm"
+              className={`library-workspace-surface relative mx-auto min-h-0 min-w-0 border-x border-border/60 bg-panel shadow-sm ${mainView === "imageUpscale" ? "h-full" : ""}`}
               style={workspaceSurfaceStyle}
             >
               <div
@@ -2637,10 +2710,16 @@ export function LibraryView() {
             </section>
               ) : null}
 
-              {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant") || mountedLexiconViews.size > 0 ? (
+              {mainView === "imageUpscale" ? (
+                <Suspense fallback={<DeferredViewFallback />}>
+                  <UpscaleWorkspace onSourceReplaced={handleUpscaleSourceReplaced} />
+                </Suspense>
+              ) : null}
+
+              {(mainView !== "home" && mainView !== "canvas" && mainView !== "webAssistant" && mainView !== "imageUpscale") || mountedLexiconViews.size > 0 ? (
             <section
               className={`py-4 min-[1024px]:py-5 ${pageGutterClassName} ${mainView === "todo" ? "h-full min-h-0" : ""} ${
-                mainView === "home" || mainView === "canvas" || mainView === "webAssistant" ? "hidden" : ""
+                mainView === "home" || mainView === "canvas" || mainView === "webAssistant" || mainView === "imageUpscale" ? "hidden" : ""
               }`}
             >
               <div className={`${lexiconShellClassName} grid gap-4 ${mainView === "todo" ? "h-full min-h-0" : ""}`}>
@@ -3037,6 +3116,7 @@ type LibrarySidebarProps = {
   onOpenHome: () => void;
   onOpenLibraryRoots: () => void;
   onOpenManager: () => void;
+  onOpenUpscale: () => void;
   onOpenTextPrompts: () => void;
   onOpenTodo: () => void;
   onOpenPromptSites: () => void;
@@ -3073,6 +3153,7 @@ function LibrarySidebar({
   onOpenHome,
   onOpenLibraryRoots,
   onOpenManager,
+  onOpenUpscale,
   onOpenTextPrompts,
   onOpenTodo,
   onOpenPromptSites,
@@ -3231,6 +3312,15 @@ function LibrarySidebar({
         {hasVisibleGroup("inspiration") ? (
         <div className="grid min-w-0 gap-1 border-t border-border/80 pt-3">
           <SidebarSectionLabel isCompact={isCompact}>{t("灵感")}</SidebarSectionLabel>
+          {isEntryVisible("imageUpscale") ? (
+            <SidebarActionButton
+              active={activeView === "imageUpscale"}
+              icon={<ScanLine size={17} />}
+              isCompact={isCompact}
+              label={t("图片超分")}
+              onClick={onOpenUpscale}
+            />
+          ) : null}
           {isEntryVisible("textPrompts") ? (
             <SidebarActionButton
               active={activeView === "textPrompts"}

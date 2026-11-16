@@ -2,10 +2,13 @@ import path from "node:path";
 import type {
   RealEsrganRunRequest,
   UpscaleEngine,
+  UpscaleExportOptions,
   UpscaleExportRequest,
+  UpscaleExportTargetDescriptor,
   UpscaleModelId,
   UpscaleOutputFormat,
   UpscaleProgressEvent,
+  UpscaleReplaceSourceRequest,
 } from "../../../src/features/upscale/types";
 import {
   getUpscaleModelDefinition,
@@ -14,19 +17,30 @@ import {
 import { AppError } from "../ipc/errors";
 import {
   exportUpscaleResult,
+  pickUpscaleExportTarget,
   pickUpscaleOutputDirectory,
+  replaceUpscaleSource,
 } from "./upscaleExport";
 import {
   getUpscaleComponentStatus,
   installRealCuganModel,
   installRealEsrgan,
+  readRealCuganModel,
   removeUpscaleComponent,
 } from "./upscaleInstaller";
+import {
+  ensureUpscaleDropboxDir,
+  getUpscaleDropboxDir,
+  openUpscaleDropboxFolder,
+  scanUpscaleDropboxInPaths,
+} from "./upscaleDropbox";
+import { getUpscalePaths } from "./upscalePaths";
 import {
   createUpscaleResult,
   pickUpscaleInputs,
   readUpscaleInput,
   readUpscaleResult,
+  registerUpscaleLibraryItem,
   registerUpscalePaths,
   type UpscaleInputPickKind,
   type UpscalePathInput,
@@ -54,6 +68,7 @@ const knownUpscaleCodes = new Set([
   "UPSCALE_RESULT_MISSING",
   "UPSCALE_EXPORT_FAILED",
   "UPSCALE_LIBRARY_IMPORT_FAILED",
+  "UPSCALE_SOURCE_REPLACE_FAILED",
   "UPSCALE_CANCELED",
 ]);
 
@@ -106,8 +121,19 @@ export function registerUpscalePathsService(value: unknown) {
   return withUpscaleErrors(() => registerUpscalePaths(normalizePathInputs(value)));
 }
 
+export function registerUpscaleLibraryItemService(value: unknown) {
+  return withUpscaleErrors(() => registerUpscaleLibraryItem(normalizeToken(value)));
+}
+
 export function readUpscaleInputService(token: unknown) {
   return withUpscaleErrors(async () => new Uint8Array(await readUpscaleInput(normalizeToken(token))));
+}
+
+export function readUpscaleModelService(modelId: unknown) {
+  return withUpscaleErrors(async () => {
+    const normalizedModel = normalizeModel(modelId, "real-cugan");
+    return new Uint8Array(await readRealCuganModel(normalizedModel));
+  });
 }
 
 export function runRealEsrganService(
@@ -154,6 +180,46 @@ export function pickUpscaleOutputDirectoryService() {
 
 export function exportUpscaleResultService(value: unknown) {
   return withUpscaleErrors(() => exportUpscaleResult(normalizeExportRequest(value)));
+}
+
+/**
+ * 画布同款导出入口：library 收录素材库 / directory 批量写目录 / file 另存为。
+ * 系统对话框只弹一次，返回 null 表示用户取消。
+ */
+export function pickUpscaleExportTargetService(value: unknown) {
+  return withUpscaleErrors(async () => {
+    const record = requireRecord(value, "UPSCALE_EXPORT_FAILED", "导出参数无效");
+    const mode = record.mode === "directory" || record.mode === "file" ? record.mode : "library";
+    const format = normalizeOutputFormat(record.format);
+    const fileName = typeof record.fileName === "string" && record.fileName.trim()
+      ? record.fileName.trim().slice(0, 240)
+      : `超分结果.${format === "jpeg" ? "jpg" : format}`;
+    return pickUpscaleExportTarget(mode, { fileName, format }) as Promise<UpscaleExportTargetDescriptor | null>;
+  });
+}
+
+export function replaceUpscaleSourceService(value: unknown) {
+  return withUpscaleErrors(() => replaceUpscaleSource(normalizeReplaceSourceRequest(value)));
+}
+
+export function getUpscaleDropboxPathService() {
+  return withUpscaleErrors(async () => {
+    const dropboxDir = getUpscaleDropboxDir();
+    await ensureUpscaleDropboxDir(dropboxDir);
+    return { dropboxDir };
+  });
+}
+
+export function scanUpscaleDropboxService() {
+  return withUpscaleErrors(async () => {
+    const dropboxDir = getUpscaleDropboxDir();
+    await ensureUpscaleDropboxDir(dropboxDir);
+    return scanUpscaleDropboxInPaths(getUpscalePaths(), dropboxDir);
+  });
+}
+
+export function openUpscaleDropboxService() {
+  return withUpscaleErrors(() => openUpscaleDropboxFolder(getUpscaleDropboxDir()));
 }
 
 async function withUpscaleErrors<T>(operation: () => Promise<T>): Promise<T> {
@@ -232,6 +298,14 @@ function normalizeExportRequest(value: unknown): UpscaleExportRequest {
     resultToken: normalizeToken(record.resultToken),
     modelId: normalizeModel(record.modelId),
     options: options as unknown as UpscaleExportRequest["options"],
+  };
+}
+
+function normalizeReplaceSourceRequest(value: unknown): UpscaleReplaceSourceRequest {
+  const record = requireRecord(value, "UPSCALE_SOURCE_REPLACE_FAILED", "替换原图参数无效");
+  return {
+    inputToken: normalizeToken(record.inputToken),
+    resultToken: normalizeToken(record.resultToken),
   };
 }
 

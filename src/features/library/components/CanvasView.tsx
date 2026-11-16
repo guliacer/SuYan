@@ -3039,11 +3039,14 @@ function CanvasGeneratingStage({
   }, [isThinking]);
 
   return (
-    <CanvasMotionBackdrop keywords={keywords} mode={isThinking ? "thinking" : "busy"} tone={tone} className="flex min-h-0 flex-1 items-center justify-center px-4 py-4 sm:px-6">
-      <div className="canvas-generating-content relative flex min-h-0 w-full flex-1 items-center justify-center">
-        <div className="canvas-status-card canvas-status-card--below-core z-10 flex w-full max-w-sm flex-col items-center gap-2 px-2 py-4 text-center">
-          <h3 className="text-lg font-medium tracking-wide text-foreground" role="status">{t("灵感汇集ing")}</h3>
-          <p className={`canvas-waiting-message min-h-12 text-sm leading-6 text-muted ${isMessageLeaving ? "canvas-waiting-message--leaving" : ""}`}>{message}</p>
+    <CanvasMotionBackdrop keywords={keywords} mode={isThinking ? "thinking" : "busy"} tone={tone} className="canvas-generating-backdrop flex min-h-0 flex-1 flex-col px-4 py-4 sm:px-6">
+      <div className="canvas-generating-content canvas-generating-stage relative flex min-h-0 w-full flex-1 flex-col">
+        <div className="canvas-generating-core-space min-h-0 flex-1" aria-hidden="true" />
+        <div className="canvas-status-dock flex shrink-0 justify-center">
+          <div className="canvas-status-card canvas-status-card--below-core z-10 flex w-full max-w-sm flex-col items-center gap-2 px-2 py-4 text-center">
+            <h3 className="canvas-status-title text-lg font-medium tracking-wide" role="status">{t("灵感汇集ing")}</h3>
+            <p className={`canvas-waiting-message min-h-12 text-sm leading-6 text-muted ${isMessageLeaving ? "canvas-waiting-message--leaving" : ""}`}>{message}</p>
+          </div>
         </div>
       </div>
     </CanvasMotionBackdrop>
@@ -3121,22 +3124,26 @@ function CanvasResultStage({
 
           {total > 1 ? (
             <>
-              <button
-                aria-label={t("上一张")}
-                className="absolute left-3 top-1/2 z-10 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm backdrop-blur transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                onClick={goPrev}
-                type="button"
-              >
-                <ChevronLeft size={18} />
-              </button>
-              <button
-                aria-label={t("下一张")}
-                className="absolute right-3 top-1/2 z-10 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-panel/90 text-foreground shadow-sm backdrop-blur transition hover:bg-primary/10 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                onClick={goNext}
-                type="button"
-              >
-                <ChevronRight size={18} />
-              </button>
+              <div className="canvas-carousel-nav-zone canvas-carousel-nav-zone--prev absolute inset-y-0 left-0 z-10 flex w-[24%] items-center justify-start pl-3">
+                <button
+                  aria-label={t("上一张")}
+                  className="inline-flex size-9 items-center justify-center rounded-full border border-border/60 bg-panel/45 text-foreground/80 shadow-sm backdrop-blur transition hover:bg-panel/55 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  onClick={goPrev}
+                  type="button"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+              </div>
+              <div className="canvas-carousel-nav-zone canvas-carousel-nav-zone--next absolute inset-y-0 right-0 z-10 flex w-[24%] items-center justify-end pr-3">
+                <button
+                  aria-label={t("下一张")}
+                  className="inline-flex size-9 items-center justify-center rounded-full border border-border/60 bg-panel/45 text-foreground/80 shadow-sm backdrop-blur transition hover:bg-panel/55 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  onClick={goNext}
+                  type="button"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
               <span className="pointer-events-none absolute bottom-2 right-3 z-10 px-2 py-1 text-[11px] font-medium tabular-nums text-muted">
                 {safeIndex + 1} / {total}
               </span>
@@ -3414,24 +3421,28 @@ function CanvasFullscreenPreview({
       >
         {total > 1 ? (
           <>
-            <button
-              aria-label={t("上一张")}
-              className="absolute left-3 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-panel/55 text-foreground shadow-lg backdrop-blur transition hover:bg-panel/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              data-feature-guide="canvas-fullscreen-navigation"
-              onClick={onPrev}
-              type="button"
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <button
-              aria-label={t("下一张")}
-              className="absolute right-16 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full border border-border/70 bg-panel/55 text-foreground shadow-lg backdrop-blur transition hover:bg-panel/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-              data-feature-guide="canvas-fullscreen-navigation"
-              onClick={onNext}
-              type="button"
-            >
-              <ChevronRight size={20} />
-            </button>
+            <div className="canvas-fullscreen-nav-zone canvas-fullscreen-nav-zone--prev absolute inset-y-0 left-0 z-10 flex w-[24%] items-center justify-start pl-3">
+              <button
+                aria-label={t("上一张")}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-border/60 bg-panel/45 text-foreground/85 shadow-lg backdrop-blur transition hover:bg-panel/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                data-feature-guide="canvas-fullscreen-navigation"
+                onClick={onPrev}
+                type="button"
+              >
+                <ChevronLeft size={20} />
+              </button>
+            </div>
+            <div className="canvas-fullscreen-nav-zone canvas-fullscreen-nav-zone--next absolute inset-y-0 right-0 z-10 flex w-[24%] items-center justify-end pr-16">
+              <button
+                aria-label={t("下一张")}
+                className="inline-flex size-10 items-center justify-center rounded-full border border-border/60 bg-panel/45 text-foreground/85 shadow-lg backdrop-blur transition hover:bg-panel/60 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                data-feature-guide="canvas-fullscreen-navigation"
+                onClick={onNext}
+                type="button"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
           </>
         ) : null}
         {result.mediaType === "video" ? (

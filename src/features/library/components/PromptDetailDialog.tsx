@@ -229,6 +229,7 @@ type PromptDetailDialogProps = {
   presentation?: "dialog" | "panel";
   item: PromptCardData;
   isBusy: boolean;
+  isSendingToUpscale: boolean;
   imageCount: number;
   imageIndex: number;
   generationModelOrder: string[];
@@ -247,6 +248,7 @@ type PromptDetailDialogProps = {
   onImportImages: () => void;
   onPushToCanvas: (prompt: string, negativePrompt: string) => void;
   onPushPromptToCanvas: (prompt: string, negativePrompt: string) => void;
+  onSendToUpscale: () => void;
   onNavigateNext: () => void;
   onNavigatePrevious: () => void;
   /** Export the current prompt group as a ZIP share package. */
@@ -289,6 +291,7 @@ export function PromptDetailDialog({
   imageCount,
   imageIndex,
   isBusy,
+  isSendingToUpscale,
   isImageLiked,
   knownCategories,
   onAnalyzePrompt,
@@ -301,6 +304,7 @@ export function PromptDetailDialog({
   onImportImages,
   onPushToCanvas,
   onPushPromptToCanvas,
+  onSendToUpscale,
   onNavigateNext,
   onNavigatePrevious,
   onShareGroup,
@@ -1938,6 +1942,17 @@ export function PromptDetailDialog({
                   tooltipPlacement="below"
                   variant="subtle"
                   onClick={() => void onPushToCanvas(promptDraft, negativePromptDraft)}
+                />
+                <IconTooltipButton
+                  ariaLabel={t("去超分")}
+                  disabled={isBusy || isSendingToUpscale || !item.imageFileName || isCurrentMediaVideo}
+                  icon={isSendingToUpscale ? <Loader2 size={14} className="animate-spin" /> : <Expand size={14} />}
+                  label={isSendingToUpscale ? t("发送中…") : t("去超分")}
+                  size="md"
+                  tooltipAlign="center"
+                  tooltipPlacement="below"
+                  variant="subtle"
+                  onClick={onSendToUpscale}
                 />
                 <IconTooltipButton
                   ariaLabel={t("复制图片到剪贴板")}

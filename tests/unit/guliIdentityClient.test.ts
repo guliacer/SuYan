@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { Issuer, custom } from "openid-client";
 
 const avatarState = vi.hoisted(() => ({ dataDir: "" }));
 
@@ -10,7 +11,12 @@ vi.mock("electron", () => ({
   net: {},
 }));
 
+const networkLogs = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }));
+vi.mock("../../electron/main/appLogger", () => ({ logger: networkLogs }));
+
 const oidcMock = vi.hoisted(() => {
+  const httpOptions = Symbol("http_options");
+  const clients: FakeClient[] = [];
   const discovery = vi.fn();
   const clientMethods = {
     authorizationUrl: vi.fn(),
@@ -29,6 +35,7 @@ const oidcMock = vi.hoisted(() => {
 
     constructor(options: Record<string, unknown>) {
       this.options = options;
+      clients.push(this);
     }
 
     authorizationUrl(...args: unknown[]): string {
@@ -56,12 +63,13 @@ const oidcMock = vi.hoisted(() => {
     }
   }
 
-  return { discovery, clientMethods, FakeClient };
+  return { discovery, clientMethods, FakeClient, httpOptions, clients };
 });
 
 vi.mock("openid-client", () => ({
   Issuer: { discover: oidcMock.discovery },
   generators: {},
+  custom: { http_options: oidcMock.httpOptions },
 }));
 
 import {
@@ -150,6 +158,9 @@ beforeEach(() => {
   process.env.GULI_IDENTITY_REDIRECT_URI = "suyan://oauth/callback";
   process.env.GULI_IDENTITY_SCOPES = "openid email";
   resetGuliIdentityClientForTests();
+  oidcMock.clients.length = 0;
+  networkLogs.warn.mockClear();
+  networkLogs.error.mockClear();
   oidcMock.discovery.mockReset();
   oidcMock.discovery.mockResolvedValue({
     metadata: { ...discoveryMetadata },
@@ -267,9 +278,70 @@ describe("guliIdentityClient", () => {
   });
 
   it("隧道不可用时报告服务不可用，不生成授权地址", async () => {
-    oidcMock.discovery.mockRejectedValueOnce({ response: { statusCode: 530 } });
+    oidcMock.discovery.mockRejectedValue({ response: { statusCode: 530 } });
     await expect(buildGuliAuthorizationUrl({ state: "s", nonce: "n", codeChallenge: "c" }))
       .rejects.toMatchObject({ code: "ACCOUNT_PROVIDER_UNAVAILABLE", message: expect.stringContaining("530") });
+    expect(oidcMock.clientMethods.authorizationUrl).not.toHaveBeenCalled();
+  });
+
+  it("Discovery、密钥和令牌请求都等待 15 秒，保留已有请求头", async () => {
+    await buildGuliAuthorizationUrl({ state: "s", nonce: "n", codeChallenge: "c" });
+    const issuer = await oidcMock.discovery.mock.results[0].value;
+    const options = { timeout: 3500, headers: { accept: "application/json" } };
+    for (const target of [Issuer, issuer, oidcMock.clients[0]]) {
+      const hook = Reflect.get(target, custom.http_options);
+      expect(hook).toBeTypeOf("function");
+      expect(hook(new URL("https://auth.example.test"), options)).toEqual({ ...options, timeout: 15000 });
+    }
+  });
+
+  it.each([
+    { code: "ECONNRESET" },
+    { code: "EAI_AGAIN" },
+    { response: { statusCode: 530 } },
+    { response: { statusCode: 503 } },
+    { name: "RPError", message: "outgoing request timed out after 3500ms" },
+  ])("首次连接抖动后自动恢复：%j", async (error) => {
+    oidcMock.discovery.mockRejectedValueOnce(error);
+    await expect(buildGuliAuthorizationUrl({ state: "s", nonce: "n", codeChallenge: "c" })).resolves.toContain("authorize");
+    expect(oidcMock.discovery).toHaveBeenCalledTimes(2);
+    expect(networkLogs.warn).toHaveBeenCalledWith("main", "oauth:discovery-retry", expect.objectContaining({ attempt: 1, maxAttempts: 2 }));
+    expect(networkLogs.error).not.toHaveBeenCalled();
+  });
+
+  it("并发登录共用恢复任务，成功后复用缓存", async () => {
+    oidcMock.discovery.mockRejectedValueOnce({ code: "ECONNRESET" });
+    const input = { state: "s", nonce: "n", codeChallenge: "c" };
+    await Promise.all([buildGuliAuthorizationUrl(input), buildGuliAuthorizationUrl(input)]);
+    await buildGuliAuthorizationUrl(input);
+    expect(oidcMock.discovery).toHaveBeenCalledTimes(2);
+    expect(oidcMock.clients).toHaveLength(1);
+  });
+
+  it("持续超时只尝试两次，错误明确且日志不含原始凭据", async () => {
+    const secret = "fixture-private-authorization-code";
+    oidcMock.discovery.mockRejectedValue(Object.assign(new Error("outgoing request timed out after 3500ms"), { response: undefined, authorization: secret, name: "RPError" }));
+    await expect(buildGuliAuthorizationUrl({ state: "s", nonce: "n", codeChallenge: "c" }))
+      .rejects.toMatchObject({ code: "ACCOUNT_NETWORK_ERROR", message: expect.stringContaining("超时") });
+    expect(oidcMock.discovery).toHaveBeenCalledTimes(2);
+    expect(oidcMock.clientMethods.authorizationUrl).not.toHaveBeenCalled();
+    expect(networkLogs.error).toHaveBeenCalledWith("main", "oauth:discovery-failed", expect.objectContaining({ attempts: 2, code: "ACCOUNT_NETWORK_ERROR" }));
+    expect(JSON.stringify([networkLogs.warn.mock.calls, networkLogs.error.mock.calls])).not.toContain(secret);
+  });
+
+  it("连接故障最终失败后仍可再次发起登录", async () => {
+    oidcMock.discovery.mockRejectedValueOnce({ code: "ECONNREFUSED" }).mockRejectedValueOnce({ code: "ECONNREFUSED" });
+    const input = { state: "s", nonce: "n", codeChallenge: "c" };
+    await expect(buildGuliAuthorizationUrl(input)).rejects.toMatchObject({ code: "ACCOUNT_NETWORK_ERROR" });
+    await expect(buildGuliAuthorizationUrl(input)).resolves.toContain("authorize");
+    expect(oidcMock.discovery).toHaveBeenCalledTimes(3);
+  });
+
+  it("证书错误不重试，不关闭证书校验", async () => {
+    oidcMock.discovery.mockRejectedValueOnce({ code: "CERT_HAS_EXPIRED" });
+    await expect(buildGuliAuthorizationUrl({ state: "s", nonce: "n", codeChallenge: "c" }))
+      .rejects.toMatchObject({ code: "ACCOUNT_PROVIDER_UNAVAILABLE", message: expect.stringContaining("证书") });
+    expect(oidcMock.discovery).toHaveBeenCalledTimes(1);
     expect(oidcMock.clientMethods.authorizationUrl).not.toHaveBeenCalled();
   });
 

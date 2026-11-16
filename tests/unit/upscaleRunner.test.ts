@@ -111,6 +111,21 @@ describe("Real-ESRGAN command builder", () => {
       outputFormat: "png",
     })).toThrow("UPSCALE_MODEL_NOT_INSTALLED");
   });
+
+  it("lets the native runtime auto-select a GPU by omitting the invalid -g -1 pair", () => {
+    const args = buildRealEsrganArgs({
+      inputPath: "C:\\input.png",
+      outputPath: "C:\\output.png",
+      modelId: "esrgan-x4plus",
+      tileSize: 0,
+      gpuId: -1,
+      outputFormat: "png",
+    });
+
+    expect(args).not.toContain("-g");
+    expect(args).not.toContain("-1");
+    expect(args.slice(-2)).toEqual(["-f", "png"]);
+  });
 });
 
 describe("Real-ESRGAN process lifecycle", () => {

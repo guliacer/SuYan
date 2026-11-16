@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LibraryItem } from "../../src/features/library/types/library";
+import type { LibraryFile, LibraryItem } from "../../src/features/library/types/library";
 import type {
   UpscaleExportOptions,
   UpscaleExportRequest,
@@ -17,10 +17,16 @@ import {
 import {
   clearUpscaleOutputDirectories,
   exportUpscaleResultWithDependencies,
+  pickUpscaleExportTarget,
+  replaceUpscaleSourceWithDependencies,
   registerUpscaleOutputDirectory,
   resolveUpscaleOutputDirectory,
   type UpscaleExportDependencies,
 } from "../../electron/main/upscale/upscaleExport";
+import {
+  replaceLibrarySourceImageWithDependencies,
+  type ReplacementDependencies,
+} from "../../electron/main/library/upscaleSourceReplacement";
 
 const roots: string[] = [];
 
@@ -102,6 +108,46 @@ describe("upscale export policy", () => {
     expect(JSON.stringify(descriptor)).not.toContain(root);
     expect(resolveUpscaleOutputDirectory(descriptor.token)).toBe(path.resolve(root));
     expect(() => resolveUpscaleOutputDirectory(root)).toThrow("UPSCALE_EXPORT_FAILED");
+  });
+});
+
+describe("upscale export target", () => {
+  it("returns the library target without touching the file system", async () => {
+    await expect(pickUpscaleExportTarget("library", { fileName: "x.png", format: "png" }))
+      .resolves.toEqual({ mode: "library", directoryToken: null, filePath: null });
+  });
+
+  it("writes to the exact path chosen by the user", async () => {
+    const root = await makeRoot();
+    const png = await createPng();
+    const target = path.join(root, "我的 导出.png");
+    await fs.writeFile(target, Buffer.from("old"));
+
+    const result = await exportUpscaleResultWithDependencies(
+      makeRequest({ saveToDirectory: true, targetFilePath: target }),
+      makeDependencies(root, png),
+    );
+
+    expect(result).toMatchObject({ savedFileName: "我的 导出.png", skipped: false });
+    await expect(fs.readFile(target)).resolves.toEqual(png);
+  });
+
+  it("restores the original file when the save-as write fails", async () => {
+    const root = await makeRoot();
+    const png = await createPng();
+    const target = path.join(root, "keep.png");
+    await fs.writeFile(target, Buffer.from("keep"));
+
+    await expect(exportUpscaleResultWithDependencies(
+      makeRequest({ saveToDirectory: true, targetFilePath: target }),
+      makeDependencies(root, png, {
+        writeFileReplace: async () => {
+          throw new Error("磁盘不可写");
+        },
+      }),
+    )).rejects.toThrow("磁盘不可写");
+
+    await expect(fs.readFile(target, "utf8")).resolves.toBe("keep");
   });
 });
 
@@ -229,6 +275,129 @@ describe("upscale export transaction", () => {
       }),
     )).rejects.toThrow("UPSCALE_EXPORT_FAILED");
   });
+
+  it("replaces a registered source only through the explicit replacement operation", async () => {
+    const root = await makeRoot();
+    const png = await createPng();
+    const replaceSourceImage = vi.fn(async () => ({
+      sourceItemId: "source-item",
+      imageFileName: "replacement.png",
+    }));
+    const dependencies = makeDependencies(root, png, { replaceSourceImage });
+
+    await exportUpscaleResultWithDependencies(makeRequest({
+      saveToDirectory: false,
+      addToLibrary: true,
+    }), dependencies);
+    expect(replaceSourceImage).not.toHaveBeenCalled();
+
+    const result = await replaceUpscaleSourceWithDependencies({
+      inputToken: "input-token",
+      resultToken: "result-token",
+    }, dependencies);
+
+    expect(result).toEqual({ sourceItemId: "source-item", imageFileName: "replacement.png" });
+    expect(replaceSourceImage).toHaveBeenCalledWith({
+      sourceItemId: "source-item",
+      expectedImageFileName: "source.png",
+      bytes: png,
+      mediaType: "image/png",
+    });
+  });
+
+  it("refuses replacement when the input was not registered from a library detail image", async () => {
+    const root = await makeRoot();
+    const png = await createPng();
+    await expect(replaceUpscaleSourceWithDependencies({
+      inputToken: "input-token",
+      resultToken: "result-token",
+    }, makeDependencies(root, png, {
+      getInputDescriptor: () => ({
+        ...makeInput(),
+        sourceItemId: null,
+        sourceImageFileName: null,
+      }),
+    }))).rejects.toThrow("UPSCALE_SOURCE_REPLACE_FAILED");
+  });
+});
+
+describe("upscale source replacement transaction", () => {
+  it("rolls back the new managed image when the registered source is stale", async () => {
+    const removeManagedImage = vi.fn(async () => undefined);
+    const dependencies = makeReplacementDependencies({
+      removeManagedImage,
+      updateLibrary: async (updater) => updater(makeLibrary({ imageFileName: "changed.png" }))!,
+    });
+
+    await expect(replaceLibrarySourceImageWithDependencies({
+      sourceItemId: "source-item",
+      expectedImageFileName: "source.png",
+      bytes: Buffer.from("replacement"),
+      mediaType: "image/png",
+    }, dependencies)).rejects.toMatchObject({ code: "UPSCALE_SOURCE_REPLACE_FAILED" });
+
+    expect(removeManagedImage).toHaveBeenCalledTimes(1);
+    expect(removeManagedImage).toHaveBeenCalledWith("replacement.png");
+    expect(dependencies.removeThumbnail).not.toHaveBeenCalled();
+  });
+
+  it("preserves metadata and never removes a user-owned external source", async () => {
+    let persisted: LibraryFile | null = null;
+    const dependencies = makeReplacementDependencies({
+      updateLibrary: async (updater) => {
+        const next = updater(makeLibrary({
+          mediaStorage: { kind: "external", rootId: "root-1", relativePath: "source.png" },
+          remoteImageUrl: "https://example.test/source.png",
+          remoteImageStatus: "downloaded",
+        }));
+        if (!next) throw new Error("expected replacement update");
+        persisted = next;
+        return next;
+      },
+    });
+
+    await expect(replaceLibrarySourceImageWithDependencies({
+      sourceItemId: "source-item",
+      expectedImageFileName: "source.png",
+      bytes: Buffer.from("replacement"),
+      mediaType: "image/png",
+    }, dependencies)).resolves.toEqual({
+      sourceItemId: "source-item",
+      imageFileName: "replacement.png",
+    });
+
+    expect((persisted as LibraryFile | null)?.items[0]).toMatchObject({
+      id: "source-item",
+      title: "来源作品",
+      prompt: "湖边日出",
+      imageFileName: "replacement.png",
+      mediaStorage: "managed",
+      remoteImageUrl: null,
+      remoteImageStatus: null,
+    });
+    expect(dependencies.removeManagedImage).not.toHaveBeenCalled();
+    expect(dependencies.removeThumbnail).toHaveBeenCalledWith("source.png");
+  });
+
+  it("keeps old managed media and its thumbnail while another item references it", async () => {
+    const dependencies = makeReplacementDependencies({
+      updateLibrary: async (updater) => {
+        const library = makeLibrary();
+        library.items.push({ ...library.items[0], id: "shared-item" });
+        return updater(library)!;
+      },
+    });
+
+    await replaceLibrarySourceImageWithDependencies({
+      sourceItemId: "source-item",
+      expectedImageFileName: "source.png",
+      bytes: Buffer.from("replacement"),
+      mediaType: "image/png",
+    }, dependencies);
+
+    expect(dependencies.removeManagedImage).not.toHaveBeenCalled();
+    expect(dependencies.removeThumbnail).not.toHaveBeenCalled();
+  });
 });
 
 function makeRequest(options: Partial<UpscaleExportOptions> = {}): UpscaleExportRequest {
@@ -254,6 +423,7 @@ function makeInput(): UpscaleInputDescriptor {
     byteSize: 4,
     mediaType: "image/png",
     sourceItemId: "source-item",
+    sourceImageFileName: "source.png",
     previewDataUrl: "data:image/webp;base64,AAAA",
   };
 }
@@ -274,6 +444,28 @@ function makeSourceItem(): LibraryItem {
   };
 }
 
+function makeLibrary(overrides: Partial<LibraryItem> = {}) {
+  return {
+    schemaVersion: 2 as const,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    items: [{ ...makeSourceItem(), mediaStorage: "managed" as const, ...overrides }],
+  };
+}
+
+function makeReplacementDependencies(
+  overrides: Partial<ReplacementDependencies> = {},
+): ReplacementDependencies {
+  return {
+    writeManagedImage: async () => "replacement.png",
+    updateLibrary: async (updater) => updater(makeLibrary())!,
+    removeManagedImage: vi.fn(async () => undefined),
+    removeThumbnail: vi.fn(async () => undefined),
+    logInfo: vi.fn(),
+    logWarn: vi.fn(),
+    ...overrides,
+  };
+}
+
 function makeDependencies(
   outputDirectory: string,
   resultBytes: Buffer,
@@ -286,6 +478,9 @@ function makeDependencies(
     findSourceItem: async () => null,
     encodeResult: async () => resultBytes,
     importToLibrary: async () => [],
+    replaceSourceImage: async () => {
+      throw new Error("replacement not configured");
+    },
     pathExists: async (filePath) => fs.stat(filePath).then(() => true, () => false),
     writeFile: (filePath, bytes) => fs.writeFile(filePath, bytes, { flag: "wx" }),
     rename: (source, target) => fs.rename(source, target),

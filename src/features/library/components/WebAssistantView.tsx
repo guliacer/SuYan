@@ -173,7 +173,11 @@ export function WebAssistantView({ isFeatureGuideOpen, isImportMenuOpen, onNotif
       storeState.webAssistantLastCustomUrl ?? getStoredWebAssistantCustomUrl();
     const customUrl = storedCustomUrl && normalizeUrlInput(storedCustomUrl) ? storedCustomUrl : null;
     const platform =
-      storedPlatform === CUSTOM_PLATFORM && customUrl ? CUSTOM_PLATFORM : storedPlatform;
+      storedPlatform === CUSTOM_PLATFORM && customUrl
+        ? CUSTOM_PLATFORM
+        : findWebAssistantSite(storedPlatform)
+          ? storedPlatform
+          : WEB_ASSISTANT_DEFAULT_SITE_ID;
     return { platform, customUrl };
   });
   const [platform, setPlatform] = useState<WebAssistantTargetId>(initialPrefs.platform);

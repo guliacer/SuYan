@@ -14,13 +14,16 @@ const channels = [
   ["UpscaleRemove", "upscale:remove"],
   ["UpscalePickInputs", "upscale:pick-inputs"],
   ["UpscaleRegisterPaths", "upscale:register-paths"],
+  ["UpscaleRegisterLibraryItem", "upscale:register-library-item"],
   ["UpscaleReadInput", "upscale:read-input"],
+  ["UpscaleReadModel", "upscale:read-model"],
   ["UpscaleRunNative", "upscale:run-native"],
   ["UpscaleCancelNative", "upscale:cancel-native"],
   ["UpscaleStoreResult", "upscale:store-result"],
   ["UpscaleReadResult", "upscale:read-result"],
   ["UpscalePickOutputDirectory", "upscale:pick-output-directory"],
   ["UpscaleExport", "upscale:export"],
+  ["UpscaleReplaceSource", "upscale:replace-source"],
   ["UpscaleProgress", "upscale:progress"],
 ] as const;
 
@@ -33,6 +36,46 @@ describe("image upscale desktop contract", () => {
     }
   });
 
+  it("lazy-loads the upscale workspace and exposes a dedicated sidebar route", () => {
+    const source = readSource("src/features/library/components/LibraryView.tsx");
+    expect(source).toContain('import("@/features/upscale")');
+    expect(source).toContain("const UpscaleWorkspace = lazy");
+    expect(source).toContain('openMainView("imageUpscale")');
+    expect(source).toContain('mainView === "imageUpscale"');
+    expect(source).toContain('isEntryVisible("imageUpscale")');
+  });
+
+  it("localizes workspace navigation, controls, statuses, and errors", () => {
+    const locale = readSource("src/components/LocaleProvider.tsx");
+    const status = readSource("src/components/uiStatusTranslations.ts");
+    const translations = [
+      ['"图片超分"', '"Image Upscale"'],
+      ['"任务队列"', '"Task Queue"'],
+      ['"前后对比"', '"Before / After"'],
+      ['"处理与导出"', '"Process & Export"'],
+      ['"开始处理"', '"Start Processing"'],
+      ['"导出结果"', '"Export Results"'],
+      ['"首次使用需下载组件"', '"Download required on first use"'],
+    ];
+    for (const [key, value] of translations) {
+      expect(locale).toContain(`${key}: ${value}`);
+    }
+    expect(status).toContain('"UPSCALE_MODEL_DOWNLOAD_FAILED"');
+    expect(status).toContain('"UPSCALE_WASM_FAILED"');
+    expect(status).toContain('"UPSCALE_EXPORT_FAILED"');
+  });
+
+  it("preserves development components and ships third-party notices", () => {
+    const packager = readSource("package-win.cjs");
+    const notices = readSource("THIRD_PARTY_NOTICES.md");
+    expect(packager).toContain('"upscale-cugan"');
+    expect(packager).toContain('"upscale-realesrgan"');
+    expect(notices).toContain("Real-CUGAN");
+    expect(notices).toContain("Real-ESRGAN");
+    expect(notices).toContain("ONNX Runtime");
+    expect(notices).toContain("ncnn");
+  });
+
   it("exposes named preload methods and converts dropped Files inside preload", () => {
     const source = readSource("electron/preload/index.ts");
     const methods = [
@@ -41,13 +84,16 @@ describe("image upscale desktop contract", () => {
       "removeUpscaleComponent",
       "pickUpscaleInputs",
       "registerUpscaleFiles",
+      "registerUpscaleLibraryItem",
       "readUpscaleInput",
+      "readUpscaleModel",
       "runRealEsrgan",
       "cancelRealEsrgan",
       "storeUpscaleResult",
       "readUpscaleResult",
       "pickUpscaleOutputDirectory",
       "exportUpscaleResult",
+      "replaceUpscaleSource",
       "onUpscaleProgress",
     ];
     for (const method of methods) {
@@ -58,6 +104,29 @@ describe("image upscale desktop contract", () => {
     expect(source).toContain("return () => ipcRenderer.removeListener(IpcChannelName.UpscaleProgress, handler)");
     expect(source).not.toContain('exposeInMainWorld("electron"');
     expect(source).not.toContain("invoke: (channel");
+  });
+
+  it("routes one detail image into upscale and only replaces it after explicit confirmation", () => {
+    const libraryView = readSource("src/features/library/components/LibraryView.tsx");
+    const detail = readSource("src/features/library/components/PromptDetailDialog.tsx");
+    const workspace = readSource("src/features/upscale/components/UpscaleWorkspace.tsx");
+
+    expect(detail).toContain("onSendToUpscale: () => void;");
+    expect(detail).toContain("isSendingToUpscale: boolean;");
+    expect(detail).toContain('ariaLabel={t("去超分")}');
+    expect(detail).toContain("onClick={onSendToUpscale}");
+    expect(libraryView).toContain("registerUpscaleLibraryItem(item.id)");
+    expect(libraryView).toContain("upscaleSendPendingRef.current");
+    expect(libraryView).toContain("originalImageFileName: item.imageFileName");
+    expect(libraryView).toContain("useLibraryStore.getState().items.find");
+    expect(libraryView).toContain('openMainView("imageUpscale")');
+    expect(libraryView).toContain("onSendToUpscale={() => void sendDetailImageToUpscale(detailItem)}");
+    expect(workspace).toContain('t("替换原图并返回详情")');
+    expect(workspace).toContain("replaceUpscaleSource({");
+    expect(workspace).toContain("setReplaceConfirmOpen(false)");
+    expect(workspace).toContain('t("原图已替换，但返回详情失败，请重新打开素材详情。")');
+    expect(workspace).toContain("<ConfirmDialog");
+    expect(workspace).toContain("onSourceReplaced(result.data.sourceItemId)");
   });
 
   it("registers every handler through handleResult and validates requests in the main service", () => {
@@ -77,10 +146,18 @@ describe("image upscale desktop contract", () => {
     const api = readSource("src/types/suyanApi.ts");
     expect(api).toContain("registerUpscaleFiles: (files: File[]");
     expect(api).toContain("readUpscaleInput: (token: string) => Promise<IpcResult<Uint8Array>>");
+    expect(api).toContain("readUpscaleModel: (modelId: UpscaleModelId) => Promise<IpcResult<Uint8Array>>");
     expect(api).toContain("readUpscaleResult: (token: string) => Promise<IpcResult<Uint8Array>>");
     expect(api).toContain("UpscaleOutputDirectoryDescriptor");
     expect(api).toContain("UpscaleExportResult");
     expect(api).not.toContain("registerUpscalePaths: (paths: string[]");
+  });
+
+  it("creates a WASM inference session when the worker is forced to WASM", () => {
+    const worker = readSource("src/features/upscale/worker/realCugan.worker.ts");
+    expect(worker).toMatch(
+      /if \(message\.forceWasm\) \{\s+await createSession\(modelBytes, "wasm"\);\s+selected = "wasm";/,
+    );
   });
 
   it("cleans orphan cache on startup and invalidates sessions on exit", () => {

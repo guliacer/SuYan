@@ -8,7 +8,7 @@ import {
 
 describe("systemPreferences", () => {
   it("lists the consolidated preference sections in stable order", () => {
-    expect(systemPreferenceSections).toEqual(["proxy", "appearance", "visualLife", "canvasBackground", "layout", "sidebar", "modules", "startupGallery"]);
+    expect(systemPreferenceSections).toEqual(["proxy", "appearance", "visualLife", "canvasBackground", "layout", "sidebar", "modules", "startupGallery", "weather"]);
     expect(defaultSystemPreferenceSection).toBe("proxy");
   });
 

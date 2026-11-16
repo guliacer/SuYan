@@ -41,6 +41,8 @@ type Props = {
   onDeleteProject: (id: string) => Promise<boolean>;
   onReorderProjects?: (ids: string[]) => Promise<boolean>;
   embedded?: boolean;
+  initialProjectId?: string;
+  hideQuickAdd?: boolean;
   actionRequest?: TodoManagerActionRequest;
   onActionRequestHandled?: () => void;
 };
@@ -70,11 +72,11 @@ type TaskInput = {
   tagIds?: string[];
 };
 
-export function TodoManagerDialog({ tasks, projects, promptEntries = [], isBusy, initialPrompt, onClose, onCreateTask, onUpdateTask, onDeleteTask, onArchiveTask, onCompleteTask, onBatchUpdateTasks, onBatchDeleteTasks, onCreateProject, onUpdateProject, onDeleteProject, onReorderProjects, embedded = false, actionRequest, onActionRequestHandled }: Props) {
+export function TodoManagerDialog({ tasks, projects, promptEntries = [], isBusy, initialPrompt, onClose, onCreateTask, onUpdateTask, onDeleteTask, onArchiveTask, onCompleteTask, onBatchUpdateTasks, onBatchDeleteTasks, onCreateProject, onUpdateProject, onDeleteProject, onReorderProjects, embedded = false, initialProjectId = "all", hideQuickAdd = false, actionRequest, onActionRequestHandled }: Props) {
   const { t } = useLocale();
   const [filter, setFilter] = useState<TodoFilter>("all");
   const [query, setQuery] = useState("");
-  const [projectId, setProjectId] = useState("all");
+  const [projectId, setProjectId] = useState(initialProjectId);
   const [editor, setEditor] = useState<TodoTask | null | undefined>(initialPrompt ? null : undefined);
   const [projectManagerOpen, setProjectManagerOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -207,8 +209,8 @@ export function TodoManagerDialog({ tasks, projects, promptEntries = [], isBusy,
             <select aria-label={t("按项目筛选")} className="h-9 rounded-lg border border-border bg-panel px-2.5 text-sm" value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="all">{t("全部项目")}</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.archived ? `（${t("已归档")}）` : ""}</option>)}</select>
             <div className="flex min-w-0 items-center gap-1.5">
               <label className="flex h-9 items-center gap-2 rounded-lg border border-border px-2.5 text-xs text-muted"><input aria-label={t("全选当前事项")} checked={allVisibleSelected} disabled={visibleTaskIds.length === 0} type="checkbox" onChange={toggleAllVisible} />{t("全选")}</label>
-              <TextField aria-label={t("快速新增事项")} className="h-9 min-w-32 flex-1 min-[720px]:w-36" disabled={isBusy || quickAdding} placeholder={t("快速新增")} value={quickTitle} onChange={(event) => setQuickTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void addQuickTasks(quickTitle); } }} onPaste={(event) => { const pasted = event.clipboardData.getData("text"); if (splitTodoQuickInput(pasted).length > 1) { event.preventDefault(); void addQuickTasks(pasted); } }} />
-              <Button disabled={isBusy || quickAdding || splitTodoQuickInput(quickTitle).length === 0} icon={<Plus size={14} />} size="sm" onClick={() => void addQuickTasks(quickTitle)}>{t("添加")}</Button>
+              {!hideQuickAdd ? <> <TextField aria-label={t("快速新增事项")} className="h-9 min-w-32 flex-1 min-[720px]:w-36" disabled={isBusy || quickAdding} placeholder={t("快速新增")} value={quickTitle} onChange={(event) => setQuickTitle(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void addQuickTasks(quickTitle); } }} onPaste={(event) => { const pasted = event.clipboardData.getData("text"); if (splitTodoQuickInput(pasted).length > 1) { event.preventDefault(); void addQuickTasks(pasted); } }} />
+              <Button disabled={isBusy || quickAdding || splitTodoQuickInput(quickTitle).length === 0} icon={<Plus size={14} />} size="sm" onClick={() => void addQuickTasks(quickTitle)}>{t("添加")}</Button> </> : null}
             </div>
           </div>
           {tagSuggestions.length ? <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 border-t border-border/60 pt-2"><span className="text-[11px] text-muted">{t("标签")}</span>{tagSuggestions.map((tag) => { const active = activeTags.some((item) => item.toLocaleLowerCase() === tag.toLocaleLowerCase()); const tone = CAPSULE_TONES[getTodoTagTone(tag)]; return <button aria-pressed={active} className={`max-w-40 truncate rounded-full border px-2 py-0.5 text-[11px] ${active ? tone.solid : "border-border text-muted hover:text-foreground"}`} key={tag} title={active ? `${t("取消筛选标签")} ${tag}` : `${t("按标签筛选")} ${tag}`} type="button" onClick={() => setActiveTags((current) => active ? current.filter((item) => item.toLocaleLowerCase() !== tag.toLocaleLowerCase()) : [...current, tag])}>{tag}</button>; })}{activeTags.length ? <button className="rounded-md px-2 py-0.5 text-[11px] text-primary hover:bg-primary-soft" type="button" onClick={() => setActiveTags([])}>{t("清除标签筛选")}</button> : null}</div> : null}

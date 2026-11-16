@@ -8,6 +8,7 @@ export const defaultUpscaleExportOptions: UpscaleExportOptions = {
   saveToDirectory: true,
   addToLibrary: false,
   outputDirectoryToken: null,
+  targetFilePath: null,
   format: "png",
   quality: 92,
   conflictPolicy: "append-number",
@@ -46,6 +47,10 @@ export function normalizeUpscaleExportOptions(
     outputDirectoryToken:
       typeof source.outputDirectoryToken === "string" && source.outputDirectoryToken.trim()
         ? source.outputDirectoryToken.trim()
+        : null,
+    targetFilePath:
+      typeof source.targetFilePath === "string" && source.targetFilePath.trim()
+        ? source.targetFilePath.trim()
         : null,
     format: source.format === "jpeg" || source.format === "webp" ? source.format : "png",
     quality,

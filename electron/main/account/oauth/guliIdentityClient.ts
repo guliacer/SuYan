@@ -1,7 +1,9 @@
 import { net } from "electron";
 import {
   Issuer,
+  custom,
   generators,
+  type CustomHttpOptionsProvider,
   type Client,
   type IdTokenClaims,
   type TokenSet,
@@ -18,6 +20,7 @@ import {
   type AccountUser,
 } from "../../../../src/features/account/types/account";
 import { AccountError } from "../errors";
+import { logger } from "../../appLogger";
 import { readGuliIdentityConfigValue } from "./guliIdentityConfig";
 import {
   cacheAccountAvatar,
@@ -33,6 +36,14 @@ const GULI_PROFILE_PATH = "/v1/account/profile";
 const GULI_AVATAR_PATH = "/v1/account/avatar";
 const GULI_AVATAR_IMAGE_PATH = "/v1/account/avatar/image";
 const GULI_AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const GULI_OIDC_REQUEST_TIMEOUT_MS = 15_000;
+const GULI_DISCOVERY_MAX_ATTEMPTS = 2;
+const GULI_DISCOVERY_RETRY_DELAY_MS = 300;
+
+const guliOidcHttpOptions: CustomHttpOptionsProvider = (_url, options) => ({
+  ...options,
+  timeout: GULI_OIDC_REQUEST_TIMEOUT_MS,
+});
 
 type GuliIdentityConfig = {
   issuer: string;
@@ -438,20 +449,16 @@ async function getGuliClient(config: GuliIdentityConfig): Promise<Client> {
   if (discoveryInFlight) return discoveryInFlight;
 
   discoveryInFlight = (async () => {
-    let issuer: Awaited<ReturnType<typeof Issuer.discover>>;
-    try {
-      issuer = await Issuer.discover(config.issuer);
-    } catch (error) {
-      throw mapOidcError(error, "无法读取登录服务配置。");
-    }
-
+    const issuer = await discoverGuliIssuer(config.issuer);
     validateDiscovery(issuer.metadata, config.issuer);
+    issuer[custom.http_options] = guliOidcHttpOptions;
     const client = new issuer.Client({
       client_id: config.clientId,
       redirect_uris: [config.redirectUri],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     });
+    client[custom.http_options] = guliOidcHttpOptions;
     cachedClient = client;
     cachedConfigKey = configKey;
     return client;
@@ -460,6 +467,37 @@ async function getGuliClient(config: GuliIdentityConfig): Promise<Client> {
   });
 
   return discoveryInFlight;
+}
+
+async function discoverGuliIssuer(issuerUrl: string): Promise<Awaited<ReturnType<typeof Issuer.discover>>> {
+  // Discovery uses the static hook; JWKS and token requests use the instance hooks.
+  Issuer[custom.http_options] = guliOidcHttpOptions;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await Issuer.discover(issuerUrl);
+    } catch (error) {
+      const failure = readOidcConnectionFailure(error);
+      const mapped = mapOidcError(error, "无法读取登录服务配置。");
+      const details = {
+        code: mapped.code,
+        message: mapped.message,
+        httpStatus: failure?.httpStatus,
+        networkCode: failure?.networkCode,
+      };
+      if (!failure?.retryable || attempt >= GULI_DISCOVERY_MAX_ATTEMPTS) {
+        logger.error("main", "oauth:discovery-failed", { ...details, attempts: attempt });
+        throw mapped;
+      }
+      logger.warn("main", "oauth:discovery-retry", {
+        ...details,
+        attempt,
+        maxAttempts: GULI_DISCOVERY_MAX_ATTEMPTS,
+      });
+      // Only retry this read-only request. Authorization codes and refresh tokens
+      // may be single use, so token operations must never be replayed here.
+      await new Promise<void>((resolve) => setTimeout(resolve, GULI_DISCOVERY_RETRY_DELAY_MS));
+    }
+  }
 }
 
 function validateDiscovery(
@@ -985,6 +1023,47 @@ function resolveExpiresAt(tokenSet: TokenSet): number {
   return Date.now() + 5 * 60 * 1000;
 }
 
+type OidcConnectionFailure = {
+  kind: "timeout" | "network" | "service" | "certificate";
+  retryable: boolean;
+  httpStatus?: number;
+  networkCode?: string;
+};
+
+const oidcTransientNetworkCodes = new Set([
+  "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH",
+  "ENETUNREACH", "EPIPE", "ETIMEDOUT", "ESOCKETTIMEDOUT", "ERR_SOCKET_CONNECTION_TIMEOUT",
+]);
+const oidcCertificateErrorCodes = new Set([
+  "CERT_HAS_EXPIRED", "CERT_NOT_YET_VALID", "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+function readOidcConnectionFailure(error: unknown): OidcConnectionFailure | null {
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  const networkCode = typeof record.code === "string" ? record.code : undefined;
+  const response = record.response as { statusCode?: number } | undefined;
+  const httpStatus = response?.statusCode;
+  if (typeof httpStatus === "number" && (httpStatus === 429 || (httpStatus >= 500 && httpStatus <= 599))) {
+    return { kind: "service", retryable: true, httpStatus };
+  }
+  if (networkCode && oidcCertificateErrorCodes.has(networkCode)) {
+    return { kind: "certificate", retryable: false, networkCode };
+  }
+  if (networkCode === "ETIMEDOUT" || networkCode === "ESOCKETTIMEDOUT" ||
+      networkCode === "ERR_SOCKET_CONNECTION_TIMEOUT" || record.name === "TimeoutError" ||
+      (record.name === "RPError" && typeof record.message === "string" &&
+        /^outgoing request timed out after \d+ms$/u.test(record.message))) {
+    return { kind: "timeout", retryable: true, networkCode };
+  }
+  if (networkCode && oidcTransientNetworkCodes.has(networkCode)) {
+    return { kind: "network", retryable: true, networkCode };
+  }
+  return null;
+}
+
 function mapOidcError(error: unknown, fallback: string): AccountError {
   if (error instanceof AccountError) return error;
   const record =
@@ -997,12 +1076,21 @@ function mapOidcError(error: unknown, fallback: string): AccountError {
       : typeof record.code === "string"
         ? record.code
         : "";
-  const response = record.response as { statusCode?: number } | undefined;
-  if (response?.statusCode === 530 || response?.statusCode === 502 || response?.statusCode === 503 || response?.statusCode === 504) {
+  const failure = readOidcConnectionFailure(error);
+  if (failure?.kind === "service") {
     return new AccountError(
       ACCOUNT_ERROR_CODES.PROVIDER_UNAVAILABLE,
-      `身份服务暂不可用（HTTP ${response.statusCode}），请管理员检查 Guli Identity 服务及 Cloudflare 隧道。尚未完成授权。`,
+      "身份服务暂不可用（HTTP " + failure.httpStatus + "），请稍后重试；若持续失败，请管理员检查身份服务及 Cloudflare 隧道。",
     );
+  }
+  if (failure?.kind === "timeout") {
+    return new AccountError(ACCOUNT_ERROR_CODES.NETWORK_ERROR, "登录服务响应超时，请检查网络与代理设置后重试。");
+  }
+  if (failure?.kind === "network") {
+    return new AccountError(ACCOUNT_ERROR_CODES.NETWORK_ERROR, "无法连接登录服务，请检查网络与代理设置后重试。");
+  }
+  if (failure?.kind === "certificate") {
+    return new AccountError(ACCOUNT_ERROR_CODES.PROVIDER_UNAVAILABLE, "登录服务证书校验失败，请检查系统时间或联系管理员。");
   }
   if (name === "access_denied" || name === "login_required") {
     return new AccountError(

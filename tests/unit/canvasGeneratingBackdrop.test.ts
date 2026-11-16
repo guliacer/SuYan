@@ -36,6 +36,9 @@ describe("Canvas workspace states", () => {
     expect(thinking).toContain("灵感汇集ing");
     expect(thinking).not.toContain("[灵感汇集ing]");
     expect(thinking).toContain("canvas-status-card--below-core");
+    expect(thinking).toContain("canvas-generating-stage");
+    expect(thinking).toContain("canvas-status-dock");
+    expect(thinking).toContain("canvas-status-title");
 
     const generating = render("generating");
     expect(generating).toContain('data-core-state="accumulating"');
@@ -67,6 +70,9 @@ describe("Canvas workspace states", () => {
     expect(generating).toContain("canvas-ai-scan");
     expect(generating).toContain("春日");
     expect(generating).toContain("山野");
+    expect(canvasBackdropSource).toContain("createPromptParticleProfiles");
+    expect(canvasBackdropSource).toContain("--prompt-particle-start-x");
+    expect(canvasBackdropSource).toContain("createPromptTokenProfiles");
     expect(render("generating", sample, "ocean")).toContain('data-canvas-tone="ocean"');
     expect(generating).not.toContain('aria-label="复制"');
     expect(generating).not.toContain('data-canvas-mode="result"');

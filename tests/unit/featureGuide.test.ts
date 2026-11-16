@@ -207,7 +207,7 @@ describe("feature guides", () => {
   it("guides the completed-generation fullscreen preview with exact regions", () => {
     expect(featureGuideDefinitions.canvasResult.steps.map((step) => step.target)).toEqual([
       '[data-feature-guide="canvas-fullscreen-media"]',
-      '[data-feature-guide="canvas-fullscreen-navigation"], [data-feature-guide="canvas-fullscreen-media"]',
+      '[data-feature-guide="canvas-fullscreen-navigation"]',
       '[data-feature-guide="canvas-fullscreen-actions"]',
       '[data-feature-guide="canvas-fullscreen-prompt"]',
       '[data-feature-guide="canvas-fullscreen-close"]',

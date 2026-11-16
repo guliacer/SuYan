@@ -99,15 +99,20 @@ export function buildRealEsrganArgs(request: RealEsrganArgumentRequest): string[
     throw new Error("UPSCALE_NATIVE_EXIT_FAILED: GPU 参数无效");
   }
 
-  return [
+  const args = [
     "-i", request.inputPath,
     "-o", request.outputPath,
     "-n", model.nativeModelName,
     "-s", String(model.scale),
     "-t", String(request.tileSize),
-    "-g", String(request.gpuId),
-    "-f", toNativeFormat(request.outputFormat),
   ];
+  // The official NCNN CLI uses an omitted -g flag for automatic GPU selection.
+  // Passing the store sentinel (-1) literally exits with "invalid gpu device".
+  if (request.gpuId >= 0) {
+    args.push("-g", String(request.gpuId));
+  }
+  args.push("-f", toNativeFormat(request.outputFormat));
+  return args;
 }
 
 export function runRealEsrgan(

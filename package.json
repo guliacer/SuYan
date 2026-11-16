@@ -75,6 +75,8 @@
       "!**/.env*",
       "!**/ai-settings.json",
       "!**/proxy-settings.json",
+      "!**/weather-settings.json",
+      "!**/weather-cache.json",
       "!**/view-settings.json",
       "!**/window-state.json",
       "!**/file-dialog-settings.json",

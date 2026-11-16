@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { AppLogoMark } from "@/components/ui/AppLogoMark";
 import { useAccountUser } from "@/features/account/store/useAccountStore";
 import { CanvasPointerField } from "./CanvasPointerField";
@@ -14,11 +14,29 @@ const blankParticlePositions = [
   [32, 88, 1.7], [94, 74, 0.4], [8, 78, 2.4], [59, 48, 1.9],
 ] as const;
 
-const formationBlocks = [
-  [18, 22, 28, 22, -0.2], [48, 18, 20, 34, 0.4], [68, 32, 18, 18, 0.1],
-  [26, 48, 17, 28, 0.7], [44, 55, 30, 19, -0.4], [72, 57, 13, 28, 0.3],
-  [12, 73, 24, 12, 0.8], [39, 78, 19, 10, 0.2], [59, 76, 30, 13, 0.6],
+type FormationBlock = readonly [number, number, number, number, number];
+
+const formationZones = [
+  [4, 28, 3, 24], [36, 64, 3, 22], [70, 96, 3, 24],
+  [3, 24, 30, 46], [76, 97, 28, 47],
+  [3, 24, 55, 73], [76, 97, 54, 73],
+  [5, 30, 76, 97], [36, 64, 78, 96],
 ] as const;
+
+function createFormationBlocks(): FormationBlock[] {
+  const zones = [...formationZones];
+  for (let index = zones.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [zones[index], zones[swapIndex]] = [zones[swapIndex], zones[index]];
+  }
+  return zones.map(([leftMin, leftMax, topMin, topMax], index) => [
+    leftMin + Math.random() * (leftMax - leftMin),
+    topMin + Math.random() * (topMax - topMin),
+    17 + Math.random() * (index % 3 === 0 ? 13 : 9),
+    12 + Math.random() * (index % 2 === 0 ? 13 : 9),
+    -0.9 + Math.random() * 1.8,
+  ]);
+}
 
 const creationCoreParticles = [
   [8, 22, 29, 45, -0.2], [14, 76, 38, 61, 0.3], [25, 12, 43, 36, -0.6],
@@ -26,6 +44,62 @@ const creationCoreParticles = [
   [86, 33, 68, 47, 0.2], [91, 72, 67, 59, 0.9], [74, 90, 59, 68, -0.3],
   [18, 46, 42, 49, 0.5], [31, 58, 46, 54, -0.8], [63, 80, 56, 64, 0.1],
 ] as const;
+
+type PromptParticleProfile = {
+  startX: number;
+  startY: number;
+  midX: number;
+  midY: number;
+  delay: number;
+  duration: number;
+};
+
+type PromptTokenProfile = {
+  x: number;
+  y: number;
+  delay: number;
+  duration: number;
+};
+
+function randomPercent(min: number, max: number) {
+  return Number((min + Math.random() * (max - min)).toFixed(2));
+}
+
+function createPromptParticleProfiles(): PromptParticleProfile[] {
+  return Array.from({ length: 12 }, (_, index) => {
+    let startX = 50;
+    let startY = 50;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      startX = randomPercent(14, 86);
+      startY = randomPercent(12, 78);
+      if (Math.hypot(startX - 50, startY - 50) > 25) break;
+    }
+    // Keep deterministic test seeds and low-entropy random sources distributed.
+    if (Math.hypot(startX - 50, startY - 50) <= 25) {
+      const angle = (index / 12) * Math.PI * 2;
+      const radius = 32 + (index % 3) * 5;
+      startX = Number((50 + Math.cos(angle) * radius).toFixed(2));
+      startY = Number((50 + Math.sin(angle) * radius * 0.78).toFixed(2));
+    }
+    return {
+      startX,
+      startY,
+      midX: randomPercent(40, 60),
+      midY: randomPercent(34, 62),
+      delay: Number((index * 0.18 + Math.random() * 0.72).toFixed(2)),
+      duration: Number((3.5 + Math.random() * 2.2).toFixed(2)),
+    };
+  });
+}
+
+function createPromptTokenProfiles(count: number): PromptTokenProfile[] {
+  return Array.from({ length: count }, (_, index) => ({
+    x: randomPercent(42, 58),
+    y: Number((60 + index * 3.8 + (Math.random() - 0.5) * 1.2).toFixed(2)),
+    delay: Number((index * 0.72 + Math.random() * 0.38).toFixed(2)),
+    duration: Number((4.6 + Math.random() * 1.8).toFixed(2)),
+  }));
+}
 
 export function CanvasMotionBackdrop({
   mode = "result", tone = "neutral", keywords = [], className, children,
@@ -133,15 +207,39 @@ function CanvasBlankParticles() {
 
 function CanvasPromptParticleField({ keywords, mode }: { keywords: string[]; mode: "thinking" | "busy" }) {
   const visibleKeywords = keywords.filter(Boolean).slice(0, 5);
+  const particleProfiles = useMemo(createPromptParticleProfiles, []);
+  const tokenProfiles = useMemo(() => createPromptTokenProfiles(visibleKeywords.length), [visibleKeywords.length]);
   return (
     <div className="canvas-prompt-particle-field" data-canvas-phase={mode}>
       <div className="canvas-prompt-particle-trail">
-        {Array.from({ length: 12 }, (_, index) => (
-          <span className="canvas-prompt-particle" key={index} style={{ "--particle-index": index } as CSSProperties} />
+        {particleProfiles.map((profile, index) => (
+          <span
+            className="canvas-prompt-particle"
+            key={index}
+            style={{
+              "--particle-index": index,
+              "--prompt-particle-start-x": `${profile.startX}%`,
+              "--prompt-particle-start-y": `${profile.startY}%`,
+              "--prompt-particle-mid-x": `${profile.midX}%`,
+              "--prompt-particle-mid-y": `${profile.midY}%`,
+              "--prompt-particle-delay": `${profile.delay}s`,
+              "--prompt-particle-duration": `${profile.duration}s`,
+            } as CSSProperties}
+          />
         ))}
       </div>
       {visibleKeywords.map((keyword, index) => (
-        <span className="canvas-prompt-token" key={`${keyword}-${index}`} style={{ "--token-index": index } as CSSProperties}>
+        <span
+          className="canvas-prompt-token"
+          key={`${keyword}-${index}`}
+          style={{
+            "--token-index": index,
+            "--token-x": `${tokenProfiles[index].x}%`,
+            "--token-y": `${tokenProfiles[index].y}%`,
+            "--token-delay": `${tokenProfiles[index].delay}s`,
+            "--token-duration": `${tokenProfiles[index].duration}s`,
+          } as CSSProperties}
+        >
           {keyword}
         </span>
       ))}
@@ -150,6 +248,7 @@ function CanvasPromptParticleField({ keywords, mode }: { keywords: string[]; mod
 }
 
 function CanvasFormationField() {
+  const formationBlocks = useMemo(createFormationBlocks, []);
   return (
     <div className="canvas-formation-field">
       {formationBlocks.map(([left, top, width, height, delay], index) => (

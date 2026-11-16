@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Blocks, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Blocks, CloudDownload, Download, ExternalLink, Link2, LoaderCircle, RotateCcw, Trash2 } from "lucide-react";
 import { useLocale } from "@/components/LocaleProvider";
 import { AppDialog, DialogCloseButton } from "@/components/ui/AppDialog";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,7 @@ import {
   type ModuleManagementRow,
 } from "../utils/moduleManagement";
 import type { BuiltinModuleId } from "../utils/moduleRegistry";
+import type { UpscaleEngine } from "@/features/upscale/types";
 import {
   resolveStatusFeedbackTone,
   type StatusFeedbackMessage,
@@ -48,10 +49,16 @@ export function ModuleManagementDialog({
   const restoreModule = useLibraryStore((state) => state.restoreModule);
   const checkVideoRuntime = useLibraryStore((state) => state.checkVideoRuntime);
   const checkNsfwRuntime = useLibraryStore((state) => state.checkNsfwRuntime);
+  const checkUpscaleRuntimes = useLibraryStore((state) => state.checkUpscaleRuntimes);
   const [isProbing, setIsProbing] = useState(true);
   const [activeModuleAction, setActiveModuleAction] = useState<ModuleAction | null>(null);
   const [modulePendingDelete, setModulePendingDelete] = useState<BuiltinModuleId | null>(null);
   const [feedbackText, setFeedbackText] = useState("");
+  /** 超分引擎的直装状态：面板里直接下载，不必先跳去超分工作台。 */
+  const [upscaleInstall, setUpscaleInstall] = useState<{
+    engine: UpscaleEngine;
+    progress: number;
+  } | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -62,6 +69,8 @@ export function ModuleManagementDialog({
         // 用户主动打开模块管理时强制真探测，不信任短缓存里的历史结果。
         await checkVideoRuntime({ force: true });
         await checkNsfwRuntime();
+        // 超分引擎走独立探测通道，漏掉这一步会让两行永远停在「未安装」。
+        await checkUpscaleRuntimes();
       } finally {
         if (!disposed) {
           setIsProbing(false);
@@ -72,7 +81,7 @@ export function ModuleManagementDialog({
     return () => {
       disposed = true;
     };
-  }, [checkNsfwRuntime, checkVideoRuntime]);
+  }, [checkNsfwRuntime, checkUpscaleRuntimes, checkVideoRuntime]);
 
   useEffect(() => {
     const text = feedbackText.trim();
@@ -85,6 +94,50 @@ export function ModuleManagementDialog({
       type: resolveStatusFeedbackTone(text),
     });
   }, [feedbackText, onNotify]);
+
+  // jobId === null 的事件属于「组件安装」而非超分任务，只按引擎过滤。
+  useEffect(
+    () =>
+      window.suyanApi.onUpscaleProgress((event) => {
+        if (event.jobId !== null) {
+          return;
+        }
+        setUpscaleInstall((current) =>
+          current && current.engine === event.engine
+            ? { ...current, progress: event.progress }
+            : current,
+        );
+      }),
+    [],
+  );
+
+  async function handleInstallUpscaleRuntime(engine: UpscaleEngine) {
+    if (upscaleInstall) {
+      return;
+    }
+    // 与超分工作台保持同一默认模型：CUGAN 用 2x 无降噪，ESRGAN 装整包。
+    const modelId = engine === "real-cugan" ? "cugan-2x-no-denoise" : "esrgan-x4plus";
+    setUpscaleInstall({ engine, progress: 0 });
+    try {
+      const result = await window.suyanApi.installUpscaleComponent(engine, modelId);
+      if (!result.ok) {
+        setFeedbackText(t(result.error.message));
+        return;
+      }
+      await checkUpscaleRuntimes();
+      setFeedbackText(
+        result.data.installed
+          ? t("{label} 已安装并启用。", {
+              label: t(
+                engine === "real-cugan" ? "Real-CUGAN 运行依赖" : "Real-ESRGAN 运行依赖",
+              ),
+            })
+          : t("组件下载完成但校验未通过，请重试。"),
+      );
+    } finally {
+      setUpscaleInstall(null);
+    }
+  }
 
   const rows = useMemo(() => buildModuleManagementRows(moduleState), [moduleState]);
   const groups = useMemo(() => groupModuleManagementRows(rows), [rows]);
@@ -164,7 +217,8 @@ export function ModuleManagementDialog({
   const body = (
       <div data-feature-guide="system-preferences-panel-modules" className={`grid min-h-0 flex-1 gap-4 overflow-y-auto overscroll-contain ${embedded ? "px-1 py-1" : "px-5 py-5"}`}>
         {groups.map((group) => (
-          <section key={group.category} className="grid gap-3 rounded-md border border-border bg-background p-4">
+          <Fragment key={group.category}>
+          <section className="grid gap-3 rounded-md border border-border bg-background p-4">
             <div>
                <p className="text-sm font-semibold text-foreground">{t(group.label)}</p>
               <p className="mt-1 text-xs leading-5 text-muted"></p>
@@ -192,10 +246,17 @@ export function ModuleManagementDialog({
                     void checkNsfwRuntime();
                      setFeedbackText(t("本地 NSFW 识别模块已安装并启用。"));
                   }}
+                  upscaleInstallEngine={upscaleInstall?.engine ?? null}
+                  upscaleInstallProgress={upscaleInstall?.progress ?? 0}
+                  onInstallUpscaleRuntime={(engine) => void handleInstallUpscaleRuntime(engine)}
                 />
               ))}
             </div>
           </section>
+          {/* 网盘手动下载入口放在「提示词」与「依赖」两组之间：
+              在线下载走 GitHub/CDN 在国内经常很慢，需要一条人工兜底路径。 */}
+          {group.category === "prompt" ? <CloudDownloadNotice /> : null}
+          </Fragment>
     ))}
       </div>
   );
@@ -275,6 +336,47 @@ export function ModuleManagementDialog({
   );
 }
 
+/**
+ * 依赖文件的网盘手动下载入口。
+ * 在线下载走 GitHub / CDN 在国内经常很慢甚至失败，得给一条人工兜底路径。
+ * 点击用 openExternalUrl 走系统默认浏览器打开，不在应用内嵌网页。
+ */
+const DEPENDENCY_PAN_URL = "https://pan.quark.cn/s/6b2fd0d256f5";
+
+function CloudDownloadNotice() {
+  const { t } = useLocale();
+  return (
+    <section className="grid gap-2 rounded-md border border-primary/25 bg-primary-soft/45 p-4">
+      <div className="flex items-start gap-2.5">
+        <span
+          className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <CloudDownload className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">{t("手动下载全部依赖文件")}</p>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            {t("在线下载慢或失败时，可以手动到网盘下载全部依赖文件。")}
+          </p>
+          <button
+            type="button"
+            className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-primary/30 bg-background px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+            onClick={() => {
+              void window.suyanApi.openExternalUrl(DEPENDENCY_PAN_URL);
+            }}
+          >
+            <Link2 className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{t("点击这里可以手动到网盘下载全部依赖文件")}</span>
+            <ExternalLink className="size-3 shrink-0 opacity-70" aria-hidden="true" />
+          </button>
+          <p className="mt-1.5 break-all text-[11px] leading-4 text-muted">{DEPENDENCY_PAN_URL}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ModuleRow({
   row,
   isBusy,
@@ -285,6 +387,9 @@ function ModuleRow({
   onToggleEnabled,
   onVideoRuntimeInstalled,
   onNsfwRuntimeInstalled,
+  upscaleInstallEngine,
+  upscaleInstallProgress,
+  onInstallUpscaleRuntime,
 }: {
   row: ModuleManagementRow;
   isBusy: boolean;
@@ -295,11 +400,23 @@ function ModuleRow({
   onToggleEnabled: (nextEnabled: boolean) => void;
   onVideoRuntimeInstalled: () => void;
   onNsfwRuntimeInstalled: () => void;
+  upscaleInstallEngine: UpscaleEngine | null;
+  upscaleInstallProgress: number;
+  onInstallUpscaleRuntime: (engine: UpscaleEngine) => void;
 }) {
   const { t } = useLocale();
   const { definition } = row;
   const isVideoRuntime = isVideoRuntimeModule(definition.id);
   const isNsfwRuntime = isNsfwRuntimeModule(definition.id);
+  const isUpscaleRuntime =
+    definition.id === "real-cugan-runtime" || definition.id === "real-esrgan-runtime";
+  const upscaleEngine: UpscaleEngine | null =
+    definition.id === "real-cugan-runtime"
+      ? "real-cugan"
+      : definition.id === "real-esrgan-runtime"
+        ? "real-esrgan"
+        : null;
+  const isInstallingThisEngine = upscaleEngine !== null && upscaleInstallEngine === upscaleEngine;
   const showInstallBanner = isVideoRuntime && !row.installed;
 
   return (
@@ -340,6 +457,11 @@ function ModuleRow({
            <p className="mt-1 text-xs leading-5 text-muted">{t(definition.description)}</p>
           {row.dependencyLabels.length > 0 ? (
             <p className="mt-1 text-[11px] text-muted">{t("依赖：")}{row.dependencyLabels.join(", ")}</p>
+          ) : null}
+          {row.anyOfDependencyLabels.length > 0 ? (
+            <p className="mt-1 text-[11px] text-muted">
+              {t("依赖（任一）：")}{row.anyOfDependencyLabels.join(t(" 或 "))}
+            </p>
           ) : null}
           {row.dependentLabels.length > 0 ? (
             <p className="mt-1 text-[11px] text-muted">{t("被依赖：")}{row.dependentLabels.join(", ")}</p>
@@ -402,6 +524,53 @@ function ModuleRow({
           message={t("本地 NSFW 模型不会随安装包分发。可在线下载固定版本，或导入已签名的三件套离线包后启用。")}
           onInstalled={onNsfwRuntimeInstalled}
         />
+      ) : null}
+
+      {/* 超分引擎不走通用安装器：组件在 data/components 下由超分子系统校验。
+          这一行必须自带下载入口，否则用户看到「未安装」却无处可点。 */}
+      {isUpscaleRuntime && upscaleEngine && !row.installed ? (
+        <div className="grid gap-2 rounded-md border border-border/80 bg-background/70 px-3 py-2">
+          <p className="text-[11px] leading-5 text-muted">
+            {upscaleEngine === "real-cugan"
+              ? t("动漫/插画超分模型，约 5 MB。下载后可在「图片超分」中选择更多倍率与降噪档位。")
+              : t("照片/通用超分组件，约 45 MB。包含通用、动漫与视频三组模型。")}
+          </p>
+          {isInstallingThisEngine ? (
+            <div className="grid gap-1.5">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-border/60">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width]"
+                  style={{ width: `${Math.round(upscaleInstallProgress * 100)}%` }}
+                />
+              </div>
+              <span className="text-[11px] tabular-nums text-muted">
+                {t("正在下载并校验…")} {Math.round(upscaleInstallProgress * 100)}%
+              </span>
+            </div>
+          ) : (
+            <div>
+              <Button
+                size="sm"
+                disabled={isBusy || upscaleInstallEngine !== null}
+                icon={<Download size={13} />}
+                type="button"
+                variant="secondary"
+                onClick={() => onInstallUpscaleRuntime(upscaleEngine)}
+              >
+                {t("下载安装")}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* 依赖「任一」全缺时，功能行要明确告诉用户缺什么、去哪装。 */}
+      {row.anyOfDependencyMissing && row.effectivelyEnabled === false ? (
+        <p className="text-[11px] leading-5 text-warning">
+          {t("运行时依赖缺失：请先在「依赖」分组安装 {labels} 中的任意一个。", {
+            labels: row.anyOfDependencyLabels.join(t(" 或 ")),
+          })}
+        </p>
       ) : null}
 
     </div>
